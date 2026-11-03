@@ -44,6 +44,7 @@ import System.Environment (getArgs)
 import System.Exit (ExitCode (..), die, exitSuccess)
 import System.FilePath
   ( takeBaseName
+  , takeDirectory
   , takeExtension
   , takeFileName
   , (</>)
@@ -214,7 +215,7 @@ renderMetaJson (Just m) =
 
 orchestratorRuleText :: Text
 orchestratorRuleText =
-  "NEVER impersonate blind-reader, answer user story questions in your own voice, edit memory.md directly, or paste current_chunk.md/memory.md inline into prompts. Always pass the prompt from <session_dir>/current_prompt.md so blind-reader reads current_chunk.md and memory.md from disk, prefix chat output with a 1-line third-person host banner, forward user comments/questions to blind-reader via send_message, and record exchanges with 'LetsRead.hs discuss --session <dir> --user-message \"...\" --response-file <path>'."
+  "NEVER run python, python3, or ad-hoc shell scripts; NEVER impersonate blind-reader, answer user story questions in your own voice, edit memory.md directly, or paste current_chunk.md/memory.md inline into prompts. Always pass the prompt from <session_dir>/current_prompt.md so blind-reader reads current_chunk.md and memory.md from disk, prefix chat output with a 1-line third-person host banner, forward user comments/questions to blind-reader via send_message, and record turns/exchanges using 'lets-read record' / 'lets-read discuss' (with --response-file, --subagent-log, --user-file, --commentary-file, or --memory-file)."
 
 renderStateJson :: FilePath -> SessionState -> Text
 renderStateJson sessionDir st =
@@ -1109,10 +1110,16 @@ parsePredictionLine rawLine =
    in if T.null afterOpen || T.null afterClose
         then PredInvalidNotation Nothing l l (normalizePredBody l)
         else
-          let inside = T.toLower (T.strip insideRaw)
-              afterBracket =
+          let (insideBeforeParen, _) = T.breakOn "(" insideRaw
+              inside = T.toLower (T.strip insideBeforeParen)
+              rawAfterBracket =
                 T.strip
                   (T.dropWhile (\c -> c == '*' || c == ':') (T.drop 1 afterClose))
+              shortHorizonPrefix = "(short-horizon <3 chunks"
+              afterBracket =
+                if shortHorizonPrefix `T.isPrefixOf` T.toLower rawAfterBracket
+                  then T.strip (T.drop 1 (snd (T.breakOn ")" rawAfterBracket)))
+                  else rawAfterBracket
               normB = normalizePredBody afterBracket
               nums :: [Int]
               nums =
@@ -2550,9 +2557,100 @@ formatAuditEntryCallout auditBlocks =
 data RecordOptions = RecordOptions
   { recSession :: FilePath
   , recResponseFile :: Maybe FilePath
+  , recSubagentLog :: Maybe FilePath
   , recCommentaryFile :: Maybe FilePath
   , recMemoryFile :: Maybe FilePath
   }
+
+stripFileUriPrefix :: FilePath -> FilePath
+stripFileUriPrefix p
+  | "file://" `isPrefixOf` p = drop 7 p
+  | otherwise = p
+
+parseJsonStringLiteral :: Text -> Maybe Text
+parseJsonStringLiteral txt = go [] txt
+  where
+    go acc t =
+      case T.uncons t of
+        Nothing -> Nothing
+        Just ('"', _) -> Just (T.pack (reverse acc))
+        Just ('\\', rest) ->
+          case T.uncons rest of
+            Nothing -> Nothing
+            Just ('"', r2) -> go ('"' : acc) r2
+            Just ('\\', r2) -> go ('\\' : acc) r2
+            Just ('/', r2) -> go ('/' : acc) r2
+            Just ('b', r2) -> go ('\b' : acc) r2
+            Just ('f', r2) -> go ('\f' : acc) r2
+            Just ('n', r2) -> go ('\n' : acc) r2
+            Just ('r', r2) -> go ('\r' : acc) r2
+            Just ('t', r2) -> go ('\t' : acc) r2
+            Just ('u', r2) ->
+              let hexDigits = T.take 4 r2
+                  afterHex = T.drop 4 r2
+               in if T.length hexDigits == 4 && T.all isHexDigit hexDigits
+                    then case readHex (T.unpack hexDigits) of
+                      [(code, "")] -> go (chr code : acc) afterHex
+                      _ -> Nothing
+                    else Nothing
+            Just (c, r2) -> go (c : acc) r2
+        Just (c, rest) -> go (c : acc) rest
+
+extractJsonStringField :: Text -> Text -> Maybe Text
+extractJsonStringField fieldName line =
+  let needle1 = "\"" <> fieldName <> "\":\""
+      needle2 = "\"" <> fieldName <> "\": \""
+      (_, after1) = T.breakOn needle1 line
+   in if not (T.null after1)
+        then parseJsonStringLiteral (T.drop (T.length needle1) after1)
+        else
+          let (_, after2) = T.breakOn needle2 line
+           in if not (T.null after2)
+                then parseJsonStringLiteral (T.drop (T.length needle2) after2)
+                else Nothing
+
+extractSubagentLogResponse :: FilePath -> IO Text
+extractSubagentLogResponse rawLogPath = do
+  let cleanPath = stripFileUriPrefix rawLogPath
+      fullCandidate = takeDirectory cleanPath </> "transcript_full.jsonl"
+  hasFull <- doesFileExist fullCandidate
+  targetPath <-
+    if hasFull
+      then pure fullCandidate
+      else do
+        hasClean <- doesFileExist cleanPath
+        if hasClean
+          then pure cleanPath
+          else die ("Error: Subagent transcript log not found: " ++ rawLogPath)
+  raw <- readTextFileSafe targetPath
+  let isPlannerResponseLine l =
+        extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
+      revLines = filter isPlannerResponseLine (reverse (T.lines raw))
+      lineTexts l =
+        [ T.strip m
+        | Just m <- [extractJsonStringField "Message" l, extractJsonStringField "content" l]
+        , not (T.null (T.strip m))
+        ]
+      allCandidates = concatMap lineTexts revLines
+      hasDelimiters t =
+        "=== COMMENTARY ===" `T.isInfixOf` t
+          || "=== UPDATED MEMORY ===" `T.isInfixOf` t
+          || "=== CHUNK SUMMARY ===" `T.isInfixOf` t
+      sendMsgCandidates =
+        [ T.strip m
+        | l <- revLines
+        , Just m <- [extractJsonStringField "Message" l]
+        , not (T.null (T.strip m))
+        ]
+      preferred =
+        filter hasDelimiters allCandidates
+          ++ sendMsgCandidates
+          ++ filter (\t -> T.length t > 200) allCandidates
+          ++ allCandidates
+  case preferred of
+    (latest : _) -> pure latest
+    [] ->
+      die ("Error: No non-empty PLANNER_RESPONSE content or send_message found in subagent log: " ++ targetPath)
 
 cmdRecord :: RecordOptions -> IO ()
 cmdRecord opts = do
@@ -2563,21 +2661,27 @@ cmdRecord opts = do
     die "Error: No chunk is currently unlocked. Run 'next' first."
 
   (_, commText, mParsedSummary, mParsedMem) <-
-    case recResponseFile opts of
-      Just respPath -> do
-        exists <- doesFileExist respPath
-        unless exists $ die ("Error: Response file not found: " ++ respPath)
-        raw <- readTextFileSafe respPath
+    case recSubagentLog opts of
+      Just logPath -> do
+        raw <- extractSubagentLogResponse logPath
+        TIO.writeFile (sessionDir </> "last_response.md") (raw <> "\n")
         pure (parseCombinedResponse raw)
       Nothing ->
-        case recCommentaryFile opts of
-          Just commPath -> do
-            exists <- doesFileExist commPath
-            unless exists $ die ("Error: Commentary file not found: " ++ commPath)
-            raw <- readTextFileSafe commPath
-            pure (Nothing, T.strip raw, Nothing, Nothing)
+        case recResponseFile opts of
+          Just respPath -> do
+            exists <- doesFileExist respPath
+            unless exists $ die ("Error: Response file not found: " ++ respPath)
+            raw <- readTextFileSafe respPath
+            pure (parseCombinedResponse raw)
           Nothing ->
-            die "Error: Provide either --response-file or --commentary-file."
+            case recCommentaryFile opts of
+              Just commPath -> do
+                exists <- doesFileExist commPath
+                unless exists $ die ("Error: Commentary file not found: " ++ commPath)
+                raw <- readTextFileSafe commPath
+                pure (Nothing, T.strip raw, Nothing, Nothing)
+              Nothing ->
+                die "Error: Provide --response-file, --subagent-log, or --commentary-file."
 
   when (T.null commText) $
     die "Error: Commentary content is empty."
@@ -2678,6 +2782,7 @@ cmdRecord opts = do
 data DiscussOptions = DiscussOptions
   { discSession :: FilePath
   , discResponseFile :: Maybe FilePath
+  , discSubagentLog :: Maybe FilePath
   , discCommentaryFile :: Maybe FilePath
   , discMemoryFile :: Maybe FilePath
   , discUserMessage :: Maybe Text
@@ -2711,21 +2816,27 @@ cmdDiscuss opts = do
     die "Error: Current chunk commentary has not been recorded yet. Run 'record' before 'discuss'."
 
   (mParsedUser, replyText, mParsedSummary, mParsedMem) <-
-    case discResponseFile opts of
-      Just respPath -> do
-        exists <- doesFileExist respPath
-        unless exists $ die ("Error: Response file not found: " ++ respPath)
-        raw <- readTextFileSafe respPath
+    case discSubagentLog opts of
+      Just logPath -> do
+        raw <- extractSubagentLogResponse logPath
+        TIO.writeFile (sessionDir </> "last_response.md") (raw <> "\n")
         pure (parseCombinedResponse raw)
       Nothing ->
-        case discCommentaryFile opts of
-          Just commPath -> do
-            exists <- doesFileExist commPath
-            unless exists $ die ("Error: Commentary file not found: " ++ commPath)
-            raw <- readTextFileSafe commPath
-            pure (Nothing, T.strip raw, Nothing, Nothing)
+        case discResponseFile opts of
+          Just respPath -> do
+            exists <- doesFileExist respPath
+            unless exists $ die ("Error: Response file not found: " ++ respPath)
+            raw <- readTextFileSafe respPath
+            pure (parseCombinedResponse raw)
           Nothing ->
-            die "Error: Provide either --response-file or --commentary-file."
+            case discCommentaryFile opts of
+              Just commPath -> do
+                exists <- doesFileExist commPath
+                unless exists $ die ("Error: Commentary file not found: " ++ commPath)
+                raw <- readTextFileSafe commPath
+                pure (Nothing, T.strip raw, Nothing, Nothing)
+              Nothing ->
+                die "Error: Provide --response-file, --subagent-log, or --commentary-file."
 
   when (T.null replyText) $
     die "Error: Discussion reply content is empty."
@@ -2837,8 +2948,8 @@ usage =
     , "Commands:"
     , "  init <source> --session <dir> [--max-words <n>] [--title <str>] [--persona <str>] [--overwrite]"
     , "  next --session <dir> [--force]"
-    , "  record --session <dir> [--response-file <path>] [--commentary-file <path>] [--memory-file <path>]"
-    , "  discuss --session <dir> [--response-file <path>] [--commentary-file <path>] [--user-message <str>] [--user-file <path>] [--memory-file <path>]"
+    , "  record --session <dir> [--response-file <path>] [--subagent-log <path>] [--commentary-file <path>] [--memory-file <path>]"
+    , "  discuss --session <dir> [--response-file <path>] [--subagent-log <path>] [--commentary-file <path>] [--user-message <str>] [--user-file <path>] [--memory-file <path>]"
     , "  status --session <dir>"
     ]
 
@@ -2873,25 +2984,27 @@ parseNextArgs = go ("", False)
     go _ (arg : _) = die ("Error: Unknown option: " ++ arg ++ "\n\n" ++ usage)
 
 parseRecordArgs :: [String] -> IO RecordOptions
-parseRecordArgs = go (RecordOptions "" Nothing Nothing Nothing)
+parseRecordArgs = go (RecordOptions "" Nothing Nothing Nothing Nothing)
   where
     go opts []
       | null (recSession opts) = die ("Error: Missing --session <dir>.\n\n" ++ usage)
       | otherwise = pure opts
     go opts ("--session" : v : rest) = go opts {recSession = v} rest
     go opts ("--response-file" : v : rest) = go opts {recResponseFile = Just v} rest
+    go opts ("--subagent-log" : v : rest) = go opts {recSubagentLog = Just v} rest
     go opts ("--commentary-file" : v : rest) = go opts {recCommentaryFile = Just v} rest
     go opts ("--memory-file" : v : rest) = go opts {recMemoryFile = Just v} rest
     go _ (arg : _) = die ("Error: Unknown option: " ++ arg ++ "\n\n" ++ usage)
 
 parseDiscussArgs :: [String] -> IO DiscussOptions
-parseDiscussArgs = go (DiscussOptions "" Nothing Nothing Nothing Nothing Nothing)
+parseDiscussArgs = go (DiscussOptions "" Nothing Nothing Nothing Nothing Nothing Nothing)
   where
     go opts []
       | null (discSession opts) = die ("Error: Missing --session <dir>.\n\n" ++ usage)
       | otherwise = pure opts
     go opts ("--session" : v : rest) = go opts {discSession = v} rest
     go opts ("--response-file" : v : rest) = go opts {discResponseFile = Just v} rest
+    go opts ("--subagent-log" : v : rest) = go opts {discSubagentLog = Just v} rest
     go opts ("--commentary-file" : v : rest) = go opts {discCommentaryFile = Just v} rest
     go opts ("--memory-file" : v : rest) = go opts {discMemoryFile = Just v} rest
     go opts ("--user-message" : v : rest) = go opts {discUserMessage = Just (T.pack v)} rest
