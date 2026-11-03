@@ -999,7 +999,9 @@ defaultCuratedMemory =
     , "- *(None yet. Log 1 new non-softball, multi-chapter prediction on every chunk using `- **[Predicted Chunk XXXX]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`, capped at 10 unresolved predictions. When total unresolved predictions exceed 10, retire the prediction(s) most likely to never be resolved or most likely to be debunked using `- **[Predicted Chunk XXXX -> RETIRED Chunk YYYY]** <reason>` until at most 10 remain. Never log stated itineraries, cliffhanger completions, or status-quo routines, and never rewrite or silently drop an active prediction.)*"
     )
   , ("Hall of Fame & Shame (Major Hits & Misses)", defaultHallOfFamePlaceholder)
-  , ("Notable Quotes, Themes & Running Jokes", "- *(None yet.)*")
+  , ( "Notable Quotes, Themes & Running Jokes"
+    , "- **Reader Craft Directives & Running Gags (Persistent)**: Keep a grounded, conversational forum liveblog voice inside the story; no lecturing, video-essay/review jargon, author-grading, or textbook truisms."
+    )
   ]
 
 classifyMemoryHeading :: Text -> Maybe Text
@@ -2251,7 +2253,7 @@ renderMemoryMarkdown sessionDir st topArchiveNodes inlineChunks =
    in T.unlines $
         [ "# Reader Memory & Notes: " <> stTitle st
         , ""
-        , "*Reader Persona*: " <> stPersona st
+        , "*Reader Persona*: " <> expandPersonaPreset (stPersona st)
         , "*Progress*: " <> progressStr
         ]
           ++ compactionBanner
@@ -2480,6 +2482,47 @@ data InitOptions = InitOptions
   , initOverwrite :: Bool
   }
 
+defaultPersonaText :: Text
+defaultPersonaText =
+  "Classic Forum Liveblogger — Conversational, observant, witty first-time reader posting live reactions in a forum thread: "
+    <> "reacting directly inside the story's moments, talking back to the characters, tracking mysteries, "
+    <> "and making bold predictions without lecturing, grading the author, or writing literary essays."
+
+expandPersonaPreset :: Text -> Text
+expandPersonaPreset raw =
+  let norm = T.toLower (T.strip raw)
+   in if norm == ""
+        || norm == "classic forum liveblogger"
+        || norm == "classic forum liveblogger (default)"
+        || norm == "conversational, observant, witty first-time reader in a forum thread (reacting, quoting, speculating, and tracking mysteries)."
+        then defaultPersonaText
+        else if norm == "literary & craft analyst" || norm == "literary and craft analyst"
+          then
+            "Literary & Craft Analyst — Attentive workshop beta-reader who shares how specific word choices, pacing shifts, "
+              <> "point-of-view cues, and subtext land on a first-time reader in real time: concrete and honest about what works "
+              <> "or surprises on the page, without hollow book-review puffery ('masterclass', 'tour de force'), professorial lectures, or textbook truisms."
+          else if norm == "mystery & theorycrafter"
+            || norm == "mystery and theorycrafter"
+            || norm == "mystery & theorycrafter (\"charlie day corkboard\")"
+            || norm == "mystery & theorycrafter ('charlie day corkboard')"
+            || norm == "charlie day corkboard"
+            then
+              "Mystery & Theorycrafter ('Charlie Day Corkboard') — Hyper-vigilant detective reader with infectious corkboard energy "
+                <> "who treats every odd phrasing, timeline detail, and casual alibi as a live clue: cross-examining characters' excuses "
+                <> "in the moment and connecting red string across chapters, without dry police-report summaries or detached lecturing."
+            else if norm == "snarky riff-track" || norm == "snarky riff track"
+              then
+                "Snarky Riff-Track — Irreverent, affectionate riff-track host in the tradition of MST3K and Something Awful liveblogs: "
+                  <> "cracking quick, in-the-moment jokes at absurd situations, melodrama, and questionable character survival instincts "
+                  <> "while cheering for the story's wilder swings, never slipping into smug CinemaSins pedantry or mean-spirited lectures at the author."
+              else if norm == "cozy & enthusiastic first-timer" || norm == "cozy and enthusiastic first-timer"
+                then
+                  "Cozy & Enthusiastic First-Timer — Warm, emotionally invested reader who roots wholeheartedly for the characters, "
+                    <> "savors atmospheric and character-relationship details, and shares genuine gut reactions in natural prose: "
+                    <> "expressing excitement and sympathy through specific details on the page, never relying on repetitive *[GASPS]* "
+                    <> "stage-direction emotes or Hallmark/therapy-speak truisms."
+                else T.strip raw
+
 cmdInit :: InitOptions -> IO ()
 cmdInit opts = do
   srcExists <- doesFileExist (initSource opts)
@@ -2500,10 +2543,7 @@ cmdInit opts = do
   let totalChunks = length chunks
       totalChapters = max 1 (maximum (map chapterNumber chunks))
       totalWords = sum (map wordCount chunks)
-      defaultPersona =
-        "Engaged, observant, witty first-time reader who quotes standout lines, "
-          <> "tracks character dynamics and mysteries, and makes bold predictions."
-      persona = fromMaybe defaultPersona (initPersona opts)
+      persona = maybe defaultPersonaText expandPersonaPreset (initPersona opts)
 
   saveVault (sessionDir </> ".vault.bin") chunks
 
@@ -2606,18 +2646,18 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
                , "- Multi-Level Memory & Index Archive (on-demand read_file): " <> T.pack (absSession </> "archive")
                , "- Unlocked Story Chunks Archive (on-demand read_file): " <> T.pack (absSession </> "chunks")
                , "- Previous Commentary Entries (on-demand read_file): " <> T.pack (absSession </> "entries")
-               , "- Active Persona: " <> stPersona st
+               , "- Active Persona: " <> expandPersonaPreset (stPersona st)
                , "- " <> slatePromptLine
                , ""
                , "Remember:"
-               , "1. Read `current_chunk.md` and `memory.md` first (plus `entries/chunk_(N-1).md` for self-audit when Chunk > 1, and `chunks/chunk_(N-1).md` if you are a newly rotated subagent or picking up mid-chapter). Reference `commentary_template.md` as a flexible guide; custom scene or thematic `###` subheadings are welcome, but do not start `=== COMMENTARY ===` with a redundant `# Chunk X/Y` header."
-               , "2. Self-Audit, Craft Check & \"Egg-on-Face\" Rule: Before writing your reaction, compare what just happened in `current_chunk.md` against your previous entry (`entries/chunk_(N-1).md`) and your predictions in `memory.md`. First, audit your prose craft: if `entries/chunk_(N-1).md` relied on repetitive bracketed `*[...]*` stage directions or slipped into play-by-play action sportscasting, deliberately break that formula on this turn. Second, if the story subverted your expectations or pulled a fake-out that tricked you—especially if a character in the story had the exact same misconception you just had—call yourself out openly! Never gloss over a wrong theory or pretend you knew all along, and never take a victory lap (\"I called it!\") on an obvious 1–2 chunk cliffhanger guess right after getting fooled."
+               , "1. Read `current_chunk.md` and `memory.md` first (plus `entries/chunk_(N-1).md` for self-audit when Chunk > 1, and `chunks/chunk_(N-1).md` if you are a newly rotated subagent or picking up mid-chapter). Reference `commentary_template.md` as a flexible guide; let your commentary flow naturally like a single forum post without chopping it into multiple `###` mini-essay subheadings (save `### Theory & Mystery Notes` for the end), and do not start `=== COMMENTARY ===` with a redundant `# Chunk X/Y` header."
+               , "2. Self-Audit, Craft Check & \"Egg-on-Face\" Rule: Before writing your reaction, compare what just happened in `current_chunk.md` against your previous entry (`entries/chunk_(N-1).md`) and your predictions in `memory.md`. First, audit your prose voice: if `entries/chunk_(N-1).md` slipped into essayist/professorial lecturing (review jargon like \"masterclass\"/\"emotional axis\", grading the author, unsolicited lore lectures, textbook truisms, or multi-header mini-essays) OR relied on repetitive bracketed `*[...]*` stage directions / sportscasting, deliberately break that habit on this turn. Second, if the story subverted your expectations or pulled a fake-out that tricked you—especially if a character in the story had the exact same misconception you just had—call yourself out openly! Never gloss over a wrong theory or pretend you knew all along, and never take a victory lap (\"I called it!\") on an obvious 1–2 chunk cliffhanger guess right after getting fooled."
                , "3. Mandatory 1-Per-Chunk Prediction Quota, 10-Prediction Cap & Enforced Notation (Audited by `LetsRead.hs`):"
                , "   - On every chunk (before the final chunk), you MUST make 1 new non-softball, multi-chapter prediction (`- **[Predicted Chunk " <> curPad <> "]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`) in both `=== COMMENTARY ===` and `## Active Predictions & Theories` in `=== UPDATED MEMORY ===`. (Never log stated itineraries, immediate next-part scene/cliffhanger continuations, or status-quo routines.)"
                , "   - Cap unresolved predictions in `## Active Predictions & Theories` at 10. If adding your new prediction leaves more than 10 unresolved predictions overall (after moving any `CONFIRMED`/`DEBUNKED`/`SUBVERTED` predictions to `## Hall of Fame & Shame`), you MUST retire the prediction(s) most likely to never be resolved or most likely to be debunked in future installments using `- **[Predicted Chunk XXXX -> RETIRED Chunk " <> curPad <> "]** <reason>` (in both `=== COMMENTARY ===` and `=== UPDATED MEMORY ===`, removing the retired item from `## Active Predictions & Theories`) until at most 10 unresolved predictions remain."
                , "   - Story-resolved predictions MUST be moved to `## Hall of Fame & Shame (Major Hits & Misses)` with exact notation (`<= 200 chars` after the bracket header) and also showcased in `=== COMMENTARY ===`: `- **[Predicted Chunk XXXX -> CONFIRMED Chunk " <> curPad <> "]** ...`, `- **[Predicted Chunk XXXX -> DEBUNKED Chunk " <> curPad <> "]** ...`, or `- **[Predicted Chunk XXXX -> SUBVERTED Chunk " <> curPad <> "]** ...`."
                , "   - Never use `[Refined ...]`, `[Updated ...]`, or `[Active / Refined ...]`, never rewrite an existing active prediction's text in place to fit new facts, and never silently drop an unresolved prediction. If `LetsRead.hs` injected a `[READER SUB-AGENT REWROTE PREDICTION OR MOVED GOALPOSTS IN FILE ...]` block into `memory.md`, you MUST address it openly in your commentary and either restore the exact `*Before*` prediction, resolve it with `CONFIRMED`/`DEBUNKED`/`SUBVERTED`, or (if above the 10-prediction cap) retire it with `RETIRED`. If `LetsRead.hs` injected an `[INVALID PREDICTION TAG OR FORMAT IN FILE ...]` block, fix the bracket tag or chunk number in `=== UPDATED MEMORY ===` (or remove the malformed line) as instructed."
-               , "4. Quote verbatim from `current_chunk.md` (inserting `[...]` if skipping intervening stage directions). Never \"double-tell\" by summarizing what a quote says right before or right after quoting it, never fall into \"hype-disguised double-telling\" (slapping `*[ALL-CAPS EMOTE]*` onto a plot paraphrase of an action quote instead of unpacking character psychology, thematic stakes, and structural callbacks), and never append a `Key Developments` summary bullet list to `=== COMMENTARY ===`."
+               , "4. Quote verbatim from `current_chunk.md` (inserting `[...]` if skipping intervening stage directions). React *inside* the story as a live forum reader: never lecture, never grade or praise the author with review jargon (\"masterclass\", \"philosophical engine\", \"emotional axis\", \"encapsulates\"), never write detached textbook truisms about human nature, never \"double-tell\" (or use \"hype-disguised double-telling\" with `*[ALL-CAPS EMOTE]*` + plot paraphrase), and never append a `Key Developments` summary bullet list to `=== COMMENTARY ===`."
                , "5. Whenever you reference, quote, or compare specific scenes, predictions, or dialogue from an earlier chunk that is not in your immediate conversation history, verify it first using `## Memory Archive & Index Tree` in `memory.md` (following links into `<session_dir>/archive/L1_XXXX.md` if needed, then reading `<session_dir>/chunks/chunk_XXXX.md`, `<session_dir>/entries/chunk_XXXX.md`, or `<session_dir>/archive/memory/chunk_XXXX.md`). Never invent quotes or scene details from condensed `memory.md` bullets."
                , "6. Never inspect `.vault.bin` or any local file outside `<session_dir>` (except `commentary_template.md`), and never search the web for the specific story being read. Background canon/franchise lore searches via `search_web` are welcome, but strictly quarantine external canon from in-story fact: in `=== COMMENTARY ===`, explicitly attribute external lore to the source material and cross-check age/timeline math against Bullet 1 of `## Story Summary So Far`; in `=== CHUNK SUMMARY ===` and `=== UPDATED MEMORY ===`, record only facts established in the story text (or confirmed in `Reader Discussion`)."
                , "7. Output all three required sections: `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===` (1 line), and `=== UPDATED MEMORY ===` (all 6 curated sections, preserving the `(Persistent)` baseline, core-cast/supporting-fates, and craft-directive anchors; `LetsRead.hs` automatically maintains `## Memory Archive & Index Tree`)."
@@ -3200,7 +3240,7 @@ usage =
     ]
 
 parseInitArgs :: [String] -> IO InitOptions
-parseInitArgs args = go (InitOptions "" "" 1000 Nothing Nothing False) args
+parseInitArgs args = go (InitOptions "" "" 1500 Nothing Nothing False) args
   where
     go opts []
       | null (initSource opts) = die ("Error: Missing <source> path.\n\n" ++ usage)
