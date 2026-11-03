@@ -24,12 +24,13 @@
 - <What is still unexplained or suspicious in the narrative?>
 
 ## Active Predictions & Theories
-- **[Predicted Chunk XXXX]** *Clue/Anomaly*: <specific detail needing explanation> -> *Theory*: <your primary bet> *(vs. Plausible Rival: <genuine rival explanation>)*
+- **[Predicted Chunk XXXX]** *Clue/Anomaly*: <specific detail needing explanation (log 1 new non-softball, multi-chapter prediction per chunk; cap active unresolved predictions at 10)> -> *Theory*: <your primary bet> *(vs. Plausible Rival: <genuine rival explanation>)*
 
 ## Hall of Fame & Shame (Major Hits & Misses)
-- **[Predicted Chunk XXXX -> CONFIRMED Chunk YYYY]** <1-line record (<= 200 chars after bracket header) of confirmed long-range predictions (`YYYY - XXXX >= 3`; `<3`-chunk confirmations are tagged `Short-Horizon <3 Chunks — No Hit Credit`). Preserve exact bracket headers and tags verbatim; never delete resolved entries.>
+- **[Predicted Chunk XXXX -> CONFIRMED Chunk YYYY]** <1-line record (<= 200 chars after bracket header) of confirmed long-range predictions (`YYYY - XXXX >= 3`; `<3`-chunk confirmations are tagged `Short-Horizon <3 Chunks — No Hit Credit`). Preserve exact bracket headers and tags verbatim; never delete `CONFIRMED`/`DEBUNKED`/`SUBVERTED` entries.>
 - **[Predicted Chunk XXXX -> DEBUNKED Chunk YYYY]** <1-line record (<= 200 chars after bracket header) of debunked or falsified predictions (`YYYY - XXXX >= 1`)>
 - **[Predicted Chunk XXXX -> SUBVERTED Chunk YYYY]** <1-line record (<= 200 chars after bracket header) of predictions fooled by an authorial fake-out or subversion (`YYYY - XXXX >= 1`)>
+- **[Predicted Chunk XXXX -> RETIRED Chunk YYYY]** <Include when retiring a prediction (most likely to never be resolved or most likely to be debunked) to keep `## Active Predictions & Theories` at <= 10 unresolved predictions; `LetsRead.hs` records it in the commentary entry and automatically prunes `RETIRED` lines from `memory.md`.>
 
 ## Notable Quotes, Themes & Running Jokes
 - **Reader Craft Directives & Running Gags (Persistent)**: <1-line ledger (<= 300 chars) of active style/craft feedback from `Reader Discussion` and thread-wide running jokes; update in place, never delete during compaction>

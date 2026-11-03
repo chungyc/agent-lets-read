@@ -988,7 +988,7 @@ buildChunksFromSource sourcePath maxWords mTitleOverride = do
 
 defaultHallOfFamePlaceholder :: Text
 defaultHallOfFamePlaceholder =
-  "- *(None yet. Move resolved predictions here using `- **[Predicted Chunk XXXX -> CONFIRMED Chunk YYYY]** ...`, `- **[Predicted Chunk XXXX -> DEBUNKED Chunk YYYY]** ...`, or `- **[Predicted Chunk XXXX -> SUBVERTED Chunk YYYY]** ...`. Confirmations with `YYYY - XXXX < 3` are tagged as short-horizon and do not count as major Hits; Debunked/Subverted misses of any distance are welcome.)*"
+  "- *(None yet. Move story-resolved predictions here using `- **[Predicted Chunk XXXX -> CONFIRMED Chunk YYYY]** ...`, `- **[Predicted Chunk XXXX -> DEBUNKED Chunk YYYY]** ...`, or `- **[Predicted Chunk XXXX -> SUBVERTED Chunk YYYY]** ...`. Confirmations with `YYYY - XXXX < 3` are tagged as short-horizon and do not count as major Hits; Debunked/Subverted misses of any distance are welcome. Predictions retired to stay within the 10-prediction cap using `- **[Predicted Chunk XXXX -> RETIRED Chunk YYYY]** ...` are recorded in the chunk commentary and automatically pruned from `memory.md`.)*"
 
 defaultCuratedMemory :: [(Text, Text)]
 defaultCuratedMemory =
@@ -996,7 +996,7 @@ defaultCuratedMemory =
   , ("Characters & Relationships", "- *(None introduced yet.)*")
   , ("Active Mysteries & Unanswered Questions", "- *(None yet.)*")
   , ( "Active Predictions & Theories"
-    , "- *(None yet. Only log genuine multi-chapter hypotheses using `- **[Predicted Chunk XXXX]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`. Never log stated plans/itineraries, cliffhanger completions, or status-quo routines, and never rewrite, 'refine', or silently drop an active prediction without marking it `CONFIRMED`, `DEBUNKED`, or `SUBVERTED`.)*"
+    , "- *(None yet. Log 1 new non-softball, multi-chapter prediction on every chunk using `- **[Predicted Chunk XXXX]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`, capped at 10 unresolved predictions. When total unresolved predictions exceed 10, retire the prediction(s) most likely to never be resolved or most likely to be debunked using `- **[Predicted Chunk XXXX -> RETIRED Chunk YYYY]** <reason>` until at most 10 remain. Never log stated itineraries, cliffhanger completions, or status-quo routines, and never rewrite or silently drop an active prediction.)*"
     )
   , ("Hall of Fame & Shame (Major Hits & Misses)", defaultHallOfFamePlaceholder)
   , ("Notable Quotes, Themes & Running Jokes", "- *(None yet.)*")
@@ -1052,7 +1052,7 @@ isPlaceholderLine line =
   let s = T.toLower (T.strip line)
    in T.null s || any (`T.isInfixOf` s) placeholderSubstrings
 
-data ResolutionKind = ResConfirmed | ResDebunked | ResSubverted
+data ResolutionKind = ResConfirmed | ResDebunked | ResSubverted | ResRetired
   deriving (Eq, Show)
 
 data ParsedPrediction
@@ -1100,6 +1100,8 @@ canonicalizeResolvedLine c1 c2 rKind body =
             "Predicted Chunk " <> c1Str <> " -> DEBUNKED Chunk " <> c2Str
           ResSubverted ->
             "Predicted Chunk " <> c1Str <> " -> SUBVERTED Chunk " <> c2Str
+          ResRetired ->
+            "Predicted Chunk " <> c1Str <> " -> RETIRED Chunk " <> c2Str
    in "- **[" <> tag <> "]** " <> T.strip body
 
 parsePredictionLine :: Text -> ParsedPrediction
@@ -1156,9 +1158,22 @@ parsePredictionLine rawLine =
                     , "disprov"
                     , "overturn"
                     ]
+              isRetired =
+                not isSubverted
+                  && not isDebunked
+                  && any
+                    (`T.isInfixOf` inside)
+                    [ "retir"
+                    , "cull"
+                    , "prune"
+                    , "moot"
+                    , "stale"
+                    , "supersed"
+                    ]
               isConfirmed =
                 not isSubverted
                   && not isDebunked
+                  && not isRetired
                   && any
                     (`T.isInfixOf` inside)
                     [ "confirm"
@@ -1167,11 +1182,12 @@ parsePredictionLine rawLine =
                     ]
            in if hasForbiddenKeyword
                 then PredInvalidNotation (listToMaybe nums) l afterBracket normB
-                else if isSubverted || isDebunked || isConfirmed
+                else if isSubverted || isDebunked || isRetired || isConfirmed
                   then
                     let rKind
                           | isSubverted = ResSubverted
                           | isDebunked = ResDebunked
+                          | isRetired = ResRetired
                           | otherwise = ResConfirmed
                      in case nums of
                           (c1 : c2 : _)
@@ -1249,6 +1265,7 @@ extractOldHallResolved oldHallBody =
   , not (isIndentedAuditSubLine rawL)
   , "- " `T.isPrefixOf` trimmed || "* " `T.isPrefixOf` trimmed
   , p@(PredValidResolved {}) <- [parsePredictionLine trimmed]
+  , ppResKind p /= ResRetired
   ]
 
 bodiesRelated :: Text -> Text -> Bool
@@ -1269,7 +1286,7 @@ renderAuditBlock curMemPath prevMemPath origC curIdx beforeTxt afterTxt =
         , "  - *After (in " <> T.pack curMemPath <> ")*: " <> T.strip afterTxt
         , "  - *Action Required*: Address this prediction rewrite, goalpost-shift, or silent omission openly in your next commentary! In `=== UPDATED MEMORY ===`, either: (1) restore the exact `*Before*` line above (`- **[Predicted Chunk "
             <> origStr
-            <> "]** ...`) in `## Active Predictions & Theories`, or (2) move it to `## Hall of Fame & Shame (Major Hits & Misses)` using one of these exact tags: `- **[Predicted Chunk "
+            <> "]** ...`) in `## Active Predictions & Theories`, (2) move it to `## Hall of Fame & Shame (Major Hits & Misses)` using `- **[Predicted Chunk "
             <> origStr
             <> " -> CONFIRMED Chunk "
             <> curStr
@@ -1285,7 +1302,11 @@ renderAuditBlock curMemPath prevMemPath origC curIdx beforeTxt afterTxt =
             <> nextStr
             <> "` if resolving on Chunk "
             <> nextStr
-            <> ") before logging any new prediction with `- **[Predicted Chunk "
+            <> "), or (3) if total unresolved predictions exceed the cap of 10, retire it using `- **[Predicted Chunk "
+            <> origStr
+            <> " -> RETIRED Chunk "
+            <> nextStr
+            <> "]** <reason>` before logging any new prediction with `- **[Predicted Chunk "
             <> nextStr
             <> "]**`."
         ]
@@ -1322,15 +1343,26 @@ mergeHallOfFameEntries oldEntries newEntries =
         then defaultHallOfFamePlaceholder
         else T.strip (T.unlines combined)
 
+isPredictionMentionedInComm :: Text -> Text -> Bool
+isPredictionMentionedInComm commLower rawPredLine =
+  let (_, afterOpen) = T.breakOn "[" rawPredLine
+      (insideRaw, _) = T.breakOn "]" (T.drop 1 afterOpen)
+      (insideBeforeParen, _) = T.breakOn "(" insideRaw
+      tagNorm = T.toLower (T.strip insideBeforeParen)
+   in not (T.null tagNorm) && tagNorm `T.isInfixOf` commLower
+
 auditAndMergePredictions
   :: FilePath
   -> Int
+  -> Int
+  -> Bool
+  -> Text
   -> Text
   -> Text
   -> Maybe Text
   -> Maybe Text
-  -> (Text, Text, [Text])
-auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveBody mNewHallBody =
+  -> (Text, Text, [Text], [Text])
+auditAndMergePredictions sessionDir curIdx totalChunks isRecordTurn commText oldActiveBody oldHallBody mNewActiveBody mNewHallBody =
   let curMemPath =
         if curIdx > 0
           then sessionDir </> "archive" </> "memory" </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")
@@ -1355,6 +1387,16 @@ auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveB
             ]
       rawFromActive = parseIncomingBullets mNewActiveBody
       rawFromHall = parseIncomingBullets mNewHallBody
+      commResolvedBullets =
+        [ p
+        | rawL <- T.lines commText
+        , let trimmed = T.strip rawL
+        , not (isPlaceholderLine trimmed)
+        , not (isAuditHeaderLine trimmed)
+        , not (isIndentedAuditSubLine rawL)
+        , "- " `T.isPrefixOf` trimmed || "* " `T.isPrefixOf` trimmed
+        , p@(PredValidResolved {}) <- [parsePredictionLine trimmed]
+        ]
       newActiveCandidates = [p | p <- rawFromActive, case p of PredValidResolved {} -> False; _ -> True]
       harvestedResolved = [p | p@(PredValidResolved {}) <- rawFromActive]
       resolvedFromHall = [p | p@(PredValidResolved {}) <- rawFromHall]
@@ -1382,7 +1424,7 @@ auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveB
           then matchUnchanged prevActives newActiveCandidates
           else (map ppRawLine prevActives, [], [])
 
-      -- Step B: Match properly resolved predictions against remPrevAfterA
+      -- Step B: Match properly resolved/retired predictions against remPrevAfterA
       prevCountWithChunk c = length [x | x <- remPrevAfterA, ppOrigChunk x == c]
       matchResolved [] resList = ([], [], resList)
       matchResolved (p : ps) resList =
@@ -1417,7 +1459,22 @@ auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveB
                 let (resAcc, remP, remR) = matchResolved ps resList
                  in (resAcc, p : remP, remR)
 
-      (resolvedFromPrev, remPrevAfterB, remResAfterB) = matchResolved remPrevAfterA allIncomingResolved
+      (resolvedFromMem, remPrevAfterMemB, remResAfterB) = matchResolved remPrevAfterA allIncomingResolved
+      (resolvedFromComm, remPrevAfterB, _) = matchResolved remPrevAfterMemB commResolvedBullets
+      resolvedFromPrev = resolvedFromMem ++ resolvedFromComm
+      storyResolvedFromPrev = [r | r <- resolvedFromPrev, ppResKind r /= ResRetired]
+      retiredFromPrev = [r | r <- resolvedFromPrev, ppResKind r == ResRetired]
+
+      sameChunkRetired =
+        [ r
+        | r@(PredValidResolved (Just origC) resC ResRetired _ _ _) <- remResAfterB ++ commResolvedBullets
+        , origC == curIdx && resC == curIdx
+        ]
+      remResAfterBFiltered =
+        [ r
+        | r <- remResAfterB
+        , ppResKind r /= ResRetired
+        ]
 
       -- Step C: Pair remaining unmatched prevActives with rewrites or flag as silent drops
       candidateChunk :: ParsedPrediction -> Maybe Int
@@ -1469,7 +1526,7 @@ auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveB
                     let omittedMsg =
                           "*(Silently omitted without `[Predicted Chunk "
                             <> T.pack (padChunkNumber origC)
-                            <> " -> CONFIRMED/DEBUNKED/SUBVERTED Chunk "
+                            <> " -> CONFIRMED/DEBUNKED/SUBVERTED/RETIRED Chunk "
                             <> curStr
                             <> "]` notation)*"
                         blk = renderAuditBlock curMemPath prevMemPath origC curIdx origLine omittedMsg
@@ -1478,11 +1535,11 @@ auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveB
 
       (rewriteAndDropBlocks, remCandAfterC) = pairRewrites remPrevAfterB remCandAfterA
 
-      -- Step D: Classify remaining candidates in remCandAfterC, invalidFromHall, and remResAfterB
-      classifyRemainingCand :: ParsedPrediction -> Either Text Text
+      -- Step D: Classify remaining candidates in remCandAfterC, invalidFromHall, and remResAfterBFiltered
+      classifyRemainingCand :: ParsedPrediction -> Either (Int, Text) Text
       classifyRemainingCand (PredValidActive newC canonLine bodyAfter _)
         | newC == curIdx || (hadTagAuditInOldActive && newC == curIdx - 1 && newC > 0) || curIdx <= 1 =
-            Left canonLine
+            Left (newC, canonLine)
         | otherwise =
             let newCStr = T.pack (padChunkNumber newC)
                 trimmedBody = T.strip bodyAfter
@@ -1564,9 +1621,13 @@ auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveB
                     <> origEx
                     <> " -> DEBUNKED Chunk "
                     <> curStr
-                    <> "]** ...`, or `- **[Predicted Chunk "
+                    <> "]** ...`, `- **[Predicted Chunk "
                     <> origEx
                     <> " -> SUBVERTED Chunk "
+                    <> curStr
+                    <> "]** ...`, or (when retiring above the 10-prediction cap) `- **[Predicted Chunk "
+                    <> origEx
+                    <> " -> RETIRED Chunk "
                     <> curStr
                     <> "]** ...`."
                 )
@@ -1586,16 +1647,37 @@ auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveB
                     <> origEx
                     <> " -> DEBUNKED Chunk "
                     <> curStr
-                    <> "]** ...`, or `- **[Predicted Chunk "
+                    <> "]** ...`, `- **[Predicted Chunk "
                     <> origEx
                     <> " -> SUBVERTED Chunk "
+                    <> curStr
+                    <> "]** ...`, or `- **[Predicted Chunk "
+                    <> origEx
+                    <> " -> RETIRED Chunk "
                     <> curStr
                     <> "]** ...`), or remove the unmatched line."
                 )
 
       candResults = map classifyRemainingCand remCandAfterC
-      newValidActiveLines = [l | Left l <- candResults]
-      candAuditBlocks = [b | Right b <- candResults]
+      rawValidNewPairs = [(c, l) | Left (c, l) <- candResults]
+      dedupNewByChunk _ [] = ([], [])
+      dedupNewByChunk seen ((c, l) : rest)
+        | c `elem` seen =
+            let cStr = T.pack (padChunkNumber c)
+                dupBlk =
+                  renderTagFormatAuditBlock
+                    curMemPath
+                    prevMemPath
+                    ("Multiple new predictions were tagged `[Predicted Chunk " <> cStr <> "]` on the same chunk (only 1 new prediction per chunk is allowed so each chunk tag remains unique).")
+                    l
+                    ("Keep only your single strongest prediction for Chunk " <> cStr <> " and remove the duplicate `- **[Predicted Chunk " <> cStr <> "]**` line(s).")
+                (keptL, dupBlks) = dedupNewByChunk seen rest
+             in (keptL, dupBlk : dupBlks)
+        | otherwise =
+            let (keptL, dupBlks) = dedupNewByChunk (c : seen) rest
+             in (l : keptL, dupBlks)
+      (newValidActiveLines, duplicateChunkAuditBlocks) = dedupNewByChunk [] rawValidNewPairs
+      candAuditBlocks = [b | Right b <- candResults] ++ duplicateChunkAuditBlocks
       hallInvalidBlocks =
         [ let (issueMsg, actMsg) =
                 case inv of
@@ -1648,7 +1730,7 @@ auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveB
         | inv <- invalidFromHall
         ]
 
-      -- Check remaining PredValidResolved in remResAfterB against oldHallResolved
+      -- Check remaining PredValidResolved in remResAfterBFiltered against oldHallResolved
       matchesOldHall :: ParsedPrediction -> Maybe ParsedPrediction
       matchesOldHall r@(PredValidResolved (Just origC) resC rKind _ rBody rNorm) =
         let hasOldMatch =
@@ -1732,14 +1814,103 @@ auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveB
                    in (vAcc, renderTagFormatAuditBlock curMemPath prevMemPath msg (ppRawLine r) act : bAcc)
           )
           ([], [])
-          remResAfterB
+          remResAfterBFiltered
+
+      -- Step E: Validate 10-prediction cap, premature retirements, and 1-per-chunk quota
+      totalUnresolvedBeforeRetire =
+        length keptActiveLines
+          + length newValidActiveLines
+          + length retiredFromPrev
+          + length sameChunkRetired
+          + length candAuditBlocks
+      maxPoolBeforeRetire =
+        max
+          (length prevActives + max (if isRecordTurn && curIdx < totalChunks then 1 else 0) (length newValidActiveLines + length sameChunkRetired))
+          totalUnresolvedBeforeRetire
+      allowedRetireCount = max 0 (maxPoolBeforeRetire - 10)
+      (validRetiredFromPrev, prematureRetired) = splitAt allowedRetireCount retiredFromPrev
+      restoredPrematurePairs =
+        [ let origC = fromMaybe curIdx (ppResOrigChunk pRet)
+              origStr = T.pack (padChunkNumber origC)
+              origActiveLine =
+                fromMaybe
+                  (canonicalizeActiveLine origC (ppBodyAfterBracket pRet))
+                  (listToMaybe [ppRawLine p | p <- prevActives, ppOrigChunk p == origC])
+              blk =
+                renderTagFormatAuditBlock
+                  curMemPath
+                  prevMemPath
+                  ("Prediction `[Predicted Chunk " <> origStr <> "]` was marked `RETIRED` when total unresolved predictions (" <> jsonInt totalUnresolvedBeforeRetire <> "/10) did not exceed the cap of 10.")
+                  (ppRawLine pRet)
+                  ( "Only retire predictions with `RETIRED` when total unresolved predictions (including your new prediction) would exceed 10. Keep `"
+                      <> origActiveLine
+                      <> "` in `## Active Predictions & Theories` until the 10-prediction cap is reached, or if the story text already falsified it, move it to `## Hall of Fame & Shame` as `- **[Predicted Chunk "
+                      <> origStr
+                      <> " -> DEBUNKED Chunk "
+                      <> curStr
+                      <> "]** <explanation>`."
+                  )
+           in (origActiveLine, blk)
+        | pRet <- prematureRetired
+        ]
+      restoredPrematureLines = map fst restoredPrematurePairs
+      prematureRetireAuditBlocks = map snd restoredPrematurePairs
+
+      finalValidActiveLines = keptActiveLines ++ restoredPrematureLines ++ newValidActiveLines
+      activeCountAfter = length finalValidActiveLines
+      capExceededAuditBlocks
+        | activeCountAfter > 10 =
+            let excess = activeCountAfter - 10
+             in [ renderTagFormatAuditBlock
+                    curMemPath
+                    prevMemPath
+                    ("`## Active Predictions & Theories` has " <> jsonInt activeCountAfter <> " unresolved predictions, exceeding the maximum cap of 10.")
+                    ("*(Active pool has " <> jsonInt activeCountAfter <> "/10 unresolved predictions — " <> jsonInt excess <> " over the cap of 10)*")
+                    ( "On your next turn (Chunk "
+                        <> nextStr
+                        <> "), in addition to retiring 1 prediction for Chunk "
+                        <> nextStr
+                        <> "'s new prediction, retire "
+                        <> jsonInt excess
+                        <> " extra prediction(s) (choosing those most likely to never be resolved or most likely to be debunked in future installments) using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
+                        <> nextStr
+                        <> "]** <reason>` so that at most 10 unresolved predictions remain in `## Active Predictions & Theories`."
+                    )
+                ]
+        | otherwise = []
+
+      hasNewForCur =
+        not (null newValidActiveLines)
+          || not (null sameChunkRetired)
+          || not (null candAuditBlocks)
+          || not (null rewriteAndDropBlocks)
+      missingNewPredAuditBlocks
+        | isRecordTurn && curIdx >= 1 && curIdx < totalChunks && isJust mNewActiveBody && not hasNewForCur =
+            [ renderTagFormatAuditBlock
+                curMemPath
+                prevMemPath
+                ("No new prediction was logged for Chunk " <> curStr <> " (every chunk before the final chunk must log 1 new non-softball, multi-chapter prediction, capped at 10 unresolved predictions).")
+                ("*(Missing `- **[Predicted Chunk " <> curStr <> "]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*` in `## Active Predictions & Theories`)*")
+                ( "On Chunk "
+                    <> nextStr
+                    <> ", make sure to log 1 new non-softball, multi-chapter prediction using `- **[Predicted Chunk "
+                    <> nextStr
+                    <> "]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*` in both `=== COMMENTARY ===` and `## Active Predictions & Theories` (and if total unresolved predictions exceed 10, retire the weakest one using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
+                    <> nextStr
+                    <> "]** <reason>`)."
+                )
+            ]
+        | otherwise = []
 
       allAuditBlocks =
         rewriteAndDropBlocks
           ++ candAuditBlocks
           ++ hallInvalidBlocks
           ++ unmatchedResAuditBlocks
-      finalActiveLines = keptActiveLines ++ newValidActiveLines ++ allAuditBlocks
+          ++ prematureRetireAuditBlocks
+          ++ capExceededAuditBlocks
+          ++ missingNewPredAuditBlocks
+      finalActiveLines = finalValidActiveLines ++ allAuditBlocks
       defaultActivePlaceholder =
         fromMaybe
           "- *(None yet.)*"
@@ -1751,8 +1922,19 @@ auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveB
       finalHallBody =
         mergeHallOfFameEntries
           oldHallResolved
-          (resolvedFromPrev ++ validRemainingHall)
-   in (finalActiveBody, finalHallBody, allAuditBlocks)
+          (storyResolvedFromPrev ++ validRemainingHall)
+
+      commLower = T.toLower commText
+      turnEvents =
+        newValidActiveLines
+          ++ map ppRawLine storyResolvedFromPrev
+          ++ map ppRawLine (validRetiredFromPrev ++ sameChunkRetired)
+      trackerUpdateLines =
+        [ evLine
+        | evLine <- turnEvents
+        , not (isPredictionMentionedInComm commLower evLine)
+        ]
+   in (finalActiveBody, finalHallBody, allAuditBlocks, trackerUpdateLines)
 
 parseMemorySections :: Text -> Map.Map Text Text
 parseMemorySections txt = Map.fromListWith (\new old -> old <> "\n" <> new) (go Nothing [] (T.lines txt))
@@ -1771,21 +1953,24 @@ parseMemorySections txt = Map.fromListWith (\new old -> old <> "\n" <> new) (go 
 auditAndMergeCuratedMemory
   :: FilePath
   -> Int
+  -> Int
+  -> Bool
+  -> Text
   -> [(Text, Text)]
   -> Maybe Text
-  -> ([(Text, Text)], [Text])
-auditAndMergeCuratedMemory _ _ prevSections Nothing = (prevSections, [])
-auditAndMergeCuratedMemory sessionDir curIdx prevSections (Just memTxt) =
+  -> ([(Text, Text)], [Text], [Text])
+auditAndMergeCuratedMemory _ _ _ _ _ prevSections Nothing = (prevSections, [], [])
+auditAndMergeCuratedMemory sessionDir curIdx totalChunks isRecordTurn commText prevSections (Just memTxt) =
   let incoming = parseMemorySections memTxt
       baseSections = if null prevSections then defaultCuratedMemory else prevSections
       oldActiveBody = fromMaybe "" (lookup "Active Predictions & Theories" baseSections)
       oldHallBody = fromMaybe defaultHallOfFamePlaceholder (lookup "Hall of Fame & Shame (Major Hits & Misses)" baseSections)
       mNewActive = Map.lookup "Active Predictions & Theories" incoming
       mNewHall = Map.lookup "Hall of Fame & Shame (Major Hits & Misses)" incoming
-      (mergedActive, mergedHall, auditBlocks) =
+      (mergedActive, mergedHall, auditBlocks, trackerUpdates) =
         if isJust mNewActive || isJust mNewHall
-          then auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActive mNewHall
-          else (oldActiveBody, oldHallBody, [])
+          then auditAndMergePredictions sessionDir curIdx totalChunks isRecordTurn commText oldActiveBody oldHallBody mNewActive mNewHall
+          else (oldActiveBody, oldHallBody, [], [])
       mergedSections =
         [ (secName, mergedBody)
         | (secName, oldBody) <- baseSections
@@ -1800,21 +1985,24 @@ auditAndMergeCuratedMemory sessionDir curIdx prevSections (Just memTxt) =
                         | isPlaceholderSection newBody && not (isPlaceholderSection oldBody) -> oldBody
                         | otherwise -> newBody
         ]
-   in (mergedSections, auditBlocks)
+   in (mergedSections, auditBlocks, trackerUpdates)
 
 resolveAndAuditMemory
   :: FilePath
   -> Int
+  -> Int
+  -> Bool
+  -> Text
   -> [(Text, Text)]
   -> Maybe Text
-  -> IO ([(Text, Text)], [Text])
-resolveAndAuditMemory sessionDir curIdx prevSections (Just memTxt) =
-  pure (auditAndMergeCuratedMemory sessionDir curIdx prevSections (Just memTxt))
-resolveAndAuditMemory sessionDir curIdx prevSections Nothing = do
+  -> IO ([(Text, Text)], [Text], [Text])
+resolveAndAuditMemory sessionDir curIdx totalChunks isRecordTurn commText prevSections (Just memTxt) =
+  pure (auditAndMergeCuratedMemory sessionDir curIdx totalChunks isRecordTurn commText prevSections (Just memTxt))
+resolveAndAuditMemory sessionDir curIdx totalChunks isRecordTurn commText prevSections Nothing = do
   let memPath = sessionDir </> "memory.md"
   exists <- doesFileExist memPath
   if not exists
-    then pure (prevSections, [])
+    then pure (prevSections, [], [])
     else do
       diskTxt <- readTextFileSafe memPath
       let incoming = parseMemorySections diskTxt
@@ -1828,8 +2016,8 @@ resolveAndAuditMemory sessionDir curIdx prevSections Nothing = do
               )
               baseSections
       if hasDiskDiff
-        then pure (auditAndMergeCuratedMemory sessionDir curIdx prevSections (Just diskTxt))
-        else pure (prevSections, [])
+        then pure (auditAndMergeCuratedMemory sessionDir curIdx totalChunks isRecordTurn commText prevSections (Just diskTxt))
+        else pure (prevSections, [], [])
 
 renderCuratedSections :: [(Text, Text)] -> Text
 renderCuratedSections sections =
@@ -2125,8 +2313,41 @@ syncMemoryAndArchives sessionDir st = do
 
   pure (checkMemoryCompaction curated)
 
-writeCurrentChunkFile :: FilePath -> Chunk -> Int -> Int -> IO ()
-writeCurrentChunkFile path c totalChunks totalChapters = do
+countActivePredictionsInMemory :: [(Text, Text)] -> Int
+countActivePredictionsInMemory curated =
+  let activeBody = fromMaybe "" (lookup "Active Predictions & Theories" curated)
+   in length (extractPrevActivePredictions activeBody)
+
+renderPredictionSlateNote :: Int -> Int -> Int -> Text
+renderPredictionSlateNote curIdx totalChunks activeCount
+  | curIdx >= totalChunks =
+      "*Prediction Slate*: Final chunk ("
+        <> jsonInt activeCount
+        <> "/10 active unresolved predictions in `memory.md`). Resolve any remaining predictions that are `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` by the finale; no new prediction is required on the final chunk."
+  | activeCount < 10 =
+      let curPad = T.pack (padChunkNumber curIdx)
+       in "*Prediction Slate*: "
+            <> jsonInt activeCount
+            <> "/10 active unresolved predictions in `memory.md`. You MUST log 1 new non-softball, multi-chapter prediction on this chunk using `- **[Predicted Chunk "
+            <> curPad
+            <> "]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*` in both `=== COMMENTARY ===` and `## Active Predictions & Theories`."
+  | otherwise =
+      let curPad = T.pack (padChunkNumber curIdx)
+          needRetire = activeCount + 1 - 10
+       in "*Prediction Slate*: "
+            <> jsonInt activeCount
+            <> "/10 active unresolved predictions in `memory.md` (AT 10-PREDICTION CAP). You MUST log 1 new non-softball, multi-chapter prediction using `- **[Predicted Chunk "
+            <> curPad
+            <> "]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`, and unless at least "
+            <> jsonInt needRetire
+            <> " existing prediction(s) are `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` on this chunk, you MUST retire "
+            <> jsonInt needRetire
+            <> " prediction(s) (choosing from all unresolved predictions, including your new one, the prediction(s) most likely to never be resolved or most likely to be debunked in future installments) using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
+            <> curPad
+            <> "]** <reason>` so at most 10 unresolved predictions remain in `## Active Predictions & Theories`."
+
+writeCurrentChunkFile :: FilePath -> Chunk -> Int -> Int -> Int -> IO ()
+writeCurrentChunkFile path c totalChunks totalChapters activeCount = do
   let isFront = chapterNumber c == 0
       labelKind = if isFront then "FRONT MATTER" else "CHAPTER"
       boundaries =
@@ -2150,6 +2371,7 @@ writeCurrentChunkFile path c totalChunks totalChapters = do
                 <> jsonInt (partsInChapter c)
                 <> " — this chapter continues in the next chunk. Do not log immediate next-part scene continuations or chapter-title payoffs as predictions)."
             ]
+      slateNote = [renderPredictionSlateNote (chunkIndex c) totalChunks activeCount]
       header =
         T.unlines $
           [ "<!-- LET'S READ GATEKEEPER: CHUNK " <> jsonInt (chunkIndex c) <> " OF " <> jsonInt totalChunks <> " -->"
@@ -2170,6 +2392,7 @@ writeCurrentChunkFile path c totalChunks totalChapters = do
               <> " words"
           ]
             ++ midChapterNote
+            ++ slateNote
             ++ [ ""
                , "---"
                , ""
@@ -2349,11 +2572,14 @@ cmdInit opts = do
       , ("message", jsonStr "Session initialized. Run 'next' to unlock Chunk 1.")
       ]
 
-writeCurrentPromptFile :: FilePath -> SessionState -> Chunk -> IO FilePath
-writeCurrentPromptFile sessionDir st chunk = do
+writeCurrentPromptFile :: FilePath -> SessionState -> Chunk -> Int -> IO FilePath
+writeCurrentPromptFile sessionDir st chunk activeCount = do
   absSession <- canonicalizePath sessionDir
   absTemplate <- canonicalizePath ".agents/skills/lets-read/resources/commentary_template.md"
   let curIdx = chunkIndex chunk
+      curPad = T.pack (padChunkNumber curIdx)
+      totalChunks = stTotalChunks st
+      slatePromptLine = renderPredictionSlateNote curIdx totalChunks activeCount
       prevContextLines =
         if curIdx <= 1
           then []
@@ -2370,7 +2596,7 @@ writeCurrentPromptFile sessionDir st chunk = do
           [ "Please read the newly unlocked chunk (Chunk "
               <> jsonInt curIdx
               <> " of "
-              <> jsonInt (stTotalChunks st)
+              <> jsonInt totalChunks
               <> ") and update your Let's Read commentary and memory."
           , "- Current Chunk File (mandatory read): " <> T.pack (absSession </> "current_chunk.md")
           , "- Reader Memory File (mandatory read): " <> T.pack (absSession </> "memory.md")
@@ -2381,14 +2607,16 @@ writeCurrentPromptFile sessionDir st chunk = do
                , "- Unlocked Story Chunks Archive (on-demand read_file): " <> T.pack (absSession </> "chunks")
                , "- Previous Commentary Entries (on-demand read_file): " <> T.pack (absSession </> "entries")
                , "- Active Persona: " <> stPersona st
+               , "- " <> slatePromptLine
                , ""
                , "Remember:"
                , "1. Read `current_chunk.md` and `memory.md` first (plus `entries/chunk_(N-1).md` for self-audit when Chunk > 1, and `chunks/chunk_(N-1).md` if you are a newly rotated subagent or picking up mid-chapter). Reference `commentary_template.md` as a flexible guide; custom scene or thematic `###` subheadings are welcome, but do not start `=== COMMENTARY ===` with a redundant `# Chunk X/Y` header."
                , "2. Self-Audit, Craft Check & \"Egg-on-Face\" Rule: Before writing your reaction, compare what just happened in `current_chunk.md` against your previous entry (`entries/chunk_(N-1).md`) and your predictions in `memory.md`. First, audit your prose craft: if `entries/chunk_(N-1).md` relied on repetitive bracketed `*[...]*` stage directions or slipped into play-by-play action sportscasting, deliberately break that formula on this turn. Second, if the story subverted your expectations or pulled a fake-out that tricked you—especially if a character in the story had the exact same misconception you just had—call yourself out openly! Never gloss over a wrong theory or pretend you knew all along, and never take a victory lap (\"I called it!\") on an obvious 1–2 chunk cliffhanger guess right after getting fooled."
-               , "3. Enforced Prediction Notation (Audited by `LetsRead.hs`):"
-               , "   - Active predictions in `## Active Predictions & Theories` MUST use exact notation: `- **[Predicted Chunk XXXX]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`"
-               , "   - Resolved predictions MUST be moved to `## Hall of Fame & Shame (Major Hits & Misses)` with exact notation (`<= 200 chars` after the bracket header): `- **[Predicted Chunk XXXX -> CONFIRMED Chunk YYYY]** ...`, `- **[Predicted Chunk XXXX -> DEBUNKED Chunk YYYY]** ...`, or `- **[Predicted Chunk XXXX -> SUBVERTED Chunk YYYY]** ...`."
-               , "   - Never use `[Refined ...]`, `[Updated ...]`, or `[Active / Refined ...]`, never rewrite an existing active prediction's text in place to fit new facts, and never silently drop an unresolved prediction. If `LetsRead.hs` injected a `[READER SUB-AGENT REWROTE PREDICTION OR MOVED GOALPOSTS IN FILE ...]` block into `memory.md`, you MUST address it openly in your commentary and either restore the exact `*Before*` prediction or resolve it with `CONFIRMED`/`DEBUNKED`/`SUBVERTED` in `## Hall of Fame & Shame`. If `LetsRead.hs` injected an `[INVALID PREDICTION TAG OR FORMAT IN FILE ...]` block, fix the bracket tag or chunk number in `=== UPDATED MEMORY ===` (or remove the malformed line) as instructed."
+               , "3. Mandatory 1-Per-Chunk Prediction Quota, 10-Prediction Cap & Enforced Notation (Audited by `LetsRead.hs`):"
+               , "   - On every chunk (before the final chunk), you MUST make 1 new non-softball, multi-chapter prediction (`- **[Predicted Chunk " <> curPad <> "]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`) in both `=== COMMENTARY ===` and `## Active Predictions & Theories` in `=== UPDATED MEMORY ===`. (Never log stated itineraries, immediate next-part scene/cliffhanger continuations, or status-quo routines.)"
+               , "   - Cap unresolved predictions in `## Active Predictions & Theories` at 10. If adding your new prediction leaves more than 10 unresolved predictions overall (after moving any `CONFIRMED`/`DEBUNKED`/`SUBVERTED` predictions to `## Hall of Fame & Shame`), you MUST retire the prediction(s) most likely to never be resolved or most likely to be debunked in future installments using `- **[Predicted Chunk XXXX -> RETIRED Chunk " <> curPad <> "]** <reason>` (in both `=== COMMENTARY ===` and `=== UPDATED MEMORY ===`, removing the retired item from `## Active Predictions & Theories`) until at most 10 unresolved predictions remain."
+               , "   - Story-resolved predictions MUST be moved to `## Hall of Fame & Shame (Major Hits & Misses)` with exact notation (`<= 200 chars` after the bracket header) and also showcased in `=== COMMENTARY ===`: `- **[Predicted Chunk XXXX -> CONFIRMED Chunk " <> curPad <> "]** ...`, `- **[Predicted Chunk XXXX -> DEBUNKED Chunk " <> curPad <> "]** ...`, or `- **[Predicted Chunk XXXX -> SUBVERTED Chunk " <> curPad <> "]** ...`."
+               , "   - Never use `[Refined ...]`, `[Updated ...]`, or `[Active / Refined ...]`, never rewrite an existing active prediction's text in place to fit new facts, and never silently drop an unresolved prediction. If `LetsRead.hs` injected a `[READER SUB-AGENT REWROTE PREDICTION OR MOVED GOALPOSTS IN FILE ...]` block into `memory.md`, you MUST address it openly in your commentary and either restore the exact `*Before*` prediction, resolve it with `CONFIRMED`/`DEBUNKED`/`SUBVERTED`, or (if above the 10-prediction cap) retire it with `RETIRED`. If `LetsRead.hs` injected an `[INVALID PREDICTION TAG OR FORMAT IN FILE ...]` block, fix the bracket tag or chunk number in `=== UPDATED MEMORY ===` (or remove the malformed line) as instructed."
                , "4. Quote verbatim from `current_chunk.md` (inserting `[...]` if skipping intervening stage directions). Never \"double-tell\" by summarizing what a quote says right before or right after quoting it, never fall into \"hype-disguised double-telling\" (slapping `*[ALL-CAPS EMOTE]*` onto a plot paraphrase of an action quote instead of unpacking character psychology, thematic stakes, and structural callbacks), and never append a `Key Developments` summary bullet list to `=== COMMENTARY ===`."
                , "5. Whenever you reference, quote, or compare specific scenes, predictions, or dialogue from an earlier chunk that is not in your immediate conversation history, verify it first using `## Memory Archive & Index Tree` in `memory.md` (following links into `<session_dir>/archive/L1_XXXX.md` if needed, then reading `<session_dir>/chunks/chunk_XXXX.md`, `<session_dir>/entries/chunk_XXXX.md`, or `<session_dir>/archive/memory/chunk_XXXX.md`). Never invent quotes or scene details from condensed `memory.md` bullets."
                , "6. Never inspect `.vault.bin` or any local file outside `<session_dir>` (except `commentary_template.md`), and never search the web for the specific story being read. Background canon/franchise lore searches via `search_web` are welcome, but strictly quarantine external canon from in-story fact: in `=== COMMENTARY ===`, explicitly attribute external lore to the source material and cross-check age/timeline math against Bullet 1 of `## Story Summary So Far`; in `=== CHUNK SUMMARY ===` and `=== UPDATED MEMORY ===`, record only facts established in the story text (or confirmed in `Reader Discussion`)."
@@ -2460,14 +2688,15 @@ cmdNext rawSessionDir forceFlag = do
           ]
     else do
       let nextIdx = curIdx + 1
+          activeCount = countActivePredictionsInMemory (stCuratedMemory st)
       chunk <- loadVaultChunk (sessionDir </> ".vault.bin") nextIdx
       let chunkFile = sessionDir </> "current_chunk.md"
           chunksDir = sessionDir </> "chunks"
           archiveChunkFile = chunksDir </> ("chunk_" ++ padChunkNumber nextIdx ++ ".md")
       createDirectoryIfMissing True chunksDir
-      writeCurrentChunkFile chunkFile chunk totalChunks (stTotalChapters st)
-      writeCurrentChunkFile archiveChunkFile chunk totalChunks (stTotalChapters st)
-      promptFile <- writeCurrentPromptFile sessionDir st chunk
+      writeCurrentChunkFile chunkFile chunk totalChunks (stTotalChapters st) activeCount
+      writeCurrentChunkFile archiveChunkFile chunk totalChunks (stTotalChapters st) activeCount
+      promptFile <- writeCurrentPromptFile sessionDir st chunk activeCount
 
       -- Rebuild cumulative unlocked story text from all unlocked chunks so far
       allChunkNames <- listDirectory chunksDir
@@ -2509,6 +2738,7 @@ cmdNext rawSessionDir forceFlag = do
           , ("is_chapter_start", jsonBool (isChapterStart chunk))
           , ("is_chapter_end", jsonBool (isChapterEnd chunk))
           , ("word_count", jsonInt (wordCount chunk))
+          , ("active_predictions_count", jsonInt activeCount)
           , ("current_chunk_file", jsonStr (T.pack chunkFile))
           , ("subagent_prompt_file", jsonStr (T.pack promptFile))
           , ("chunk_archive_file", jsonStr (T.pack archiveChunkFile))
@@ -2542,6 +2772,17 @@ rebuildMasterLog sessionDir st = do
       logPath = sessionDir </> "lets_read_log.md"
   TIO.writeFile logPath (logHeader <> T.concat entryContents)
   pure logPath
+
+formatPredictionTrackerCallout :: [Text] -> Text
+formatPredictionTrackerCallout [] = ""
+formatPredictionTrackerCallout trackerLines =
+  "\n\n> [!NOTE]\n> **Prediction Tracker Update**:\n"
+    <> T.stripEnd
+      ( T.unlines
+          [ if T.null (T.strip l) then ">" else "> " <> l
+          | l <- trackerLines
+          ]
+      )
 
 formatAuditEntryCallout :: [Text] -> Text
 formatAuditEntryCallout [] = ""
@@ -2700,7 +2941,9 @@ cmdRecord opts = do
         case mExplicitMem of
           Just m -> Just m
           Nothing -> mParsedMem
-  (curated', auditBlocks) <- resolveAndAuditMemory sessionDir curIdx (stCuratedMemory st) finalMem
+      cleanedCommText = stripLeadingChunkHeading commText
+  (curated', auditBlocks, trackerUpdates) <-
+    resolveAndAuditMemory sessionDir curIdx (stTotalChunks st) True cleanedCommText (stCuratedMemory st) finalMem
 
   let summaryTxt = fromMaybe (extractFallbackSummary commText) mParsedSummary
       (chapNum, chapTitle, partNum, partsTotal) =
@@ -2723,9 +2966,9 @@ cmdRecord opts = do
           <> "/"
           <> jsonInt partsTotal
           <> ")\n\n"
-      cleanedCommText = stripLeadingChunkHeading commText
+      trackerCallout = formatPredictionTrackerCallout trackerUpdates
       auditCallout = formatAuditEntryCallout auditBlocks
-      entryContent = entryHeader <> cleanedCommText <> auditCallout <> "\n\n---\n\n"
+      entryContent = entryHeader <> cleanedCommText <> trackerCallout <> auditCallout <> "\n\n---\n\n"
       entriesDir = sessionDir </> "entries"
       entryFile = entriesDir </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")
 
@@ -2771,6 +3014,7 @@ cmdRecord opts = do
       , ("log_file", jsonStr (T.pack logPath))
       , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
       , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
+      , ("active_predictions_count", jsonInt (countActivePredictionsInMemory curated'))
       , ("prediction_audit_warnings_count", jsonInt (length auditBlocks))
       , ("memory_compaction_needed", jsonBool needsCompaction)
       , ("curated_memory_lines", jsonInt curLines)
@@ -2880,7 +3124,8 @@ cmdDiscuss opts = do
   unless entryExists $
     die ("Error: Recorded entry file not found: " ++ entryFile)
 
-  (curated', auditBlocks) <- resolveAndAuditMemory sessionDir curIdx (stCuratedMemory st) finalMem
+  (curated', auditBlocks, trackerUpdates) <-
+    resolveAndAuditMemory sessionDir curIdx (stTotalChunks st) False replyText (stCuratedMemory st) finalMem
 
   existingEntry <- readTextFileSafe entryFile
   let baseEntry = stripTrailingEntryRule existingEntry
@@ -2890,8 +3135,9 @@ cmdDiscuss opts = do
         case mUserMsg of
           Nothing -> ""
           Just u -> formatUserQuote u <> "\n"
+      trackerCallout = formatPredictionTrackerCallout trackerUpdates
       auditCallout = formatAuditEntryCallout auditBlocks
-      appendedSection = headingPrefix <> userBlock <> replyText <> auditCallout
+      appendedSection = headingPrefix <> userBlock <> replyText <> trackerCallout <> auditCallout
       updatedEntry = baseEntry <> "\n\n" <> appendedSection <> "\n\n---\n\n"
 
   TIO.writeFile entryFile updatedEntry
