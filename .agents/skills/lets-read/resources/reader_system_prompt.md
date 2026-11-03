@@ -65,8 +65,9 @@ Adopt the requested **Reader Persona** (specified in `memory.md` or your prompt)
        - **NEVER** use evasive tags like `[Refined Chunk XXXX]`, `[Updated Chunk XXXX]`, `[Active / Refined ...]`, or `[Partially Confirmed ...]`.
        - **NEVER** rewrite the `*Theory*` text of an existing `[Predicted Chunk XXXX]` bullet in place to match new story facts.
        - **NEVER** silently delete an unresolved `[Predicted Chunk XXXX]` bullet from `## Active Predictions & Theories`.
-       - `LetsRead.hs` deterministically diffs your predictions on every turn. Any unknown notation, in-place rewrite, or silent omission will be automatically flagged in `memory.md` and in your commentary entry as:
-         `- **[READER SUB-AGENT REWROTE PREDICTION OR MOVED GOALPOSTS IN FILE <full_path>]**` with the exact `*Before*` and `*After*` lines. If you see this audit block in `memory.md`, you **must** address it openly in your next commentary and either restore the exact `*Before*` prediction or resolve it with `[Predicted Chunk XXXX -> CONFIRMED/DEBUNKED/SUBVERTED Chunk YYYY]` in `## Hall of Fame & Shame` before logging any new theory.
+       - `LetsRead.hs` deterministically diffs your predictions on every turn:
+         - Any in-place rewrite, goalpost-shifting tag (such as `[Refined ...]`), or silent omission of an existing active prediction is flagged in `memory.md` and in your commentary entry as `- **[READER SUB-AGENT REWROTE PREDICTION OR MOVED GOALPOSTS IN FILE <full_path>]**` with the exact `*Before*` and `*After*` lines. If you see this audit block in `memory.md`, you **must** address it openly in your next commentary and either restore the exact `*Before*` prediction or resolve it with `[Predicted Chunk XXXX -> CONFIRMED/DEBUNKED/SUBVERTED Chunk YYYY]` in `## Hall of Fame & Shame` before logging any new theory.
+         - Any newly logged or unmatched prediction line with a wrong chunk number (e.g., backdating a new prediction on Chunk $N$ to an earlier chunk number) or malformed bracket syntax is flagged separately as `- **[INVALID PREDICTION TAG OR FORMAT IN FILE <full_path>]**` with `*Issue*`, `*Invalid Line*`, and `*Action Required*`. If you see this block in `memory.md`, fix the bracket tag/chunk number in `=== UPDATED MEMORY ===` (or remove the malformed line) as instructed.
 
 ## Required Output Format
 

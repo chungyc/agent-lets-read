@@ -995,7 +995,7 @@ defaultCuratedMemory =
   , ("Characters & Relationships", "- *(None introduced yet.)*")
   , ("Active Mysteries & Unanswered Questions", "- *(None yet.)*")
   , ( "Active Predictions & Theories"
-    , "- *(None yet. Only log genuine multi-chapter hypotheses using `- **[Predicted Chunk XXXX]** *Clue*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`. Never log stated plans/itineraries, cliffhanger completions, or status-quo routines, and never rewrite, 'refine', or silently drop an active prediction without marking it `CONFIRMED` or `DEBUNKED`.)*"
+    , "- *(None yet. Only log genuine multi-chapter hypotheses using `- **[Predicted Chunk XXXX]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`. Never log stated plans/itineraries, cliffhanger completions, or status-quo routines, and never rewrite, 'refine', or silently drop an active prediction without marking it `CONFIRMED`, `DEBUNKED`, or `SUBVERTED`.)*"
     )
   , ("Hall of Fame & Shame (Major Hits & Misses)", defaultHallOfFamePlaceholder)
   , ("Notable Quotes, Themes & Running Jokes", "- *(None yet.)*")
@@ -1024,33 +1024,32 @@ classifyMemoryHeading rawHeading =
                     then Just "Notable Quotes, Themes & Running Jokes"
                     else Nothing
 
+placeholderSubstrings :: [Text]
+placeholderSubstrings =
+  [ "*(none"
+  , "*(no chunks"
+  , "*(no major"
+  , "*(no hits"
+  , "*(no active"
+  , "*(no predictions"
+  , "*(no resolved"
+  , "*(no notable"
+  , "- <1-line"
+  , "- <compact"
+  , "- <questions"
+  , "- <what is"
+  , "- <recurring"
+  ]
+
 isPlaceholderSection :: Text -> Bool
 isPlaceholderSection body =
   let s = T.toLower (T.strip body)
-   in T.null s
-        || any
-          (`T.isInfixOf` s)
-          [ "*(none"
-          , "*(no chunks"
-          , "*(no major"
-          , "*(no hits"
-          , "*(no active"
-          , "*(no predictions"
-          ]
+   in T.null s || any (`T.isInfixOf` s) placeholderSubstrings
 
 isPlaceholderLine :: Text -> Bool
 isPlaceholderLine line =
   let s = T.toLower (T.strip line)
-   in T.null s
-        || any
-          (`T.isInfixOf` s)
-          [ "*(none"
-          , "*(no chunks"
-          , "*(no major"
-          , "*(no hits"
-          , "*(no active"
-          , "*(no predictions"
-          ]
+   in T.null s || any (`T.isInfixOf` s) placeholderSubstrings
 
 data ResolutionKind = ResConfirmed | ResDebunked | ResSubverted
   deriving (Eq, Show)
@@ -1189,7 +1188,9 @@ parsePredictionLine rawLine =
 
 isAuditHeaderLine :: Text -> Bool
 isAuditHeaderLine line =
-  "reader sub-agent rewrote prediction or moved goalposts" `T.isInfixOf` T.toLower line
+  let l = T.toLower line
+   in "reader sub-agent rewrote prediction or moved goalposts" `T.isInfixOf` l
+        || "invalid prediction tag or format in file" `T.isInfixOf` l
 
 isIndentedAuditSubLine :: Text -> Bool
 isIndentedAuditSubLine rawLine =
@@ -1198,6 +1199,8 @@ isIndentedAuditSubLine rawLine =
    in leadingSpaces >= 2
         && ( "- *Before (" `T.isPrefixOf` trimmed
                || "- *After (" `T.isPrefixOf` trimmed
+               || "- *Issue (" `T.isPrefixOf` trimmed
+               || "- *Invalid Line (" `T.isPrefixOf` trimmed
                || "- *Action Required*:" `T.isPrefixOf` trimmed
            )
 
@@ -1247,14 +1250,47 @@ bodiesRelated b1 b2 =
       p2 = T.take 20 b2
    in not (T.null p1) && not (T.null p2) && (p1 `T.isInfixOf` b2 || p2 `T.isInfixOf` b1)
 
-renderAuditBlock :: FilePath -> FilePath -> Text -> Text -> Text
-renderAuditBlock curMemPath prevMemPath beforeTxt afterTxt =
+renderAuditBlock :: FilePath -> FilePath -> Int -> Int -> Text -> Text -> Text
+renderAuditBlock curMemPath prevMemPath origC curIdx beforeTxt afterTxt =
+  let origStr = T.pack (padChunkNumber origC)
+      curStr = T.pack (padChunkNumber (max 1 curIdx))
+      nextStr = T.pack (padChunkNumber (max 1 curIdx + 1))
+   in T.intercalate
+        "\n"
+        [ "- **[READER SUB-AGENT REWROTE PREDICTION OR MOVED GOALPOSTS IN FILE " <> T.pack curMemPath <> "]**"
+        , "  - *Before (in " <> T.pack prevMemPath <> ")*: " <> T.strip beforeTxt
+        , "  - *After (in " <> T.pack curMemPath <> ")*: " <> T.strip afterTxt
+        , "  - *Action Required*: Address this prediction rewrite, goalpost-shift, or silent omission openly in your next commentary! In `=== UPDATED MEMORY ===`, either: (1) restore the exact `*Before*` line above (`- **[Predicted Chunk "
+            <> origStr
+            <> "]** ...`) in `## Active Predictions & Theories`, or (2) move it to `## Hall of Fame & Shame (Major Hits & Misses)` using one of these exact tags: `- **[Predicted Chunk "
+            <> origStr
+            <> " -> CONFIRMED Chunk "
+            <> curStr
+            <> "]** <explanation>`, `- **[Predicted Chunk "
+            <> origStr
+            <> " -> DEBUNKED Chunk "
+            <> curStr
+            <> "]** <explanation>`, or `- **[Predicted Chunk "
+            <> origStr
+            <> " -> SUBVERTED Chunk "
+            <> curStr
+            <> "]** <explanation>` (or `Chunk "
+            <> nextStr
+            <> "` if resolving on Chunk "
+            <> nextStr
+            <> ") before logging any new prediction with `- **[Predicted Chunk "
+            <> nextStr
+            <> "]**`."
+        ]
+
+renderTagFormatAuditBlock :: FilePath -> FilePath -> Text -> Text -> Text -> Text
+renderTagFormatAuditBlock curMemPath prevMemPath issueTxt invalidLineTxt actionTxt =
   T.intercalate
     "\n"
-    [ "- **[READER SUB-AGENT REWROTE PREDICTION OR MOVED GOALPOSTS IN FILE " <> T.pack curMemPath <> "]**"
-    , "  - *Before (in " <> T.pack prevMemPath <> ")*: " <> T.strip beforeTxt
-    , "  - *After (in " <> T.pack curMemPath <> ")*: " <> T.strip afterTxt
-    , "  - *Action Required*: Address this prediction rewrite, goalpost-shift, or silent omission openly in your next commentary! Either restore the exact *Before* prediction or mark it `[Predicted Chunk XXXX -> CONFIRMED/DEBUNKED Chunk YYYY]` before logging a new prediction."
+    [ "- **[INVALID PREDICTION TAG OR FORMAT IN FILE " <> T.pack curMemPath <> "]**"
+    , "  - *Issue (against " <> T.pack prevMemPath <> ")*: " <> T.strip issueTxt
+    , "  - *Invalid Line (in " <> T.pack curMemPath <> ")*: " <> T.strip invalidLineTxt
+    , "  - *Action Required*: " <> T.strip actionTxt
     ]
 
 mergeHallOfFameEntries :: [ParsedPrediction] -> [ParsedPrediction] -> Text
@@ -1382,35 +1418,54 @@ auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveB
       candidateChunk (PredInvalidNotation mc _ _ _) = mc
       candidateChunk (PredValidResolved mc _ _ _ _ _) = mc
 
+      curStr = T.pack (padChunkNumber (max 1 curIdx))
+      nextStr = T.pack (padChunkNumber (max 1 curIdx + 1))
+      hadTagAuditInOldActive =
+        "invalid prediction tag or format in file" `T.isInfixOf` T.toLower oldActiveBody
+      prevActiveChunksSummary =
+        case map (T.pack . padChunkNumber . ppOrigChunk) prevActives of
+          [] -> "none currently active in previous `memory.md`"
+          cs -> T.intercalate ", " ["`[Predicted Chunk " <> c <> "]`" | c <- cs]
+      sampleOrigStr mGuessed =
+        case mGuessed of
+          Just g | any (\p -> ppOrigChunk p == g) prevActives -> T.pack (padChunkNumber g)
+          _ ->
+            case prevActives of
+              (p : _) -> T.pack (padChunkNumber (ppOrigChunk p))
+              [] ->
+                case mGuessed of
+                  Just g -> T.pack (padChunkNumber g)
+                  Nothing -> curStr
+
       pairRewrites [] cands = ([], cands)
       pairRewrites (p : ps) cands =
         let origC = ppOrigChunk p
             origLine = ppRawLine p
             exactChunkCand c = candidateChunk c == Just origC
-            fallbackRewriteCand c =
+            relatedBodyCand c =
               case c of
-                PredInvalidNotation {} -> True
-                PredValidActive cNum _ _ _ -> cNum /= curIdx
+                PredInvalidNotation _ _ _ cNorm -> bodiesRelated (ppNormBody p) cNorm
+                PredValidActive cNum _ _ cNorm -> cNum /= curIdx && bodiesRelated (ppNormBody p) cNorm
                 PredValidResolved {} -> False
          in case break exactChunkCand cands of
               (b1, m1 : a1) ->
-                let blk = renderAuditBlock curMemPath prevMemPath origLine (ppRawLine m1)
+                let blk = renderAuditBlock curMemPath prevMemPath origC curIdx origLine (ppRawLine m1)
                     (blks, remC) = pairRewrites ps (b1 ++ a1)
                  in (blk : blks, remC)
               (_, []) ->
-                case break fallbackRewriteCand cands of
+                case break relatedBodyCand cands of
                   (b2, m2 : a2) ->
-                    let blk = renderAuditBlock curMemPath prevMemPath origLine (ppRawLine m2)
+                    let blk = renderAuditBlock curMemPath prevMemPath origC curIdx origLine (ppRawLine m2)
                         (blks, remC) = pairRewrites ps (b2 ++ a2)
                      in (blk : blks, remC)
                   (_, []) ->
                     let omittedMsg =
                           "*(Silently omitted without `[Predicted Chunk "
                             <> T.pack (padChunkNumber origC)
-                            <> " -> CONFIRMED/DEBUNKED Chunk "
-                            <> T.pack (padChunkNumber (max 1 curIdx))
+                            <> " -> CONFIRMED/DEBUNKED/SUBVERTED Chunk "
+                            <> curStr
                             <> "]` notation)*"
-                        blk = renderAuditBlock curMemPath prevMemPath origLine omittedMsg
+                        blk = renderAuditBlock curMemPath prevMemPath origC curIdx origLine omittedMsg
                         (blks, remC) = pairRewrites ps cands
                      in (blk : blks, remC)
 
@@ -1418,39 +1473,171 @@ auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveB
 
       -- Step D: Classify remaining candidates in remCandAfterC, invalidFromHall, and remResAfterB
       classifyRemainingCand :: ParsedPrediction -> Either Text Text
-      classifyRemainingCand (PredValidActive newC canonLine _ _)
-        | newC == curIdx || curIdx <= 1 = Left canonLine
+      classifyRemainingCand (PredValidActive newC canonLine bodyAfter _)
+        | newC == curIdx || (hadTagAuditInOldActive && newC == curIdx - 1 && newC > 0) || curIdx <= 1 =
+            Left canonLine
         | otherwise =
-            Right $
-              renderAuditBlock
+            let newCStr = T.pack (padChunkNumber newC)
+                trimmedBody = T.strip bodyAfter
+                issueDetail =
+                  if any (\p -> ppOrigChunk p == newC) prevActives
+                    then
+                      "New active prediction logged on Chunk "
+                        <> curStr
+                        <> " was tagged with `[Predicted Chunk "
+                        <> newCStr
+                        <> "]` instead of `[Predicted Chunk "
+                        <> curStr
+                        <> "]` (the existing `[Predicted Chunk "
+                        <> newCStr
+                        <> "]` entry was already matched; any newly added prediction on Chunk "
+                        <> curStr
+                        <> " must use the current chunk number)."
+                    else
+                      "New active prediction logged on Chunk "
+                        <> curStr
+                        <> " was tagged with wrong chunk number `[Predicted Chunk "
+                        <> newCStr
+                        <> "]` (no active prediction from Chunk "
+                        <> newCStr
+                        <> " existed in previous `memory.md`; existing active tags: "
+                        <> prevActiveChunksSummary
+                        <> ")."
+             in Right $
+                  renderTagFormatAuditBlock
+                    curMemPath
+                    prevMemPath
+                    issueDetail
+                    canonLine
+                    ( "Fix the bracket tag in `=== UPDATED MEMORY ===`! Replace `- **[Predicted Chunk "
+                        <> newCStr
+                        <> "]**` with `- **[Predicted Chunk "
+                        <> nextStr
+                        <> "]** "
+                        <> trimmedBody
+                        <> "` (when submitting Chunk "
+                        <> nextStr
+                        <> ") or `- **[Predicted Chunk "
+                        <> curStr
+                        <> "]** "
+                        <> trimmedBody
+                        <> "` (if updating Chunk "
+                        <> curStr
+                        <> "), or remove the mistagged line."
+                    )
+      classifyRemainingCand (PredInvalidNotation mGuessed rawInv bodyAfter _) =
+        let origEx = sampleOrigStr mGuessed
+            trimmedBody =
+              if T.null (T.strip bodyAfter)
+                then "*Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*"
+                else T.strip bodyAfter
+         in Right $
+              renderTagFormatAuditBlock
                 curMemPath
                 prevMemPath
-                ("*(No active prediction from Chunk " <> T.pack (padChunkNumber newC) <> " existed in previous memory.md)*")
-                canonLine
-      classifyRemainingCand (PredInvalidNotation _ rawInv _ _) =
-        Right $
-          renderAuditBlock
-            curMemPath
-            prevMemPath
-            "*(No matching prior prediction; invalid or goalpost-shifting notation used)*"
-            rawInv
-      classifyRemainingCand (PredValidResolved _ _ _ rawR _ _) =
-        Right $
-          renderAuditBlock
-            curMemPath
-            prevMemPath
-            "*(Unmatched resolved prediction notation)*"
-            rawR
+                ("Malformed or unsupported prediction bracket tag in `## Active Predictions & Theories` (existing active tags in previous `memory.md`: " <> prevActiveChunksSummary <> ").")
+                rawInv
+                ( "Fix or remove this line in `=== UPDATED MEMORY ===`! To log an active prediction in `## Active Predictions & Theories`, use `- **[Predicted Chunk "
+                    <> nextStr
+                    <> "]** "
+                    <> trimmedBody
+                    <> "` (on Chunk "
+                    <> nextStr
+                    <> ") or `- **[Predicted Chunk "
+                    <> curStr
+                    <> "]** "
+                    <> trimmedBody
+                    <> "` (on Chunk "
+                    <> curStr
+                    <> "). Or if resolving an existing active prediction, move it to `## Hall of Fame & Shame (Major Hits & Misses)` using `- **[Predicted Chunk "
+                    <> origEx
+                    <> " -> CONFIRMED Chunk "
+                    <> curStr
+                    <> "]** ...`, `- **[Predicted Chunk "
+                    <> origEx
+                    <> " -> DEBUNKED Chunk "
+                    <> curStr
+                    <> "]** ...`, or `- **[Predicted Chunk "
+                    <> origEx
+                    <> " -> SUBVERTED Chunk "
+                    <> curStr
+                    <> "]** ...`."
+                )
+      classifyRemainingCand (PredValidResolved mOrig _ _ rawR _ _) =
+        let origEx = sampleOrigStr mOrig
+         in Right $
+              renderTagFormatAuditBlock
+                curMemPath
+                prevMemPath
+                ("Unmatched resolved prediction tag in `## Active Predictions & Theories` (existing active tags in previous `memory.md`: " <> prevActiveChunksSummary <> ").")
+                rawR
+                ( "Move valid resolved predictions to `## Hall of Fame & Shame (Major Hits & Misses)` using an origin chunk that existed in `## Active Predictions & Theories` (`- **[Predicted Chunk "
+                    <> origEx
+                    <> " -> CONFIRMED Chunk "
+                    <> curStr
+                    <> "]** ...`, `- **[Predicted Chunk "
+                    <> origEx
+                    <> " -> DEBUNKED Chunk "
+                    <> curStr
+                    <> "]** ...`, or `- **[Predicted Chunk "
+                    <> origEx
+                    <> " -> SUBVERTED Chunk "
+                    <> curStr
+                    <> "]** ...`), or remove the unmatched line."
+                )
 
       candResults = map classifyRemainingCand remCandAfterC
       newValidActiveLines = [l | Left l <- candResults]
       candAuditBlocks = [b | Right b <- candResults]
       hallInvalidBlocks =
-        [ renderAuditBlock
-            curMemPath
-            prevMemPath
-            "*(Invalid or unresolved prediction notation placed in Hall of Fame & Shame)*"
-            (ppRawLine inv)
+        [ let (issueMsg, actMsg) =
+                case inv of
+                  PredValidActive c1 canonAct _ _ ->
+                    let c1Str = T.pack (padChunkNumber c1)
+                     in ( "Active prediction tag `[Predicted Chunk " <> c1Str <> "]` was placed inside `## Hall of Fame & Shame (Major Hits & Misses)` without a resolution tag."
+                        , "Either move `"
+                            <> canonAct
+                            <> "` back to `## Active Predictions & Theories`, or resolve it in `## Hall of Fame & Shame` using `- **[Predicted Chunk "
+                            <> c1Str
+                            <> " -> CONFIRMED Chunk "
+                            <> curStr
+                            <> "]** ...`, `- **[Predicted Chunk "
+                            <> c1Str
+                            <> " -> DEBUNKED Chunk "
+                            <> curStr
+                            <> "]** ...`, or `- **[Predicted Chunk "
+                            <> c1Str
+                            <> " -> SUBVERTED Chunk "
+                            <> curStr
+                            <> "]** ...`."
+                        )
+                  PredInvalidNotation mGuessed _ _ _ ->
+                    let origEx = sampleOrigStr mGuessed
+                     in ( "Invalid or unresolved prediction notation placed in `## Hall of Fame & Shame (Major Hits & Misses)` (existing active tags in previous `memory.md`: " <> prevActiveChunksSummary <> ")."
+                        , "Fix or remove this line in `=== UPDATED MEMORY ===`! Every bullet in `## Hall of Fame & Shame (Major Hits & Misses)` MUST use one of these exact tags: `- **[Predicted Chunk "
+                            <> origEx
+                            <> " -> CONFIRMED Chunk "
+                            <> curStr
+                            <> "]** ...`, `- **[Predicted Chunk "
+                            <> origEx
+                            <> " -> DEBUNKED Chunk "
+                            <> curStr
+                            <> "]** ...`, or `- **[Predicted Chunk "
+                            <> origEx
+                            <> " -> SUBVERTED Chunk "
+                            <> curStr
+                            <> "]** ...` (or `- *(No resolved predictions yet.)*` when empty)."
+                        )
+                  PredValidResolved {} ->
+                    ( "Unmatched resolved prediction notation in `## Hall of Fame & Shame (Major Hits & Misses)`."
+                    , "Remove or fix this line in `=== UPDATED MEMORY ===`."
+                    )
+           in renderTagFormatAuditBlock
+                curMemPath
+                prevMemPath
+                issueMsg
+                (ppRawLine inv)
+                actMsg
         | inv <- invalidFromHall
         ]
 
@@ -1494,15 +1681,48 @@ auditAndMergePredictions sessionDir curIdx oldActiveBody oldHallBody mNewActiveB
               case matchesOldHall r of
                 Just validR -> (validR : vAcc, bAcc)
                 Nothing ->
-                  let msg =
+                  let origEx = sampleOrigStr (ppResOrigChunk r)
+                      msg =
                         case ppResOrigChunk r of
                           Just origC ->
-                            "*(No active prediction from Chunk "
+                            "Resolved prediction in `## Hall of Fame & Shame` references `[Predicted Chunk "
                               <> T.pack (padChunkNumber origC)
-                              <> " existed in previous memory.md)*"
+                              <> "]`, which did not exist in `## Active Predictions & Theories` or `## Hall of Fame & Shame` in previous `memory.md` (existing active tags: "
+                              <> prevActiveChunksSummary
+                              <> ")."
                           Nothing ->
-                            "*(Missing `[Predicted Chunk XXXX -> CONFIRMED/DEBUNKED Chunk YYYY]` origin and no matching active prediction in previous memory.md)*"
-                   in (vAcc, renderAuditBlock curMemPath prevMemPath msg (ppRawLine r) : bAcc)
+                            "Resolved prediction is missing its origin chunk number and did not match any active prediction in previous `memory.md` (existing active tags: "
+                              <> prevActiveChunksSummary
+                              <> ")."
+                      act =
+                        if null prevActives
+                          then
+                            "No active predictions existed in previous `memory.md` to resolve! Remove this line from `## Hall of Fame & Shame (Major Hits & Misses)`, or if logging a new active prediction, place it in `## Active Predictions & Theories` using `- **[Predicted Chunk "
+                              <> nextStr
+                              <> "]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*` (on Chunk "
+                              <> nextStr
+                              <> ") or `- **[Predicted Chunk "
+                              <> curStr
+                              <> "]** ...` (on Chunk "
+                              <> curStr
+                              <> ")."
+                          else
+                            "Only resolve predictions that actually existed in `## Active Predictions & Theories` ("
+                              <> prevActiveChunksSummary
+                              <> "), using `- **[Predicted Chunk "
+                              <> origEx
+                              <> " -> CONFIRMED Chunk "
+                              <> curStr
+                              <> "]** ...`, `- **[Predicted Chunk "
+                              <> origEx
+                              <> " -> DEBUNKED Chunk "
+                              <> curStr
+                              <> "]** ...`, or `- **[Predicted Chunk "
+                              <> origEx
+                              <> " -> SUBVERTED Chunk "
+                              <> curStr
+                              <> "]** ...`, or remove the unmatched line."
+                   in (vAcc, renderTagFormatAuditBlock curMemPath prevMemPath msg (ppRawLine r) act : bAcc)
           )
           ([], [])
           remResAfterB
@@ -2157,15 +2377,15 @@ writeCurrentPromptFile sessionDir st chunk = do
                , ""
                , "Remember:"
                , "1. Read `current_chunk.md` and `memory.md` first (plus `entries/chunk_(N-1).md` for self-audit when Chunk > 1, and `chunks/chunk_(N-1).md` if you are a newly rotated subagent or picking up mid-chapter). Reference `commentary_template.md` as a flexible guide; custom scene or thematic `###` subheadings are welcome, but do not start `=== COMMENTARY ===` with a redundant `# Chunk X/Y` header."
-               , "2. Self-Audit & \"Egg-on-Face\" Rule: Before writing your reaction, compare what just happened in `current_chunk.md` against your previous entry (`entries/chunk_(N-1).md`) and your predictions in `memory.md`. If the story subverted your expectations or pulled a fake-out that tricked you—especially if a character in the story had the exact same misconception you just had—call yourself out openly! Never gloss over a wrong theory or pretend you knew all along, and never take a victory lap (\"I called it!\") on an obvious 1–2 chunk cliffhanger guess right after getting fooled."
+               , "2. Self-Audit, Craft Check & \"Egg-on-Face\" Rule: Before writing your reaction, compare what just happened in `current_chunk.md` against your previous entry (`entries/chunk_(N-1).md`) and your predictions in `memory.md`. First, audit your prose craft: if `entries/chunk_(N-1).md` relied on repetitive bracketed `*[...]*` stage directions or slipped into play-by-play action sportscasting, deliberately break that formula on this turn. Second, if the story subverted your expectations or pulled a fake-out that tricked you—especially if a character in the story had the exact same misconception you just had—call yourself out openly! Never gloss over a wrong theory or pretend you knew all along, and never take a victory lap (\"I called it!\") on an obvious 1–2 chunk cliffhanger guess right after getting fooled."
                , "3. Enforced Prediction Notation (Audited by `LetsRead.hs`):"
-               , "   - Active predictions in `## Active Predictions & Theories` MUST use exact notation: `- **[Predicted Chunk XXXX]** *Clue*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`"
-               , "   - Resolved predictions MUST be moved to `## Hall of Fame & Shame (Major Hits & Misses)` with exact notation: `- **[Predicted Chunk XXXX -> CONFIRMED Chunk YYYY]** ...`, `- **[Predicted Chunk XXXX -> DEBUNKED Chunk YYYY]** ...`, or `- **[Predicted Chunk XXXX -> SUBVERTED Chunk YYYY]** ...`."
-               , "   - Never use `[Refined ...]`, `[Updated ...]`, or `[Active / Refined ...]`, never rewrite an existing prediction's text in place to fit new facts, and never silently drop an unresolved prediction. If `LetsRead.hs` injected a `[READER SUB-AGENT REWROTE PREDICTION OR MOVED GOALPOSTS IN FILE ...]` block into `memory.md`, you MUST address it openly in your commentary and either restore the exact `*Before*` prediction or resolve it with `CONFIRMED`/`DEBUNKED`/`SUBVERTED` in `## Hall of Fame & Shame`."
-               , "4. Quote verbatim from `current_chunk.md` (inserting `[...]` if skipping intervening stage directions). Never \"double-tell\" by summarizing what a quote says right before or right after quoting it, and never append a `Key Developments` summary bullet list to `=== COMMENTARY ===`."
+               , "   - Active predictions in `## Active Predictions & Theories` MUST use exact notation: `- **[Predicted Chunk XXXX]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`"
+               , "   - Resolved predictions MUST be moved to `## Hall of Fame & Shame (Major Hits & Misses)` with exact notation (`<= 200 chars` after the bracket header): `- **[Predicted Chunk XXXX -> CONFIRMED Chunk YYYY]** ...`, `- **[Predicted Chunk XXXX -> DEBUNKED Chunk YYYY]** ...`, or `- **[Predicted Chunk XXXX -> SUBVERTED Chunk YYYY]** ...`."
+               , "   - Never use `[Refined ...]`, `[Updated ...]`, or `[Active / Refined ...]`, never rewrite an existing active prediction's text in place to fit new facts, and never silently drop an unresolved prediction. If `LetsRead.hs` injected a `[READER SUB-AGENT REWROTE PREDICTION OR MOVED GOALPOSTS IN FILE ...]` block into `memory.md`, you MUST address it openly in your commentary and either restore the exact `*Before*` prediction or resolve it with `CONFIRMED`/`DEBUNKED`/`SUBVERTED` in `## Hall of Fame & Shame`. If `LetsRead.hs` injected an `[INVALID PREDICTION TAG OR FORMAT IN FILE ...]` block, fix the bracket tag or chunk number in `=== UPDATED MEMORY ===` (or remove the malformed line) as instructed."
+               , "4. Quote verbatim from `current_chunk.md` (inserting `[...]` if skipping intervening stage directions). Never \"double-tell\" by summarizing what a quote says right before or right after quoting it, never fall into \"hype-disguised double-telling\" (slapping `*[ALL-CAPS EMOTE]*` onto a plot paraphrase of an action quote instead of unpacking character psychology, thematic stakes, and structural callbacks), and never append a `Key Developments` summary bullet list to `=== COMMENTARY ===`."
                , "5. Whenever you reference, quote, or compare specific scenes, predictions, or dialogue from an earlier chunk that is not in your immediate conversation history, verify it first using `## Memory Archive & Index Tree` in `memory.md` (following links into `<session_dir>/archive/L1_XXXX.md` if needed, then reading `<session_dir>/chunks/chunk_XXXX.md`, `<session_dir>/entries/chunk_XXXX.md`, or `<session_dir>/archive/memory/chunk_XXXX.md`). Never invent quotes or scene details from condensed `memory.md` bullets."
-               , "6. Never inspect `.vault.bin` or any local file outside `<session_dir>` (except `commentary_template.md`), and never search the web for the specific story being read (using `search_web` for background canon/franchise lore or allusions is welcome)."
-               , "7. Output all three required sections: `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===` (1 line), and `=== UPDATED MEMORY ===` (all 6 curated sections; `LetsRead.hs` automatically maintains `## Memory Archive & Index Tree`)."
+               , "6. Never inspect `.vault.bin` or any local file outside `<session_dir>` (except `commentary_template.md`), and never search the web for the specific story being read. Background canon/franchise lore searches via `search_web` are welcome, but strictly quarantine external canon from in-story fact: in `=== COMMENTARY ===`, explicitly attribute external lore to the source material and cross-check age/timeline math against Bullet 1 of `## Story Summary So Far`; in `=== CHUNK SUMMARY ===` and `=== UPDATED MEMORY ===`, record only facts established in the story text (or confirmed in `Reader Discussion`)."
+               , "7. Output all three required sections: `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===` (1 line), and `=== UPDATED MEMORY ===` (all 6 curated sections, preserving the `(Persistent)` baseline, core-cast/supporting-fates, and craft-directive anchors; `LetsRead.hs` automatically maintains `## Memory Archive & Index Tree`)."
                ]
   TIO.writeFile promptPath promptText
   pure promptPath
