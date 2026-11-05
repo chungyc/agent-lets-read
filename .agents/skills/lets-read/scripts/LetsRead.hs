@@ -996,7 +996,7 @@ defaultCuratedMemory =
   , ("Characters & Relationships", "- *(None introduced yet.)*")
   , ("Active Mysteries & Unanswered Questions", "- *(None yet.)*")
   , ( "Active Predictions & Theories"
-    , "- *(None yet. Log 1 new non-softball, multi-chapter prediction on every chunk using `- **[Predicted Chunk XXXX]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`, capped at 10 unresolved predictions. When total unresolved predictions exceed 10, retire the prediction(s) most likely to never be resolved or most likely to be debunked using `- **[Predicted Chunk XXXX -> RETIRED Chunk YYYY]** <reason>` until at most 10 remain. Never log stated itineraries, cliffhanger completions, or status-quo routines, and never rewrite or silently drop an active prediction.)*"
+    , "- *(None yet. Log 1 new non-softball, multi-chapter prediction on every chunk using `- **[Predicted Chunk XXXX]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)`, capped at 10 unresolved predictions. When total unresolved predictions exceed 10, retire the prediction(s) most likely to never be resolved or most likely to be debunked using `- **[Predicted Chunk XXXX -> RETIRED Chunk YYYY]** <reason>` until at most 10 remain. Never log stated itineraries, cliffhanger completions, or status-quo routines, and never rewrite or silently drop an active prediction.)*"
     )
   , ("Hall of Fame & Shame (Major Hits & Misses)", defaultHallOfFamePlaceholder)
   , ( "Notable Quotes, Themes & Running Jokes"
@@ -1595,7 +1595,7 @@ auditAndMergePredictions sessionDir curIdx totalChunks isRecordTurn commText old
         let origEx = sampleOrigStr mGuessed
             trimmedBody =
               if T.null (T.strip bodyAfter)
-                then "*Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*"
+                then "**Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)"
                 else T.strip bodyAfter
          in Right $
               renderTagFormatAuditBlock
@@ -1790,7 +1790,7 @@ auditAndMergePredictions sessionDir curIdx totalChunks isRecordTurn commText old
                           then
                             "No active predictions existed in previous `memory.md` to resolve! Remove this line from `## Hall of Fame & Shame (Major Hits & Misses)`, or if logging a new active prediction, place it in `## Active Predictions & Theories` using `- **[Predicted Chunk "
                               <> nextStr
-                              <> "]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*` (on Chunk "
+                              <> "]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` (on Chunk "
                               <> nextStr
                               <> ") or `- **[Predicted Chunk "
                               <> curStr
@@ -1892,12 +1892,12 @@ auditAndMergePredictions sessionDir curIdx totalChunks isRecordTurn commText old
                 curMemPath
                 prevMemPath
                 ("No new prediction was logged for Chunk " <> curStr <> " (every chunk before the final chunk must log 1 new non-softball, multi-chapter prediction, capped at 10 unresolved predictions).")
-                ("*(Missing `- **[Predicted Chunk " <> curStr <> "]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*` in `## Active Predictions & Theories`)*")
+                ("*(Missing `- **[Predicted Chunk " <> curStr <> "]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` in `## Active Predictions & Theories`)*")
                 ( "On Chunk "
                     <> nextStr
                     <> ", make sure to log 1 new non-softball, multi-chapter prediction using `- **[Predicted Chunk "
                     <> nextStr
-                    <> "]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*` in both `=== COMMENTARY ===` and `## Active Predictions & Theories` (and if total unresolved predictions exceed 10, retire the weakest one using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
+                    <> "]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` in both `=== COMMENTARY ===` and `## Active Predictions & Theories` (and if total unresolved predictions exceed 10, retire the weakest one using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
                     <> nextStr
                     <> "]** <reason>`)."
                 )
@@ -2332,7 +2332,7 @@ renderPredictionSlateNote curIdx totalChunks activeCount
             <> jsonInt activeCount
             <> "/10 active unresolved predictions in `memory.md`. You MUST log 1 new non-softball, multi-chapter prediction on this chunk using `- **[Predicted Chunk "
             <> curPad
-            <> "]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*` in both `=== COMMENTARY ===` and `## Active Predictions & Theories`."
+            <> "]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` in both `=== COMMENTARY ===` and `## Active Predictions & Theories`."
   | otherwise =
       let curPad = T.pack (padChunkNumber curIdx)
           needRetire = activeCount + 1 - 10
@@ -2340,7 +2340,7 @@ renderPredictionSlateNote curIdx totalChunks activeCount
             <> jsonInt activeCount
             <> "/10 active unresolved predictions in `memory.md` (AT 10-PREDICTION CAP). You MUST log 1 new non-softball, multi-chapter prediction using `- **[Predicted Chunk "
             <> curPad
-            <> "]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`, and unless at least "
+            <> "]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)`, and unless at least "
             <> jsonInt needRetire
             <> " existing prediction(s) are `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` on this chunk, you MUST retire "
             <> jsonInt needRetire
@@ -2653,7 +2653,7 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
                , "1. Read `current_chunk.md` and `memory.md` first (plus `entries/chunk_(N-1).md` for self-audit when Chunk > 1, and `chunks/chunk_(N-1).md` if you are a newly rotated subagent or picking up mid-chapter). Reference `commentary_template.md` as a flexible guide; let your commentary flow naturally like a single forum post without chopping it into multiple `###` mini-essay subheadings (save `### Theory & Mystery Notes` for the end), and do not start `=== COMMENTARY ===` with a redundant `# Chunk X/Y` header."
                , "2. Self-Audit, Craft Check & \"Egg-on-Face\" Rule: Before writing your reaction, compare what just happened in `current_chunk.md` against your previous entry (`entries/chunk_(N-1).md`) and your predictions in `memory.md`. First, audit your prose voice: if `entries/chunk_(N-1).md` slipped into essayist/professorial lecturing (review jargon like \"masterclass\"/\"emotional axis\", grading the author, unsolicited lore lectures, textbook truisms, or multi-header mini-essays) OR relied on repetitive bracketed `*[...]*` stage directions / sportscasting, deliberately break that habit on this turn. Second, if the story subverted your expectations or pulled a fake-out that tricked you—especially if a character in the story had the exact same misconception you just had—call yourself out openly! Never gloss over a wrong theory or pretend you knew all along, and never take a victory lap (\"I called it!\") on an obvious 1–2 chunk cliffhanger guess right after getting fooled."
                , "3. Mandatory 1-Per-Chunk Prediction Quota, 10-Prediction Cap & Enforced Notation (Audited by `LetsRead.hs`):"
-               , "   - On every chunk (before the final chunk), you MUST make 1 new non-softball, multi-chapter prediction (`- **[Predicted Chunk " <> curPad <> "]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`) in both `=== COMMENTARY ===` and `## Active Predictions & Theories` in `=== UPDATED MEMORY ===`. (Never log stated itineraries, immediate next-part scene/cliffhanger continuations, or status-quo routines.)"
+               , "   - On every chunk (before the final chunk), you MUST make 1 new non-softball, multi-chapter prediction (`- **[Predicted Chunk " <> curPad <> "]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)`) in both `=== COMMENTARY ===` and `## Active Predictions & Theories` in `=== UPDATED MEMORY ===`. (Keep `**Clue/Anomaly**` to 1 concise clause without re-quoting full dialogue; state `**Theory**` directly without \"Chekhov's gun\" meta-preambles; state `**Plausible Rival**` in normal roman text without repeating `**Theory**` in negated form; never log stated itineraries, immediate next-part scene/cliffhanger continuations, or status-quo routines.)"
                , "   - Cap unresolved predictions in `## Active Predictions & Theories` at 10. If adding your new prediction leaves more than 10 unresolved predictions overall (after moving any `CONFIRMED`/`DEBUNKED`/`SUBVERTED` predictions to `## Hall of Fame & Shame`), you MUST retire the prediction(s) most likely to never be resolved or most likely to be debunked in future installments using `- **[Predicted Chunk XXXX -> RETIRED Chunk " <> curPad <> "]** <reason>` (in both `=== COMMENTARY ===` and `=== UPDATED MEMORY ===`, removing the retired item from `## Active Predictions & Theories`) until at most 10 unresolved predictions remain."
                , "   - Story-resolved predictions MUST be moved to `## Hall of Fame & Shame (Major Hits & Misses)` with exact notation (`<= 200 chars` after the bracket header) and also showcased in `=== COMMENTARY ===`: `- **[Predicted Chunk XXXX -> CONFIRMED Chunk " <> curPad <> "]** ...`, `- **[Predicted Chunk XXXX -> DEBUNKED Chunk " <> curPad <> "]** ...`, or `- **[Predicted Chunk XXXX -> SUBVERTED Chunk " <> curPad <> "]** ...`."
                , "   - Never use `[Refined ...]`, `[Updated ...]`, or `[Active / Refined ...]`, never rewrite an existing active prediction's text in place to fit new facts, and never silently drop an unresolved prediction. If `LetsRead.hs` injected a `[READER SUB-AGENT REWROTE PREDICTION OR MOVED GOALPOSTS IN FILE ...]` block into `memory.md`, you MUST address it openly in your commentary and either restore the exact `*Before*` prediction, resolve it with `CONFIRMED`/`DEBUNKED`/`SUBVERTED`, or (if above the 10-prediction cap) retire it with `RETIRED`. If `LetsRead.hs` injected an `[INVALID PREDICTION TAG OR FORMAT IN FILE ...]` block, fix the bracket tag or chunk number in `=== UPDATED MEMORY ===` (or remove the malformed line) as instructed."

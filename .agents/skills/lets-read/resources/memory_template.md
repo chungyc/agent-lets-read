@@ -24,7 +24,7 @@
 - <What is still unexplained or suspicious in the narrative?>
 
 ## Active Predictions & Theories
-- **[Predicted Chunk XXXX]** *Clue/Anomaly*: <specific detail needing explanation (log 1 new non-softball, multi-chapter prediction per chunk; cap active unresolved predictions at 10)> -> *Theory*: <your primary bet> *(vs. Plausible Rival: <genuine rival explanation>)*
+- **[Predicted Chunk XXXX]** **Clue/Anomaly**: <concise 1-clause detail (log 1 new non-softball, multi-chapter prediction per chunk; cap active unresolved predictions at 10)> -> **Theory**: <your direct primary bet> (vs. **Plausible Rival**: <concise rival explanation>)
 
 ## Hall of Fame & Shame (Major Hits & Misses)
 - **[Predicted Chunk XXXX -> CONFIRMED Chunk YYYY]** <1-line record (<= 200 chars after bracket header) of confirmed long-range predictions (`YYYY - XXXX >= 3`; `<3`-chunk confirmations are tagged `Short-Horizon <3 Chunks — No Hit Credit`). Preserve exact bracket headers and tags verbatim; never delete `CONFIRMED`/`DEBUNKED`/`SUBVERTED` entries.>

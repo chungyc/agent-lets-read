@@ -43,13 +43,14 @@ This skill enables a genuine, unspoiled **Let's Read** of a story or book in `.t
    - Whenever presenting `blind-reader`'s commentary or discussion reply in chat, always prefix your message with a clear third-person host banner (e.g. `> **Let's Read Host** — Relaying from \`blind-reader\` (Chunk XXXX/YYYY):`) so the conversation history and any context compaction summaries always preserve the boundary between the host and `blind-reader`.
 7. **NEVER Run `python`, `python3`, or Ad-Hoc Shell Scripts**:
    - Do **not** run `python`, `python3`, `node`, `perl`, or any ad-hoc shell/Python one-liners to extract subagent responses from `transcript.jsonl`, splice or pre-process `last_response.md` / `memory.md`, check byte/line counts, or escape multi-line strings.
-   - `LetsRead.hs` handles all parsing, prediction auditing, memory merging, byte/line counting, and subagent transcript extraction natively in compiled Haskell. Use strictly `.agents/skills/lets-read/.bin/lets-read` (`init`, `next`, `record`, `discuss`, `status`), `read_file`, `write_file`, and `manage_subagents`.
+   - `LetsRead.hs` handles all parsing, prediction auditing, memory merging, byte/line counting, and subagent transcript extraction natively in compiled Haskell. Use strictly `.agents/skills/lets-read/scripts/prepare.sh`, `.agents/skills/lets-read/.bin/lets-read` (`init`, `next`, `record`, `discuss`, `status`), `read_file`, `write_file`, and `manage_subagents`.
 
 ---
 
 ## Directory & Resource Layout
 
 - **Haskell Gatekeeper**: [LetsRead.hs](./scripts/LetsRead.hs)
+- **Gatekeeper Build Script**: [prepare.sh](./scripts/prepare.sh)
 - **Blind Reader System Prompt**: [reader_system_prompt.md](./resources/reader_system_prompt.md)
 - **Reader Memory Template**: [memory_template.md](./resources/memory_template.md)
 - **Commentary Template**: [commentary_template.md](./resources/commentary_template.md)
@@ -70,18 +71,21 @@ If the user has not specified their preferences, briefly check or choose sensibl
 
 ### Step 2: Initialize the Gatekeeper Session
 
-Read [personas.md](./references/personas.md) if a custom tone was requested. Ensure the shared gatekeeper binary `.agents/skills/lets-read/.bin/lets-read` is compiled and up to date (rebuilding only if missing or if `LetsRead.hs` is newer), then initialize the session:
+Read [personas.md](./references/personas.md) if a custom tone was requested.
 
-```bash
-if [ ! -x .agents/skills/lets-read/.bin/lets-read ] || [ .agents/skills/lets-read/scripts/LetsRead.hs -nt .agents/skills/lets-read/.bin/lets-read ]; then
-  mkdir -p .agents/skills/lets-read/.bin
-  ghc -O2 -outputdir .agents/skills/lets-read/.bin -o .agents/skills/lets-read/.bin/lets-read .agents/skills/lets-read/scripts/LetsRead.hs
-fi
+1. **Prepare the Gatekeeper Binary**:
+   Run [prepare.sh](./scripts/prepare.sh) as a standalone command to ensure `.agents/skills/lets-read/.bin/lets-read` is compiled and up to date (rebuilding only if missing or if `LetsRead.hs` is newer):
+   ```bash
+   .agents/skills/lets-read/scripts/prepare.sh
+   ```
 
-.agents/skills/lets-read/.bin/lets-read init "<source_story_path>" \
-  --session "<session_dir>" \
-  --persona "<chosen_persona>"
-```
+2. **Initialize the Session**:
+   Run `.agents/skills/lets-read/.bin/lets-read init` as a separate command:
+   ```bash
+   .agents/skills/lets-read/.bin/lets-read init "<source_story_path>" \
+     --session "<session_dir>" \
+     --persona "<chosen_persona>"
+   ```
 
 Verify the JSON output from `init`, which reports `total_chapters`, `total_chunks`, `total_words`, `memory_file`, and `log_file` without revealing any future chapter titles or story text.
 
@@ -126,7 +130,7 @@ For each chunk to be read:
      1. Read `current_chunk.md` and `memory.md` first (plus `entries/chunk_(N-1).md` for self-audit when Chunk > 1, and `chunks/chunk_(N-1).md` if you are a newly rotated subagent or picking up mid-chapter). Reference `commentary_template.md` as a flexible guide; let your commentary flow naturally like a single forum post without chopping it into multiple `###` mini-essay subheadings (save `### Theory & Mystery Notes` for the end), and do not start `=== COMMENTARY ===` with a redundant `# Chunk X/Y` header.
      2. Self-Audit, Craft Check & "Egg-on-Face" Rule: Before writing your reaction, compare what just happened in `current_chunk.md` against your previous entry (`entries/chunk_(N-1).md`) and your predictions in `memory.md`. First, audit your prose voice: if `entries/chunk_(N-1).md` slipped into essayist/professorial lecturing (review jargon like "masterclass"/"emotional axis", grading the author, unsolicited lore lectures, textbook truisms, or multi-header mini-essays) OR relied on repetitive bracketed `*[...]*` stage directions / sportscasting, deliberately break that habit on this turn. Second, if the story subverted your expectations or pulled a fake-out that tricked you—especially if a character in the story had the exact same misconception you just had—call yourself out openly! Never gloss over a wrong theory or pretend you knew all along, and never take a victory lap ("I called it!") on an obvious 1–2 chunk cliffhanger guess right after getting fooled.
      3. Mandatory 1-Per-Chunk Prediction Quota, 10-Prediction Cap & Enforced Notation (Audited by `LetsRead.hs`):
-        - On every chunk (before the final chunk), you MUST make 1 new non-softball, multi-chapter prediction (`- **[Predicted Chunk XXXX]** *Clue/Anomaly*: ... -> *Theory*: ... *(vs. Plausible Rival: ...)*`) in both `=== COMMENTARY ===` and `## Active Predictions & Theories` in `=== UPDATED MEMORY ===`. (Never log stated itineraries, immediate next-part scene/cliffhanger continuations, or status-quo routines.)
+        - On every chunk (before the final chunk), you MUST make 1 new non-softball, multi-chapter prediction (`- **[Predicted Chunk XXXX]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)`) in both `=== COMMENTARY ===` and `## Active Predictions & Theories` in `=== UPDATED MEMORY ===`. (Keep `**Clue/Anomaly**` to 1 concise clause without re-quoting full dialogue; state `**Theory**` directly without "Chekhov's gun" meta-preambles; state `**Plausible Rival**` in normal roman text without repeating `**Theory**` in negated form; never log stated itineraries, immediate next-part scene/cliffhanger continuations, or status-quo routines.)
         - Cap unresolved predictions in `## Active Predictions & Theories` at 10. If adding your new prediction leaves more than 10 unresolved predictions overall (after moving any `CONFIRMED`/`DEBUNKED`/`SUBVERTED` predictions to `## Hall of Fame & Shame`), you MUST retire the prediction(s) most likely to never be resolved or most likely to be debunked in future installments using `- **[Predicted Chunk XXXX -> RETIRED Chunk YYYY]** <reason>` (in both `=== COMMENTARY ===` and `=== UPDATED MEMORY ===`, removing the retired item from `## Active Predictions & Theories`) until at most 10 unresolved predictions remain.
         - Story-resolved predictions MUST be moved to `## Hall of Fame & Shame (Major Hits & Misses)` with exact notation (`<= 200 chars` after the bracket header) and also showcased in `=== COMMENTARY ===`: `- **[Predicted Chunk XXXX -> CONFIRMED Chunk YYYY]** ...`, `- **[Predicted Chunk XXXX -> DEBUNKED Chunk YYYY]** ...`, or `- **[Predicted Chunk XXXX -> SUBVERTED Chunk YYYY]** ...`.
         - Never use `[Refined ...]`, `[Updated ...]`, or `[Active / Refined ...]`, never rewrite an existing active prediction's text in place to fit new facts, and never silently drop an unresolved prediction. If `LetsRead.hs` injected a `[READER SUB-AGENT REWROTE PREDICTION OR MOVED GOALPOSTS IN FILE ...]` block into `memory.md`, you MUST address it openly in your commentary and either restore the exact `*Before*` prediction, resolve it with `CONFIRMED`/`DEBUNKED`/`SUBVERTED`, or (if above the 10-prediction cap) retire it with `RETIRED`. If `LetsRead.hs` injected an `[INVALID PREDICTION TAG OR FORMAT IN FILE ...]` block, fix the bracket tag or chunk number in `=== UPDATED MEMORY ===` (or remove the malformed line) as instructed.
