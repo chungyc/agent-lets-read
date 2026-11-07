@@ -1501,8 +1501,8 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle isRecordTurn
 
       classifyActiveBullet :: ParsedPrediction -> Either (Int, ParsedPrediction) (Maybe Text)
       classifyActiveBullet p@(PredValidActive c1 _ clue theory rival canonL bodyAfter)
-        | c1 /= curIdx && any (\pr -> prOriginChunk pr == c1) prevRecords =
-            -- Existing prediction re-emitted in `=== PREDICTION UPDATES ===`; ignore since existing records are immutable.
+        | any (\pr -> prOriginChunk pr == c1) prevRecords =
+            -- Once recorded in stPredictions, a prediction record's text is strictly immutable.
             Right Nothing
         | c1 /= curIdx =
             let newCStr = T.pack (padChunkNumber c1)
@@ -1613,18 +1613,14 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle isRecordTurn
       toPredictionRecord _ =
         error "toPredictionRecord: expected PredValidActive"
 
-      newActiveRecords = map toPredictionRecord validNewActiveParsed
-      newActiveOriginChunks = map prOriginChunk newActiveRecords
+      newActiveRecords =
+        [ toPredictionRecord p
+        | p <- validNewActiveParsed
+        , all (\pr -> prOriginChunk pr /= ppOrigChunk p) prevRecords
+        ]
 
       candidateRecords =
-        sortOn
-          prOriginChunk
-          ( [ pr
-            | pr <- prevRecords
-            , prOriginChunk pr `notElem` newActiveOriginChunks
-            ]
-              ++ newActiveRecords
-          )
+        sortOn prOriginChunk (prevRecords ++ newActiveRecords)
 
       activePoolBeforeJudge = [pr | pr <- candidateRecords, prStatus pr == PredStatusActive]
 
@@ -2788,7 +2784,7 @@ renderPredictionSlateSection st =
       activeLines =
         if null activePreds
           then
-            [ "- *(No active predictions yet. On every chunk before the final chunk, output 1 new non-softball, multi-chapter prediction in `=== PREDICTION UPDATES ===` using `- **[Predicted Chunk XXXX | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)`.)*"
+            [ "- *(No active predictions yet. On every chunk before the final chunk, output 1 new non-softball, multi-chapter prediction (`<= 450 chars` total) in `=== PREDICTION UPDATES ===` using `- **[Predicted Chunk XXXX | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <detail, <= 120 chars, no quotes> -> **Theory**: <direct bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`.)*"
             ]
           else
             [ let origPad = padChunkNumber (prOriginChunk pr)
@@ -2955,17 +2951,17 @@ renderPredictionSlateNote curIdx totalChunks activeCount
       let curPad = T.pack (padChunkNumber curIdx)
        in "*Prediction Slate*: "
             <> jsonInt activeCount
-            <> "/10 active unresolved predictions in `memory.md`. React in `=== COMMENTARY ===` to any `prediction-judge` rulings from the previous chunk, and log 1 new non-softball, multi-chapter prediction on this chunk using `- **[Predicted Chunk "
+            <> "/10 active unresolved predictions in `memory.md`. React in `=== COMMENTARY ===` to any `prediction-judge` rulings from the previous chunk, and log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total) on this chunk using `- **[Predicted Chunk "
             <> curPad
-            <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` in both `=== COMMENTARY ===` and `=== PREDICTION UPDATES ===` (`prediction-judge` will evaluate all active predictions after your turn; do NOT emit `CONFIRMED`/`DEBUNKED`/`SUBVERTED` tags)."
+            <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <detail, <= 120 chars, no quotes> -> **Theory**: <direct bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)` in both `=== COMMENTARY ===` and `=== PREDICTION UPDATES ===` (`prediction-judge` will evaluate all active predictions after your turn; do NOT emit `CONFIRMED`/`DEBUNKED`/`SUBVERTED` tags)."
   | otherwise =
       let curPad = T.pack (padChunkNumber curIdx)
           needRetire = activeCount + 1 - 10
        in "*Prediction Slate*: "
             <> jsonInt activeCount
-            <> "/10 active unresolved predictions in `memory.md` (AT 10-PREDICTION CAP). React in `=== COMMENTARY ===` to any `prediction-judge` rulings from the previous chunk, log 1 new non-softball, multi-chapter prediction using `- **[Predicted Chunk "
+            <> "/10 active unresolved predictions in `memory.md` (AT 10-PREDICTION CAP). React in `=== COMMENTARY ===` to any `prediction-judge` rulings from the previous chunk, log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total) using `- **[Predicted Chunk "
             <> curPad
-            <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)`, AND nominate "
+            <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <detail, <= 120 chars, no quotes> -> **Theory**: <direct bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`, AND nominate "
             <> jsonInt needRetire
             <> " conditional retirement candidate(s) (choosing from all unresolved predictions, including your new one, the prediction(s) most likely to never be resolved or most likely to be debunked in future installments) in `=== PREDICTION UPDATES ===` using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
             <> curPad
@@ -3305,7 +3301,7 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
                , "1. Read `current_chunk.md` and `memory.md` first (plus `critic_feedback.md` if listed above, and `chunks/chunk_(N-1).md` ONLY if you are a newly rotated subagent or picking up mid-chapter). Do NOT read `entries/chunk_(N-1).md` unless checking a specific thread callback."
                , "2. If `critic_feedback.md` is present: (a) Never blindly trust `commentary-critic` on factual/canon flags—verify every disputed claim against the cited `chunks/chunk_XXXX.md` quote, Bullet 1 of `## Story Summary So Far` (for AU divergences), or `search_web` before accepting; if verified, fix `=== UPDATED MEMORY ===` and include a natural 1-sentence in-character walkback in `=== COMMENTARY ===`, or overrule and ignore the flag if your original reading/joke was right. (b) Apply any `Persona & Style Coaching` notes silently—never apologize for or mention style feedback in `=== COMMENTARY ===`."
                , "3. Check `### Latest Prediction Judge Rulings` in `memory.md` and react in `=== COMMENTARY ===` to any `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` verdicts from the previous chunk (owning `DEBUNKED`/`SUBVERTED` misses with good humor, and never taking a victory lap on a 1–2 chunk short-horizon call)."
-               , "4. Prediction Quota & Conditional Retirement: Do NOT emit `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` tags (`prediction-judge` evaluates all active predictions after your turn). On every chunk before the final chunk, log 1 new non-softball, multi-chapter prediction (`- **[Predicted Chunk " <> curPad <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)`) in both `=== COMMENTARY ===` and `=== PREDICTION UPDATES ===`. If `memory.md` already has 10/10 active predictions, also nominate 1 conditional retirement candidate (`- **[Predicted Chunk XXXX -> RETIRED Chunk " <> curPad <> "]** <reason>`); it will only be retired if >10 remain active after `prediction-judge`'s verdicts."
+               , "4. Prediction Quota, Conciseness Cap & Conditional Retirement: Do NOT emit `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` tags (`prediction-judge` evaluates all active predictions after your turn). On every chunk before the final chunk, log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total after bracket tag: `- **[Predicted Chunk " <> curPad <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <detail, <= 120 chars, no inline quotes> -> **Theory**: <direct 1-clause bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`) in both `=== COMMENTARY ===` and `=== PREDICTION UPDATES ===`. If `memory.md` already has 10/10 active predictions, also nominate 1 conditional retirement candidate (`- **[Predicted Chunk XXXX -> RETIRED Chunk " <> curPad <> "]** <reason>`); it will only be retired if >10 remain active after `prediction-judge`'s verdicts."
                , "5. Stay *inside* the story in your active Persona: weave verbatim `>` blockquotes (`[...]` for skipped beats) with live reactions in a single natural forum post (no `# Chunk X/Y` top header, no multiple `###` subheadings except `### Theory & Mystery Notes` at the end, no double-telling/sportscasting, no review jargon like \"masterclass\"/\"emotional axis\", and no textbook truisms). Verify any earlier-chapter callbacks via `memory.md` / `chunks/chunk_XXXX.md`, and quarantine external `search_web` canon lore from in-story facts."
                , "6. Output all four required sections: `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===` (1 line), `=== PREDICTION UPDATES ===` (new prediction + optional conditional `RETIRED` nomination), and `=== UPDATED MEMORY ===` (only the 4 narrative sections)."
                ]
@@ -3397,8 +3393,8 @@ writeCurrentJudgePromptFile sessionDir st = do
   TIO.writeFile judgePromptPath judgePromptText
   pure judgePromptPath
 
-lintReaderCommentary :: Text -> [Text]
-lintReaderCommentary commText =
+lintReaderCommentary :: Text -> Maybe PredictionRecord -> [Text]
+lintReaderCommentary commText mNewPred =
   let low = T.toLower commText
       bannedJargon =
         [ "masterclass"
@@ -3449,7 +3445,32 @@ lintReaderCommentary commText =
                 <> jsonInt stageEmoteCount
                 <> " bracketed `*[...]*` stage-direction emotes. Express excitement, shock, or humor in natural prose rather than repetitive stage-direction emotes or action sportscasting."
             ]
-   in jargonWarn ++ headingWarn ++ emoteWarn
+      predLenWarn =
+        case mNewPred of
+          Nothing -> []
+          Just pr ->
+            let bodyLen = T.length (prRawBody pr)
+                clueLen = T.length (prClue pr)
+                theoryLen = T.length (prTheory pr)
+                rivalLen = T.length (prRival pr)
+                clueHasQuote = T.any (\c -> c == '"' || c == '\x201C' || c == '\x201D') (prClue pr)
+                issues =
+                  [ "total body was " <> jsonInt bodyLen <> " chars (cap: <= 450 chars)" | bodyLen > 450 ]
+                    ++ [ "`**Clue/Anomaly**` was " <> jsonInt clueLen <> " chars (cap: <= 120 chars)" | clueLen > 120 ]
+                    ++ [ "`**Clue/Anomaly**` contained inline quotation marks (summarize the detail in 1 short clause without quoting)" | clueHasQuote ]
+                    ++ [ "`**Theory**` was " <> jsonInt theoryLen <> " chars (cap: <= 160 chars)" | theoryLen > 160 ]
+                    ++ [ "`**Plausible Rival**` was " <> jsonInt rivalLen <> " chars (cap: <= 120 chars)" | rivalLen > 120 ]
+                cPad = T.pack (padChunkNumber (prOriginChunk pr))
+             in if null issues
+                  then []
+                  else
+                    [ "- **[Deterministic Style Linter (`LetsRead.hs`)]** Your prediction `[Predicted Chunk "
+                        <> cPad
+                        <> "]` exceeded the conciseness budget ("
+                        <> T.intercalate "; " issues
+                        <> "). On your next turn, keep the prediction body `<= 450 chars` total (`**Clue/Anomaly** <= 120 chars` with no inline quotes, `**Theory** <= 160 chars` stating 1 direct outcome, `**Plausible Rival** <= 120 chars`)."
+                    ]
+   in jargonWarn ++ headingWarn ++ emoteWarn ++ predLenWarn
 
 writeCurrentCriticPromptFile :: FilePath -> SessionState -> Text -> IO FilePath
 writeCurrentCriticPromptFile sessionDir st summaryTxt = do
@@ -4061,7 +4082,6 @@ cmdRecord opts = do
           Just m -> Just m
           Nothing -> mParsedMem
       cleanedCommText = stripLeadingChunkHeading commText
-      linterWarnings = lintReaderCommentary cleanedCommText
       (chapNum, chapTitle, partNum, partsTotal) =
         case stCurrentMeta st of
           Just m -> (metaChapterNumber m, metaChapterTitle m, metaPartInChapter m, metaPartsInChapter m)
@@ -4080,6 +4100,14 @@ cmdRecord opts = do
           (stPredictionAuditWarnings st)
           mParsedPredUpdates
           finalMem
+      mNewlyLoggedPred =
+        listToMaybe
+          [ pr
+          | pr <- preds'
+          , prOriginChunk pr == curIdx
+          , all (\oldPr -> prOriginChunk oldPr /= curIdx) (stPredictions st)
+          ]
+      linterWarnings = lintReaderCommentary cleanedCommText mNewlyLoggedPred
       summaryTxt = fromMaybe (extractFallbackSummary commText) mParsedSummary
       chapDisplay
         | chapNum == 0 = chapTitle

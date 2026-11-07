@@ -34,7 +34,7 @@
 - *(Appears after Chunk 1 is judged by `prediction-judge`.)*
 
 ### Currently Active Unresolved Predictions (0/10)
-- **[Predicted Chunk XXXX | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <concise 1-clause detail> -> **Theory**: <your direct primary bet> (vs. **Plausible Rival**: <concise rival explanation>) ([details](predictions/pred_XXXX.md))
+- **[Predicted Chunk XXXX | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <1 short clause, <= 120 chars, no quotes> -> **Theory**: <direct primary bet, <= 160 chars> (vs. **Plausible Rival**: <concise rival explanation, <= 120 chars>) ([details](predictions/pred_XXXX.md))
 
 ## Notable Quotes, Themes & Running Jokes
 - **Reader Craft Directives & Running Gags (Persistent)**: <1-line ledger (<= 300 chars) of active style/craft feedback from `Reader Discussion` and thread-wide running jokes; update in place, never delete during compaction>
