@@ -45,10 +45,12 @@ Each active prediction has the structure:
    - If the prompt lists any `Recently Resolved` predictions from the last 1–2 chunks, check whether `current_chunk.md` reveals that the previous chunk's apparent resolution was an in-story fake-out, illusion, cover story, or misdirection.
    - If so, emit an updated ruling line for that prediction (e.g., flipping a premature `CONFIRMED` to `- **[Predicted Chunk XXXX -> SUBVERTED Chunk NNNN]** <explanation of the fake-out>`, or restoring it to `- **[Predicted Chunk XXXX -> ACTIVE]** <explanation>`). Otherwise, omit already-resolved predictions that did not change.
 
-4. **Screening the Reader's Newly Logged Prediction (`Predicted Chunk NNNN`)**:
+4. **Screening the Reader's Newly Logged Prediction (`Predicted Chunk NNNN`) for Same-Chunk Resolution & Synthesis Quality ($A + B \rightarrow C$ vs. Linear Extrapolation)**:
    - Also evaluate the new prediction `blind-reader` just logged for the current chunk (`Predicted Chunk NNNN`):
-     - In almost all cases, it is a bet on future chapters and should be ruled `- **[Predicted Chunk NNNN -> ACTIVE]**`.
-     - However, if `current_chunk.md` *already* answered, confirmed, or falsified `Predicted Chunk NNNN` within the very same chunk, resolve it immediately (`CONFIRMED Chunk NNNN`, `DEBUNKED Chunk NNNN`, or `SUBVERTED Chunk NNNN`).
+     - **Same-Chunk Resolution Check**: If `current_chunk.md` *already* answered, confirmed, or falsified `Predicted Chunk NNNN` within the very same chunk, resolve it immediately (`CONFIRMED Chunk NNNN`, `DEBUNKED Chunk NNNN`, or `SUBVERTED Chunk NNNN`).
+     - **Synthesis vs. Linear-Extrapolation Audit on `ACTIVE` (`<= 200 chars`)**: When `Predicted Chunk NNNN` remains unresolved (`- **[Predicted Chunk NNNN -> ACTIVE]** <1-sentence quality audit>`), your 1-sentence note is shown directly to `blind-reader` in `### Latest Prediction Judge Rulings`. Use it to audit whether `Predicted Chunk NNNN` is a genuine cross-thread synthesis ($A + B \rightarrow C$) or a single-beat linear extrapolation ($A \rightarrow A'$):
+       - *If it synthesizes two threads ($A + B \rightarrow C$)* (connecting a detail in `current_chunk.md` with an earlier clue/mystery/character thread in `memory.md` or canon to bet on a hidden cause, motive, or collision): briefly affirm the cross-thread synthesis.
+       - *If it is a single-beat linear extrapolation ($A \rightarrow A'$)* (taking one trait, habit, tool, or beat in `current_chunk.md` and merely predicting "more of $A$" will happen later without connecting to an earlier thread): still rule it `ACTIVE`, **but explicitly call out the linear extrapolation in your 1-sentence note** (e.g., *"Single-beat linear extrapolation from Chunk NNNN alone; on your next turn, synthesize a new detail with an earlier mystery/thread in `memory.md` ($A + B \rightarrow C$), and prioritize retiring linear extrapolations first at the 10-slot cap."*).
 
 ---
 

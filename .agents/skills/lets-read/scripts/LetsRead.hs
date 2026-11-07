@@ -1889,11 +1889,22 @@ applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
         , prOriginChunk pr `elem` reopenedOrigins
         ]
       newCurLine =
-        [ "- **[Predicted Chunk "
-            <> T.pack (padChunkNumber (prOriginChunk pr))
-            <> " -> ACTIVE]** Newly logged prediction remains active ("
-            <> T.intercalate ", " (prTopics pr)
-            <> ")."
+        [ let origC = prOriginChunk pr
+              mJudgeNote =
+                listToMaybe
+                  [ T.strip note
+                  | PredValidKeepActive kOrig _ note <- keepActiveVerdicts
+                  , kOrig == origC
+                  , not (T.null (T.strip note))
+                  ]
+              noteSuffix =
+                fromMaybe
+                  ("Newly logged prediction remains active (" <> T.intercalate ", " (prTopics pr) <> ").")
+                  mJudgeNote
+           in "- **[Predicted Chunk "
+                <> T.pack (padChunkNumber origC)
+                <> " -> ACTIVE]** "
+                <> noteSuffix
         | pr <- finalRecords
         , prOriginChunk pr == curIdx
         , prStatus pr == PredStatusActive
@@ -3301,7 +3312,7 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
                , "1. Read `current_chunk.md` and `memory.md` first (plus `critic_feedback.md` if listed above, and `chunks/chunk_(N-1).md` ONLY if you are a newly rotated subagent or picking up mid-chapter). Do NOT read `entries/chunk_(N-1).md` unless checking a specific thread callback."
                , "2. If `critic_feedback.md` is present: (a) Never blindly trust `commentary-critic` on factual/canon flags—verify every disputed claim against the cited `chunks/chunk_XXXX.md` quote, Bullet 1 of `## Story Summary So Far` (for AU divergences), or `search_web` before accepting; if verified, fix `=== UPDATED MEMORY ===` and include a natural 1-sentence in-character walkback in `=== COMMENTARY ===`, or overrule and ignore the flag if your original reading/joke was right. (b) Apply any `Persona & Style Coaching` notes silently—never apologize for or mention style feedback in `=== COMMENTARY ===`."
                , "3. Check `### Latest Prediction Judge Rulings` in `memory.md` and react in `=== COMMENTARY ===` to any `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` verdicts from the previous chunk (owning `DEBUNKED`/`SUBVERTED` misses with good humor, and never taking a victory lap on a 1–2 chunk short-horizon call)."
-               , "4. Prediction Quota, Conciseness Cap & Conditional Retirement: Do NOT emit `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` tags (`prediction-judge` evaluates all active predictions after your turn). On every chunk before the final chunk, log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total after bracket tag: `- **[Predicted Chunk " <> curPad <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <detail, <= 120 chars, no inline quotes> -> **Theory**: <direct 1-clause bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`) in both `=== COMMENTARY ===` and `=== PREDICTION UPDATES ===`. If `memory.md` already has 10/10 active predictions, also nominate 1 conditional retirement candidate (`- **[Predicted Chunk XXXX -> RETIRED Chunk " <> curPad <> "]** <reason>`); it will only be retired if >10 remain active after `prediction-judge`'s verdicts."
+               , "4. Prediction Quota, Cross-Thread Synthesis ($A + B -> C$), Conciseness Cap & Conditional Retirement: Do NOT emit `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` tags (`prediction-judge` evaluates all active predictions after your turn). On every chunk before the final chunk, log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total after bracket tag: `- **[Predicted Chunk " <> curPad <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <detail A in current_chunk.md + earlier thread/mystery/canon B, <= 120 chars, no inline quotes> -> **Theory**: <direct non-linear outcome C, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`) in both `=== COMMENTARY ===` and `=== PREDICTION UPDATES ===`. Never log single-beat linear extrapolations (\"X happened here so more of X will happen later\"). If `memory.md` already has 10/10 active predictions, also nominate 1 conditional retirement candidate (`- **[Predicted Chunk XXXX -> RETIRED Chunk " <> curPad <> "]** <reason>`); it will only be retired if >10 remain active after `prediction-judge`'s verdicts."
                , "5. Stay *inside* the story in your active Persona: weave verbatim `>` blockquotes (`[...]` for skipped beats) with live reactions in a single natural forum post (no `# Chunk X/Y` top header, no multiple `###` subheadings except `### Theory & Mystery Notes` at the end, no double-telling/sportscasting, no review jargon like \"masterclass\"/\"emotional axis\", and no textbook truisms). Verify any earlier-chapter callbacks via `memory.md` / `chunks/chunk_XXXX.md`, and quarantine external `search_web` canon lore from in-story facts."
                , "6. Output all four required sections: `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===` (1 line), `=== PREDICTION UPDATES ===` (new prediction + optional conditional `RETIRED` nomination), and `=== UPDATED MEMORY ===` (only the 4 narrative sections)."
                ]
@@ -3384,7 +3395,8 @@ writeCurrentJudgePromptFile sessionDir st = do
                , "## Instructions Reminder"
                , "1. Read `current_chunk.md` carefully. Judge **every** active prediction listed above against the explicit text of `current_chunk.md`."
                , "2. Output a single section starting with `=== PREDICTION JUDGMENTS ===` containing **one bullet line for every active prediction** (or `- None.` if 0 active predictions exist):"
-               , "   - Still unresolved: `- **[Predicted Chunk XXXX -> ACTIVE]**`"
+               , "   - Earlier prediction still unresolved: `- **[Predicted Chunk XXXX -> ACTIVE]**`"
+               , "   - Newly logged prediction (`Predicted Chunk " <> curPad <> "`) still unresolved: `- **[Predicted Chunk " <> curPad <> " -> ACTIVE]** <1-sentence quality audit (<= 200 chars): note whether it synthesizes current_chunk.md with an earlier thread/mystery/canon (A + B -> C), or flag if it is a single-beat linear extrapolation (A -> A') so blind-reader connects two threads next turn and retires linear extrapolations first at the 10-cap>`"
                , "   - Confirmed: `- **[Predicted Chunk XXXX -> CONFIRMED Chunk " <> curPad <> "]** <concise 1-sentence explanation citing the specific reveal in Chunk " <> curPad <> " (<= 200 chars)>`"
                , "   - Debunked: `- **[Predicted Chunk XXXX -> DEBUNKED Chunk " <> curPad <> "]** <concise 1-sentence explanation citing the specific contradicting fact in Chunk " <> curPad <> " (<= 200 chars)>`"
                , "   - Subverted: `- **[Predicted Chunk XXXX -> SUBVERTED Chunk " <> curPad <> "]** <concise 1-sentence explanation citing the real anomaly vs. how the story twisted the explanation in Chunk " <> curPad <> " (<= 200 chars)>`"
