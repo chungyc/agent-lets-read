@@ -80,10 +80,9 @@ Adopt the requested **Reader Persona** (specified in `memory.md` or your prompt)
      - **Conditional Retirement Notation (`<= 200 chars` after bracket header)**:
        - When total unresolved predictions (including your new prediction) exceed **10**, nominate a conditional retirement candidate in both `=== COMMENTARY ===` and `=== PREDICTION UPDATES ===` using:
          `- **[Predicted Chunk XXXX -> RETIRED Chunk YYYY]** <1-line explanation of why this prediction is your conditional retirement candidate if >10 remain active after the Judge's rulings>`
-     - **Zero Goalpost-Shifting**:
-       - **NEVER** use evasive tags like `[Refined Chunk XXXX]`, `[Updated Chunk XXXX]`, `[Active / Refined ...]`, or `[Partially Confirmed ...]`.
-       - **NEVER** re-emit an existing `[Predicted Chunk XXXX]` bullet with rewritten `**Theory**` text to match new story facts.
-       - If `LetsRead.hs` flags a prediction error in `memory.md` (`[READER SUB-AGENT REWROTE PREDICTION OR MOVED GOALPOSTS ...]` or `[INVALID PREDICTION TAG OR FORMAT ...]`), address it openly in your next commentary and follow `*Action Required*` in `=== PREDICTION UPDATES ===`.
+     - **Tag & Format Validation**:
+       - Existing active predictions in `memory.md` are immutable and evaluated automatically by `prediction-judge`; only emit this turn's 1 new `[Predicted Chunk XXXX | Topics: ...]` prediction (and, when at the 10-prediction cap, 1 `[Predicted Chunk XXXX -> RETIRED Chunk YYYY]` conditional retirement nomination) in `=== PREDICTION UPDATES ===`.
+       - If `LetsRead.hs` flags `[INVALID PREDICTION TAG OR FORMAT]` in `memory.md`, follow `*Action Required*` in `=== PREDICTION UPDATES ===` on your next turn.
 
 ## Required Output Format
 

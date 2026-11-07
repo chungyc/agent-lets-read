@@ -26,7 +26,7 @@ import qualified Data.ByteString.Lazy as BSL
 import Data.Char (chr, isAlphaNum, isDigit, isHexDigit, isSpace, isUpper, toLower)
 import Data.List (foldl', groupBy, isPrefixOf, isSuffixOf, nub, sort, sortOn)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, isJust, listToMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -133,7 +133,6 @@ data PredictionRecord = PredictionRecord
   , prTheory :: !Text
   , prRival :: !Text
   , prRawBody :: !Text
-  , prNormBody :: !Text
   , prStatus :: !PredictionStatus
   , prResolutionNote :: !(Maybe Text)
   }
@@ -1064,13 +1063,7 @@ classifyMemoryHeading rawHeading =
               then Just "Active Mysteries & Unanswered Questions"
               else if "quote" `T.isInfixOf` h || "theme" `T.isInfixOf` h || "joke" `T.isInfixOf` h || "meme" `T.isInfixOf` h
                 then Just "Notable Quotes, Themes & Running Jokes"
-                else if "prediction" `T.isInfixOf` h
-                  || "theor" `T.isInfixOf` h
-                  || "hall of fame" `T.isInfixOf` h
-                  || "shame" `T.isInfixOf` h
-                  || "hits & misses" `T.isInfixOf` h
-                  then Just "_FallbackPredictions_"
-                  else Nothing
+                else Nothing
 
 placeholderSubstrings :: [Text]
 placeholderSubstrings =
@@ -1131,7 +1124,6 @@ data ParsedPrediction
       , ppRival :: !Text
       , ppRawLine :: !Text
       , ppBodyAfterBracket :: !Text
-      , ppNormBody :: !Text
       }
   | PredValidKeepActive
       { ppKeepOrigChunk :: !Int
@@ -1139,23 +1131,17 @@ data ParsedPrediction
       , ppBodyAfterBracket :: !Text
       }
   | PredValidResolved
-      { ppResOrigChunk :: !(Maybe Int)
+      { ppResOrigChunk :: !Int
       , ppResChunk :: !Int
       , ppResKind :: !ResolutionKind
       , ppRawLine :: !Text
       , ppBodyAfterBracket :: !Text
-      , ppNormBody :: !Text
       }
   | PredInvalidNotation
-      { ppGuessedOrigChunk :: !(Maybe Int)
-      , ppRawLine :: !Text
+      { ppRawLine :: !Text
       , ppBodyAfterBracket :: !Text
-      , ppNormBody :: !Text
       }
   deriving (Eq, Show)
-
-normalizePredBody :: Text -> Text
-normalizePredBody = T.filter isAlphaNum . T.toLower
 
 stopTopicWords :: [Text]
 stopTopicWords =
@@ -1318,7 +1304,7 @@ parsePredictionLine rawLine =
       (_, afterOpen) = T.breakOn "[" l
       (insideRaw, afterClose) = T.breakOn "]" (T.drop 1 afterOpen)
    in if T.null afterOpen || T.null afterClose
-        then PredInvalidNotation Nothing l l (normalizePredBody l)
+        then PredInvalidNotation l l
         else
           let (insideBeforePipe, _) = T.breakOn "|" insideRaw
               (insideBeforeParen, _) = T.breakOn "(" insideBeforePipe
@@ -1331,7 +1317,6 @@ parsePredictionLine rawLine =
                 if shortHorizonPrefix `T.isPrefixOf` T.toLower rawAfterBracket
                   then T.strip (T.drop 1 (snd (T.breakOn ")" rawAfterBracket)))
                   else rawAfterBracket
-              normB = normalizePredBody afterBracket
               nums :: [Int]
               nums =
                 [ n
@@ -1339,20 +1324,6 @@ parsePredictionLine rawLine =
                 , not (T.null tok)
                 , [(n, "")] <- [reads (T.unpack tok)]
                 ]
-              hasForbiddenKeyword =
-                any
-                  (`T.isInfixOf` inside)
-                  [ "refin"
-                  , "updat"
-                  , "revis"
-                  , "modif"
-                  , "chang"
-                  , "adjust"
-                  , "tweak"
-                  , "semi"
-                  , "partial"
-                  , "shift"
-                  ]
               isSubverted = "subvert" `T.isInfixOf` inside
               isDebunked =
                 not isSubverted
@@ -1389,72 +1360,43 @@ parsePredictionLine rawLine =
                     , "hit"
                     , "correct"
                     ]
-           in if hasForbiddenKeyword
-                then PredInvalidNotation (listToMaybe nums) l afterBracket normB
-                else if isSubverted || isDebunked || isRetired || isConfirmed
-                  then
-                    let rKind
-                          | isSubverted = ResSubverted
-                          | isDebunked = ResDebunked
-                          | isRetired = ResRetired
-                          | otherwise = ResConfirmed
-                     in case nums of
-                          (c1 : c2 : _)
-                            | c1 > 0 && c2 >= c1 ->
-                                PredValidResolved (Just c1) c2 rKind (canonicalizeResolvedLine c1 c2 rKind afterBracket) afterBracket normB
-                          [cOnly]
-                            | cOnly > 0 ->
-                                PredValidResolved (Just cOnly) cOnly rKind l afterBracket normB
+           in if isSubverted || isDebunked || isRetired || isConfirmed
+                then
+                  let rKind
+                        | isSubverted = ResSubverted
+                        | isDebunked = ResDebunked
+                        | isRetired = ResRetired
+                        | otherwise = ResConfirmed
+                   in case nums of
+                        (c1 : c2 : _)
+                          | c1 > 0 && c2 >= c1 ->
+                              PredValidResolved c1 c2 rKind (canonicalizeResolvedLine c1 c2 rKind afterBracket) afterBracket
+                        _ ->
+                          PredInvalidNotation l afterBracket
+                else
+                  let hasArrow = "->" `T.isInfixOf` inside || "→" `T.isInfixOf` inside
+                      isKeepActive =
+                        hasArrow
+                          && ( "active" `T.isInfixOf` inside
+                                 || "unresolv" `T.isInfixOf` inside
+                                 || "pending" `T.isInfixOf` inside
+                             )
+                      isActiveTag =
+                        ("predicted" `T.isInfixOf` inside || "active" `T.isInfixOf` inside)
+                          && not hasArrow
+                   in if isKeepActive
+                        then case nums of
+                          (c1 : _) | c1 > 0 -> PredValidKeepActive c1 l afterBracket
+                          _ -> PredInvalidNotation l afterBracket
+                        else case nums of
+                          [c1]
+                            | isActiveTag && c1 > 0 && not (T.null (T.strip afterBracket)) ->
+                                let topics = parseTopicsFromBracket insideRaw afterBracket
+                                    (clue, theory, rival) = splitPredictionComponents afterBracket
+                                    canonL = canonicalizeActiveLine c1 topics afterBracket
+                                 in PredValidActive c1 topics clue theory rival canonL afterBracket
                           _ ->
-                            PredInvalidNotation (listToMaybe nums) l afterBracket normB
-                  else
-                    let hasArrow = "->" `T.isInfixOf` inside || "→" `T.isInfixOf` inside
-                        isKeepActive =
-                          hasArrow
-                            && ( "active" `T.isInfixOf` inside
-                                   || "unresolv" `T.isInfixOf` inside
-                                   || "pending" `T.isInfixOf` inside
-                               )
-                        isActiveTag =
-                          ("predicted" `T.isInfixOf` inside || "active" `T.isInfixOf` inside)
-                            && not hasArrow
-                     in if isKeepActive
-                          then case nums of
-                            (c1 : _) | c1 > 0 -> PredValidKeepActive c1 l afterBracket
-                            _ -> PredInvalidNotation (listToMaybe nums) l afterBracket normB
-                          else case nums of
-                            [c1]
-                              | isActiveTag && c1 > 0 && not (T.null normB) ->
-                                  let topics = parseTopicsFromBracket insideRaw afterBracket
-                                      (clue, theory, rival) = splitPredictionComponents afterBracket
-                                      canonL = canonicalizeActiveLine c1 topics afterBracket
-                                   in PredValidActive c1 topics clue theory rival canonL afterBracket normB
-                            _ ->
-                              PredInvalidNotation (listToMaybe nums) l afterBracket normB
-
-isAuditHeaderLine :: Text -> Bool
-isAuditHeaderLine line =
-  let l = T.toLower line
-   in "reader sub-agent rewrote prediction or moved goalposts" `T.isInfixOf` l
-        || "invalid prediction tag or format in file" `T.isInfixOf` l
-
-isIndentedAuditSubLine :: Text -> Bool
-isIndentedAuditSubLine rawLine =
-  let trimmed = T.stripStart rawLine
-      leadingSpaces = T.length rawLine - T.length trimmed
-   in leadingSpaces >= 2
-        && ( "- *Before (" `T.isPrefixOf` trimmed
-               || "- *After (" `T.isPrefixOf` trimmed
-               || "- *Issue (" `T.isPrefixOf` trimmed
-               || "- *Invalid Line (" `T.isPrefixOf` trimmed
-               || "- *Action Required*:" `T.isPrefixOf` trimmed
-           )
-
-bodiesRelated :: Text -> Text -> Bool
-bodiesRelated b1 b2 =
-  let p1 = T.take 20 b1
-      p2 = T.take 20 b2
-   in not (T.null p1) && not (T.null p2) && (p1 `T.isInfixOf` b2 || p2 `T.isInfixOf` b1)
+                            PredInvalidNotation l afterBracket
 
 renderRecordActiveLine :: PredictionRecord -> Text
 renderRecordActiveLine pr =
@@ -1471,32 +1413,13 @@ renderRecordResolvedLine pr =
         PredStatusSubverted resC -> canonicalizeResolvedLine origC resC ResSubverted noteTxt
         PredStatusRetired resC -> canonicalizeResolvedLine origC resC ResRetired noteTxt
 
-renderAuditBlock :: FilePath -> FilePath -> Int -> Int -> Text -> Text -> Text
-renderAuditBlock curMemPath prevMemPath origC curIdx beforeTxt afterTxt =
-  let origStr = T.pack (padChunkNumber origC)
-      _ = curIdx
-      nextStr = T.pack (padChunkNumber (max 1 curIdx + 1))
-   in T.intercalate
-        "\n"
-        [ "- **[READER SUB-AGENT REWROTE PREDICTION OR MOVED GOALPOSTS IN FILE " <> T.pack curMemPath <> "]**"
-        , "  - *Before (in " <> T.pack prevMemPath <> ")*: " <> T.strip beforeTxt
-        , "  - *After (in " <> T.pack curMemPath <> ")*: " <> T.strip afterTxt
-        , "  - *Action Required*: Address this prediction rewrite or goalpost-shift openly in your next commentary! Do not rewrite existing active predictions in `=== PREDICTION UPDATES ===`: leave `[Predicted Chunk "
-            <> origStr
-            <> "]` unchanged for `prediction-judge` to evaluate, or if total unresolved predictions exceed the cap of 10, nominate it for conditional retirement using `- **[Predicted Chunk "
-            <> origStr
-            <> " -> RETIRED Chunk "
-            <> nextStr
-            <> "]** <reason>`."
-        ]
-
-renderTagFormatAuditBlock :: FilePath -> FilePath -> Text -> Text -> Text -> Text
-renderTagFormatAuditBlock curMemPath prevMemPath issueTxt invalidLineTxt actionTxt =
+renderTagFormatAuditBlock :: Text -> Text -> Text -> Text
+renderTagFormatAuditBlock issueTxt invalidLineTxt actionTxt =
   T.intercalate
     "\n"
-    [ "- **[INVALID PREDICTION TAG OR FORMAT IN FILE " <> T.pack curMemPath <> "]**"
-    , "  - *Issue (against " <> T.pack prevMemPath <> ")*: " <> T.strip issueTxt
-    , "  - *Invalid Line (in " <> T.pack curMemPath <> ")*: " <> T.strip invalidLineTxt
+    [ "- **[INVALID PREDICTION TAG OR FORMAT]**"
+    , "  - *Issue*: " <> T.strip issueTxt
+    , "  - *Line*: " <> T.strip invalidLineTxt
     , "  - *Action Required*: " <> T.strip actionTxt
     ]
 
@@ -1509,88 +1432,45 @@ isPredictionMentionedInComm commLower rawPredLine =
       tagNorm = T.toLower (T.strip insideBeforeParen)
    in not (T.null tagNorm) && tagNorm `T.isInfixOf` commLower
 
--- | Audits and applies `blind-reader`'s delta prediction updates from `=== PREDICTION UPDATES ===`:
+-- | Validates tag/format correctness and applies `blind-reader`'s delta prediction updates from `=== PREDICTION UPDATES ===`:
 -- 1. Adds the reader's 1 new prediction for `curIdx` (as `PredStatusActive`).
 -- 2. Collects any conditional retirement suggestions (`ResRetired`) into `pendingRetires :: [(Int, Text)]`
 --    WITHOUT retiring them yet (so `prediction-judge` evaluates all active predictions first!).
 -- 3. Rejects any self-judged `CONFIRMED`/`DEBUNKED`/`SUBVERTED` tags from `blind-reader` (since
 --    `prediction-judge` is solely responsible for judging active predictions).
 auditAndApplyPredictionUpdates
-  :: FilePath
-  -> Int
+  :: Int
   -> Int
   -> Int
   -> Text
   -> Bool
   -> Text
   -> [PredictionRecord]
-  -> [Text]
   -> Maybe Text
   -> ([PredictionRecord], [(Int, Text)], [Text], [Text])
-auditAndApplyPredictionUpdates sessionDir curIdx totalChunks chapNum chapTitle isRecordTurn commText prevRecords prevWarnings mPredUpdatesTxt =
-  let _ = sessionDir
-      curMemPath =
-        if curIdx > 0
-          then "archive" </> "memory" </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")
-          else "memory.md"
-      prevMemPath =
-        if curIdx > 1
-          then "archive" </> "memory" </> ("chunk_" ++ padChunkNumber (curIdx - 1) ++ ".md")
-          else "memory.md"
-      curStr = T.pack (padChunkNumber (max 1 curIdx))
+auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle isRecordTurn commText prevRecords mPredUpdatesTxt =
+  let curStr = T.pack (padChunkNumber (max 1 curIdx))
       nextStr = T.pack (padChunkNumber (max 1 curIdx + 1))
       prevActives = [pr | pr <- prevRecords, prStatus pr == PredStatusActive]
       prevActiveChunksSummary =
         case map (T.pack . padChunkNumber . prOriginChunk) prevActives of
           [] -> "none currently active in `memory.md`"
           cs -> T.intercalate ", " ["`[Predicted Chunk " <> c <> "]`" | c <- cs]
-      sampleOrigStr mGuessed =
-        case mGuessed of
-          Just g | any (\p -> prOriginChunk p == g) prevActives -> T.pack (padChunkNumber g)
-          _ ->
-            case prevActives of
-              (p : _) -> T.pack (padChunkNumber (prOriginChunk p))
-              [] ->
-                case mGuessed of
-                  Just g -> T.pack (padChunkNumber g)
-                  Nothing -> curStr
-      hadTagAuditPreviously =
-        any ("invalid prediction tag or format in file" `T.isInfixOf`) (map T.toLower prevWarnings)
+      sampleOrigStr =
+        case prevActives of
+          (p : _) -> T.pack (padChunkNumber (prOriginChunk p))
+          [] -> curStr
 
-      parseIncomingBullets mBody =
-        case mBody of
+      allBullets =
+        case mPredUpdatesTxt of
           Nothing -> []
           Just b ->
             [ parsePredictionLine trimmed
             | rawL <- T.lines b
             , let trimmed = T.strip rawL
             , not (isPlaceholderLine trimmed)
-            , not (isAuditHeaderLine trimmed)
-            , not (isIndentedAuditSubLine rawL)
             , "- " `T.isPrefixOf` trimmed || "* " `T.isPrefixOf` trimmed
             ]
-
-      explicitBullets = parseIncomingBullets mPredUpdatesTxt
-      isNothing Nothing = True
-      isNothing (Just _) = False
-      commPredBullets =
-        [ p
-        | isNothing mPredUpdatesTxt
-        , rawL <- T.lines commText
-        , let trimmed = T.strip rawL
-        , not (isPlaceholderLine trimmed)
-        , not (isAuditHeaderLine trimmed)
-        , not (isIndentedAuditSubLine rawL)
-        , "- " `T.isPrefixOf` trimmed || "* " `T.isPrefixOf` trimmed
-        , "[" `T.isInfixOf` trimmed && "]" `T.isInfixOf` trimmed
-        , p <- [parsePredictionLine trimmed]
-        , case p of
-            PredValidActive {} -> True
-            PredValidResolved _ _ ResRetired _ _ _ -> True
-            _ -> False
-        ]
-
-      allBullets = explicitBullets ++ commPredBullets
 
       activeBullets = [p | p@(PredValidActive {}) <- allBullets]
       resolvedBullets = [p | p@(PredValidResolved {}) <- allBullets]
@@ -1598,18 +1478,16 @@ auditAndApplyPredictionUpdates sessionDir curIdx totalChunks chapNum chapTitle i
 
       selfJudgedBullets =
         [ r
-        | r@(PredValidResolved _ _ rKind _ _ _) <- resolvedBullets
+        | r@(PredValidResolved _ _ rKind _ _) <- resolvedBullets
         , rKind /= ResRetired
         ]
       retireBullets =
         [ r
-        | r@(PredValidResolved _ _ ResRetired _ _ _) <- resolvedBullets
+        | r@(PredValidResolved _ _ ResRetired _ _) <- resolvedBullets
         ]
 
       selfJudgedAuditBlocks =
         [ renderTagFormatAuditBlock
-            curMemPath
-            prevMemPath
             "Self-judging predictions (`CONFIRMED`, `DEBUNKED`, `SUBVERTED`) is handled exclusively by the `prediction-judge` sub-agent; `blind-reader` must not emit resolution verdicts in `=== PREDICTION UPDATES ===`."
             (ppRawLine r)
             ( "Remove `CONFIRMED` / `DEBUNKED` / `SUBVERTED` lines from `=== PREDICTION UPDATES ===`. Only output your 1 new prediction (`- **[Predicted Chunk "
@@ -1622,107 +1500,76 @@ auditAndApplyPredictionUpdates sessionDir curIdx totalChunks chapNum chapTitle i
         ]
 
       classifyActiveBullet :: ParsedPrediction -> Either (Int, ParsedPrediction) (Maybe Text)
-      classifyActiveBullet p@(PredValidActive c1 _ _ _ _ canonL bodyAfter cNorm) =
-        case [pr | pr <- prevRecords, prOriginChunk pr == c1] of
-          (existingPr : _)
-            | c1 == curIdx -> Left (c1, p)
-            | cNorm == prNormBody existingPr || bodiesRelated cNorm (prNormBody existingPr) ->
-                Right Nothing
-            | otherwise ->
-                Right
+      classifyActiveBullet p@(PredValidActive c1 _ clue theory rival canonL bodyAfter)
+        | c1 /= curIdx && any (\pr -> prOriginChunk pr == c1) prevRecords =
+            -- Existing prediction re-emitted in `=== PREDICTION UPDATES ===`; ignore since existing records are immutable.
+            Right Nothing
+        | c1 /= curIdx =
+            let newCStr = T.pack (padChunkNumber c1)
+                trimmedBody = T.strip bodyAfter
+                issueDetail =
+                  "New active prediction logged on Chunk "
+                    <> curStr
+                    <> " was tagged with wrong chunk number `[Predicted Chunk "
+                    <> newCStr
+                    <> "]` instead of `[Predicted Chunk "
+                    <> curStr
+                    <> "]` (existing active tags: "
+                    <> prevActiveChunksSummary
+                    <> ")."
+             in Right
                   ( Just
-                      ( renderAuditBlock
-                          curMemPath
-                          prevMemPath
-                          c1
-                          curIdx
-                          (renderRecordActiveLine existingPr)
+                      ( renderTagFormatAuditBlock
+                          issueDetail
                           canonL
-                      )
-                  )
-          [] ->
-            if c1 == curIdx || (hadTagAuditPreviously && c1 == curIdx - 1 && c1 > 0) || (curIdx == 0 && c1 == 1)
-              then Left (c1, p)
-              else
-                let newCStr = T.pack (padChunkNumber c1)
-                    trimmedBody = T.strip bodyAfter
-                    issueDetail =
-                      "New active prediction logged on Chunk "
-                        <> curStr
-                        <> " was tagged with wrong chunk number `[Predicted Chunk "
-                        <> newCStr
-                        <> "]` instead of `[Predicted Chunk "
-                        <> curStr
-                        <> "]` (existing active tags: "
-                        <> prevActiveChunksSummary
-                        <> ")."
-                 in Right
-                      ( Just
-                          ( renderTagFormatAuditBlock
-                              curMemPath
-                              prevMemPath
-                              issueDetail
-                              canonL
-                              ( "Fix the bracket tag in `=== PREDICTION UPDATES ===`! Use `- **[Predicted Chunk "
-                                  <> nextStr
-                                  <> " | Topics: Tag1, Tag2]** "
-                                  <> trimmedBody
-                                  <> "` (when submitting Chunk "
-                                  <> nextStr
-                                  <> ") or `- **[Predicted Chunk "
-                                  <> curStr
-                                  <> " | Topics: Tag1, Tag2]** "
-                                  <> trimmedBody
-                                  <> "` (if updating Chunk "
-                                  <> curStr
-                                  <> ")."
-                              )
+                          ( "Use the current chunk number in the bracket tag: `- **[Predicted Chunk "
+                              <> nextStr
+                              <> " | Topics: Tag1, Tag2]** "
+                              <> trimmedBody
+                              <> "` (when submitting Chunk "
+                              <> nextStr
+                              <> ")."
                           )
                       )
+                  )
+        | T.null clue || T.null theory || T.null rival =
+            Right
+              ( Just
+                  ( renderTagFormatAuditBlock
+                      "New prediction is missing one or more required structured segments (`**Clue/Anomaly**`, `-> **Theory**`, or `(vs. **Plausible Rival**: ...)`)."
+                      canonL
+                      ( "Format every new prediction as `- **[Predicted Chunk "
+                          <> nextStr
+                          <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <detail> -> **Theory**: <primary bet> (vs. **Plausible Rival**: <rival explanation>)`."
+                      )
+                  )
+              )
+        | otherwise = Left (c1, p)
       classifyActiveBullet _ = Right Nothing
 
       classifyInvalidBullet :: ParsedPrediction -> Text
-      classifyInvalidBullet (PredInvalidNotation mGuessed rawInv bodyAfter cNorm) =
-        let mMatchedExisting =
-              case mGuessed of
-                Just g -> listToMaybe [pr | pr <- prevActives, prOriginChunk pr == g]
-                Nothing -> listToMaybe [pr | pr <- prevActives, bodiesRelated (prNormBody pr) cNorm]
-         in case mMatchedExisting of
-              Just existingPr ->
-                renderAuditBlock
-                  curMemPath
-                  prevMemPath
-                  (prOriginChunk existingPr)
-                  curIdx
-                  (renderRecordActiveLine existingPr)
-                  rawInv
-              Nothing ->
-                let origEx = sampleOrigStr mGuessed
-                    trimmedBody =
-                      if T.null (T.strip bodyAfter)
-                        then "**Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)"
-                        else T.strip bodyAfter
-                 in renderTagFormatAuditBlock
-                      curMemPath
-                      prevMemPath
-                      ("Malformed or unsupported prediction bracket tag in `=== PREDICTION UPDATES ===` (currently active tags: " <> prevActiveChunksSummary <> ").")
-                      rawInv
-                      ( "Fix or remove this line in `=== PREDICTION UPDATES ===`! To log your new prediction, use `- **[Predicted Chunk "
-                          <> nextStr
-                          <> " | Topics: Tag1, Tag2]** "
-                          <> trimmedBody
-                          <> "` (on Chunk "
-                          <> nextStr
-                          <> "). Or when at the 10-prediction cap, suggest a conditional retirement using `- **[Predicted Chunk "
-                          <> origEx
-                          <> " -> RETIRED Chunk "
-                          <> nextStr
-                          <> "]** <reason>`."
-                      )
+      classifyInvalidBullet (PredInvalidNotation rawInv bodyAfter) =
+        let trimmedBody =
+              if T.null (T.strip bodyAfter)
+                then "**Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)"
+                else T.strip bodyAfter
+         in renderTagFormatAuditBlock
+              ("Malformed or unsupported prediction bracket tag in `=== PREDICTION UPDATES ===` (currently active tags: " <> prevActiveChunksSummary <> ").")
+              rawInv
+              ( "Fix or remove this line in `=== PREDICTION UPDATES ===`! To log your new prediction, use `- **[Predicted Chunk "
+                  <> nextStr
+                  <> " | Topics: Tag1, Tag2]** "
+                  <> trimmedBody
+                  <> "` (on Chunk "
+                  <> nextStr
+                  <> "). Or when at the 10-prediction cap, suggest a conditional retirement using `- **[Predicted Chunk "
+                  <> sampleOrigStr
+                  <> " -> RETIRED Chunk "
+                  <> nextStr
+                  <> "]** <reason>`."
+              )
       classifyInvalidBullet p =
         renderTagFormatAuditBlock
-          curMemPath
-          prevMemPath
           "Unexpected prediction line format."
           (ppRawLine p)
           "Use standard `[Predicted Chunk XXXX | Topics: ...]` or (when above the 10-prediction cap) `[Predicted Chunk XXXX -> RETIRED Chunk YYYY]` notation."
@@ -1738,8 +1585,6 @@ auditAndApplyPredictionUpdates sessionDir curIdx totalChunks chapNum chapTitle i
             let cStr = T.pack (padChunkNumber c)
                 dupBlk =
                   renderTagFormatAuditBlock
-                    curMemPath
-                    prevMemPath
                     ("Multiple new predictions were tagged `[Predicted Chunk " <> cStr <> "]` on the same chunk (only 1 new prediction per chunk is allowed so each chunk tag remains unique).")
                     (ppRawLine p)
                     ("Keep only your single strongest prediction for Chunk " <> cStr <> " and remove the duplicate `- **[Predicted Chunk " <> cStr <> "]**` line(s).")
@@ -1752,7 +1597,7 @@ auditAndApplyPredictionUpdates sessionDir curIdx totalChunks chapNum chapTitle i
       (validNewActiveParsed, duplicateChunkAuditBlocks) = dedupNewByChunk [] rawValidNewPairs
 
       toPredictionRecord :: ParsedPrediction -> PredictionRecord
-      toPredictionRecord (PredValidActive c1 topics clue theory rival _ bodyAfter normB) =
+      toPredictionRecord (PredValidActive c1 topics clue theory rival _ bodyAfter) =
         PredictionRecord
           { prOriginChunk = c1
           , prChapterNumber = chapNum
@@ -1762,7 +1607,6 @@ auditAndApplyPredictionUpdates sessionDir curIdx totalChunks chapNum chapTitle i
           , prTheory = theory
           , prRival = rival
           , prRawBody = bodyAfter
-          , prNormBody = normB
           , prStatus = PredStatusActive
           , prResolutionNote = Nothing
           }
@@ -1772,46 +1616,21 @@ auditAndApplyPredictionUpdates sessionDir curIdx totalChunks chapNum chapTitle i
       newActiveRecords = map toPredictionRecord validNewActiveParsed
       newActiveOriginChunks = map prOriginChunk newActiveRecords
 
-      recordsWithNew =
-        [ pr
-        | pr <- prevRecords
-        , prOriginChunk pr `notElem` newActiveOriginChunks
-        ]
-          ++ newActiveRecords
-
-      -- Support same-chunk retirement where the reader wrote only `- **[Predicted Chunk NNNN -> RETIRED Chunk NNNN]** <body>`
-      -- We add it as an ACTIVE prediction first so `prediction-judge` still evaluates it on the merits!
-      sameChunkRetireSynthesized =
-        [ let (clue, theory, rival) = splitPredictionComponents (ppBodyAfterBracket r)
-              topics = extractFallbackTopics (ppBodyAfterBracket r)
-           in PredictionRecord
-                { prOriginChunk = curIdx
-                , prChapterNumber = chapNum
-                , prChapterTitle = chapTitle
-                , prTopics = topics
-                , prClue = clue
-                , prTheory = theory
-                , prRival = rival
-                , prRawBody = ppBodyAfterBracket r
-                , prNormBody = ppNormBody r
-                , prStatus = PredStatusActive
-                , prResolutionNote = Nothing
-                }
-        | r@(PredValidResolved (Just origC) resC ResRetired _ _ _) <- retireBullets
-        , origC == curIdx && resC == curIdx
-        , curIdx `notElem` map prOriginChunk recordsWithNew
-        ]
-
       candidateRecords =
-        sortOn prOriginChunk (recordsWithNew ++ sameChunkRetireSynthesized)
+        sortOn
+          prOriginChunk
+          ( [ pr
+            | pr <- prevRecords
+            , prOriginChunk pr `notElem` newActiveOriginChunks
+            ]
+              ++ newActiveRecords
+          )
+
+      activePoolBeforeJudge = [pr | pr <- candidateRecords, prStatus pr == PredStatusActive]
 
       findMatchingRetireTarget :: ParsedPrediction -> Maybe PredictionRecord
-      findMatchingRetireTarget (PredValidResolved (Just origC) _ _ _ _ rNorm) =
-        case [pr | pr <- candidateRecords, prOriginChunk pr == origC] of
-          (p : _) -> Just p
-          [] -> listToMaybe [pr | pr <- candidateRecords, bodiesRelated (prNormBody pr) rNorm]
-      findMatchingRetireTarget (PredValidResolved Nothing _ _ _ _ rNorm) =
-        listToMaybe [pr | pr <- candidateRecords, bodiesRelated (prNormBody pr) rNorm]
+      findMatchingRetireTarget (PredValidResolved origC _ _ _ _) =
+        listToMaybe [pr | pr <- activePoolBeforeJudge, prOriginChunk pr == origC]
       findMatchingRetireTarget _ = Nothing
 
       dedupRetireByOrigin _ [] = []
@@ -1833,32 +1652,25 @@ auditAndApplyPredictionUpdates sessionDir curIdx totalChunks chapNum chapTitle i
         ]
 
       unmatchedRetireAuditBlocks =
-        [ let origEx = sampleOrigStr (ppResOrigChunk r)
+        [ let origC = ppResOrigChunk r
               msg =
-                case ppResOrigChunk r of
-                  Just origC ->
-                    "Conditional retirement tag references `[Predicted Chunk "
-                      <> T.pack (padChunkNumber origC)
-                      <> "]`, which does not match any active prediction in `memory.md` (currently active tags: "
-                      <> prevActiveChunksSummary
-                      <> ")."
-                  Nothing ->
-                    "Conditional retirement tag is missing its origin chunk number and did not match any active prediction (currently active tags: "
-                      <> prevActiveChunksSummary
-                      <> ")."
+                "Conditional retirement tag references `[Predicted Chunk "
+                  <> T.pack (padChunkNumber origC)
+                  <> "]`, which does not match any active prediction in `memory.md` (currently active tags: "
+                  <> prevActiveChunksSummary
+                  <> ")."
               act =
-                "Only nominate predictions that exist in `memory.md` ("
+                "Only nominate predictions that are currently active in `memory.md` ("
                   <> prevActiveChunksSummary
                   <> ") using `- **[Predicted Chunk "
-                  <> origEx
+                  <> sampleOrigStr
                   <> " -> RETIRED Chunk "
                   <> curStr
                   <> "]** <reason>`."
-           in renderTagFormatAuditBlock curMemPath prevMemPath msg (ppRawLine r) act
+           in renderTagFormatAuditBlock msg (ppRawLine r) act
         | r <- unmatchedRetires
         ]
 
-      activePoolBeforeJudge = [pr | pr <- candidateRecords, prStatus pr == PredStatusActive]
       totalUnresolvedBeforeJudge = length activePoolBeforeJudge
       allowedRetireCount = max 0 (totalUnresolvedBeforeJudge - 10)
       (validRetireCandidates, prematureRetirements) = splitAt allowedRetireCount matchedRetires
@@ -1875,16 +1687,13 @@ auditAndApplyPredictionUpdates sessionDir curIdx totalChunks chapNum chapTitle i
 
       prematureRetireAuditBlocks =
         [ let origStr = T.pack (padChunkNumber origC)
-              origLine = renderRecordActiveLine targetPr
-           in renderTagFormatAuditBlock
-                curMemPath
-                prevMemPath
-                ("Prediction `[Predicted Chunk " <> origStr <> "]` was nominated for `RETIRED` when total unresolved predictions (" <> jsonInt totalUnresolvedBeforeJudge <> "/10) did not exceed the cap of 10.")
-                (ppRawLine r)
-                ( "Only nominate predictions for conditional retirement (`RETIRED`) when total unresolved predictions (including your new prediction) exceed 10. It remains active in `memory.md` (`"
-                    <> origLine
-                    <> "`) for `prediction-judge` to evaluate."
-                )
+               in renderTagFormatAuditBlock
+                    ("Prediction `[Predicted Chunk " <> origStr <> "]` was nominated for `RETIRED` when total unresolved predictions (" <> jsonInt totalUnresolvedBeforeJudge <> "/10) did not exceed the cap of 10.")
+                    (ppRawLine r)
+                    ( "Only nominate predictions for conditional retirement (`RETIRED`) when total unresolved predictions (including your new prediction) exceed 10. It remains active in `memory.md` (`"
+                        <> renderRecordActiveLine targetPr
+                        <> "`) for `prediction-judge` to evaluate."
+                    )
         | (origC, r, targetPr) <- prematureRetirements
         ]
 
@@ -1896,8 +1705,6 @@ auditAndApplyPredictionUpdates sessionDir curIdx totalChunks chapNum chapTitle i
       missingNewPredAuditBlocks
         | isRecordTurn && curIdx >= 1 && curIdx < totalChunks && not hasNewForCur =
             [ renderTagFormatAuditBlock
-                curMemPath
-                prevMemPath
                 ("No new prediction was logged for Chunk " <> curStr <> " (every chunk before the final chunk must log 1 new non-softball, multi-chapter prediction, capped at 10 unresolved predictions).")
                 ("*(Missing `- **[Predicted Chunk " <> curStr <> " | Topics: Tag1, Tag2]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` in `=== PREDICTION UPDATES ===`)*")
                 ( "On Chunk "
@@ -1919,8 +1726,7 @@ auditAndApplyPredictionUpdates sessionDir curIdx totalChunks chapNum chapTitle i
           ++ missingNewPredAuditBlocks
 
       commLower = T.toLower commText
-      turnEvents =
-        map renderRecordActiveLine (newActiveRecords ++ sameChunkRetireSynthesized)
+      turnEvents = map renderRecordActiveLine newActiveRecords
       trackerUpdateLines =
         [ evLine
         | evLine <- turnEvents
@@ -1954,28 +1760,19 @@ applyJudgeVerdicts
   -> Text
   -> ([PredictionRecord], [Text], [Text])
 applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
-  let curMemPath =
-        if curIdx > 0
-          then "archive" </> "memory" </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")
-          else "memory.md"
-      prevMemPath =
-        if curIdx > 1
-          then "archive" </> "memory" </> ("chunk_" ++ padChunkNumber (curIdx - 1) ++ ".md")
-          else "memory.md"
-      nextStr = T.pack (padChunkNumber (max 1 curIdx + 1))
+  let nextStr = T.pack (padChunkNumber (max 1 curIdx + 1))
       judgeBody = extractJudgeSection rawJudgeTxt
       parsedLines =
         [ parsePredictionLine trimmed
         | rawL <- T.lines judgeBody
         , let trimmed = T.strip rawL
         , not (isPlaceholderLine trimmed)
-        , not (isAuditHeaderLine trimmed)
         , "- " `T.isPrefixOf` trimmed || "* " `T.isPrefixOf` trimmed
         , "[" `T.isInfixOf` trimmed && "]" `T.isInfixOf` trimmed
         ]
       resolvedVerdicts =
         [ r
-        | r@(PredValidResolved _ _ rKind _ _ _) <- parsedLines
+        | r@(PredValidResolved _ _ rKind _ _) <- parsedLines
         , rKind `elem` [ResConfirmed, ResDebunked, ResSubverted]
         ]
       keepActiveVerdicts =
@@ -1984,12 +1781,8 @@ applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
         ]
 
       findJudgeTarget :: ParsedPrediction -> Maybe PredictionRecord
-      findJudgeTarget (PredValidResolved (Just origC) _ _ _ _ rNorm) =
-        case [pr | pr <- prevRecords, prOriginChunk pr == origC] of
-          (p : _) -> Just p
-          [] -> listToMaybe [pr | pr <- prevRecords, bodiesRelated (prNormBody pr) rNorm]
-      findJudgeTarget (PredValidResolved Nothing _ _ _ _ rNorm) =
-        listToMaybe [pr | pr <- prevRecords, bodiesRelated (prNormBody pr) rNorm]
+      findJudgeTarget (PredValidResolved origC _ _ _ _) =
+        listToMaybe [pr | pr <- prevRecords, prOriginChunk pr == origC]
       findJudgeTarget _ = Nothing
 
       dedupByOrigin _ [] = []
@@ -2071,8 +1864,6 @@ applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
         | finalActiveCount > 10 =
             let excess = finalActiveCount - 10
              in [ renderTagFormatAuditBlock
-                    curMemPath
-                    prevMemPath
                     ("Active prediction slate has " <> jsonInt finalActiveCount <> " unresolved predictions after `prediction-judge` rulings, exceeding the maximum cap of 10.")
                     ("*(Active pool has " <> jsonInt finalActiveCount <> "/10 unresolved predictions — " <> jsonInt excess <> " over the cap of 10)*")
                     ( "On your next turn (Chunk "
@@ -2166,9 +1957,9 @@ parseMemorySections txt = Map.fromListWith (\new old -> old <> "\n" <> new) (go 
            in flush curH acc ++ go (classifyMemoryHeading hName) [] ls
       | otherwise = go curH (l : acc) ls
 
-mergeCuratedNarrativeMemory :: [(Text, Text)] -> Maybe Text -> ([(Text, Text)], Maybe Text)
+mergeCuratedNarrativeMemory :: [(Text, Text)] -> Maybe Text -> [(Text, Text)]
 mergeCuratedNarrativeMemory prevSections Nothing =
-  (if null prevSections then defaultCuratedMemory else prevSections, Nothing)
+  if null prevSections then defaultCuratedMemory else prevSections
 mergeCuratedNarrativeMemory prevSections (Just memTxt) =
   let incoming = parseMemorySections memTxt
       baseSections =
@@ -2176,22 +1967,18 @@ mergeCuratedNarrativeMemory prevSections (Just memTxt) =
         | (secName, oldBody) <- if null prevSections then defaultCuratedMemory else prevSections
         , secName `elem` map fst defaultCuratedMemory
         ]
-      mergedSections =
-        [ (secName, mergedBody)
-        | (secName, oldBody) <- baseSections
-        , let mergedBody =
-                case Map.lookup secName incoming of
-                  Nothing -> oldBody
-                  Just newBody
-                    | isPlaceholderSection newBody && not (isPlaceholderSection oldBody) -> oldBody
-                    | otherwise -> newBody
-        ]
-      mFallbackPreds = Map.lookup "_FallbackPredictions_" incoming
-   in (mergedSections, mFallbackPreds)
+   in [ (secName, mergedBody)
+      | (secName, oldBody) <- baseSections
+      , let mergedBody =
+              case Map.lookup secName incoming of
+                Nothing -> oldBody
+                Just newBody
+                  | isPlaceholderSection newBody && not (isPlaceholderSection oldBody) -> oldBody
+                  | otherwise -> newBody
+      ]
 
 resolveAndAuditTurn
-  :: FilePath
-  -> Int
+  :: Int
   -> Int
   -> Int
   -> Text
@@ -2202,39 +1989,13 @@ resolveAndAuditTurn
   -> [Text]
   -> Maybe Text
   -> Maybe Text
-  -> IO ([(Text, Text)], [PredictionRecord], [(Int, Text)], [Text], [Text])
-resolveAndAuditTurn sessionDir curIdx totalChunks chapNum chapTitle isRecordTurn commText prevSections prevPreds prevWarns mPredUpdates mMemTxt = do
-  mEffectiveMem <-
-    case mMemTxt of
-      Just m -> pure (Just m)
-      Nothing -> do
-        let memPath = sessionDir </> "memory.md"
-        exists <- doesFileExist memPath
-        if not exists
-          then pure Nothing
-          else do
-            diskTxt <- readTextFileSafe memPath
-            let incoming = parseMemorySections diskTxt
-                baseSections = if null prevSections then defaultCuratedMemory else prevSections
-                hasDiskDiff =
-                  any
-                    ( \(secName, oldBody) ->
-                        case Map.lookup secName incoming of
-                          Nothing -> False
-                          Just diskBody -> T.strip diskBody /= T.strip oldBody
-                    )
-                    baseSections
-            pure (if hasDiskDiff then Just diskTxt else Nothing)
-  let (curated', mFallbackPreds) = mergeCuratedNarrativeMemory prevSections mEffectiveMem
-      effectivePredUpdates =
-        case mPredUpdates of
-          Just pu -> Just pu
-          Nothing -> mFallbackPreds
+  -> ([(Text, Text)], [PredictionRecord], [(Int, Text)], [Text], [Text])
+resolveAndAuditTurn curIdx totalChunks chapNum chapTitle isRecordTurn commText prevSections prevPreds prevWarns mPredUpdates mMemTxt =
+  let curated' = mergeCuratedNarrativeMemory prevSections mMemTxt
       (preds', pendingRetires, auditBlocks, trackerUpdates) =
-        if isRecordTurn || isJust effectivePredUpdates
+        if isRecordTurn || isJust mPredUpdates
           then
             auditAndApplyPredictionUpdates
-              sessionDir
               curIdx
               totalChunks
               chapNum
@@ -2242,10 +2003,9 @@ resolveAndAuditTurn sessionDir curIdx totalChunks chapNum chapTitle isRecordTurn
               isRecordTurn
               commText
               prevPreds
-              prevWarns
-              effectivePredUpdates
+              mPredUpdates
           else (prevPreds, [], prevWarns, [])
-  pure (curated', preds', pendingRetires, auditBlocks, trackerUpdates)
+   in (curated', preds', pendingRetires, auditBlocks, trackerUpdates)
 
 renderCuratedSections :: [(Text, Text)] -> Text
 renderCuratedSections sections =
@@ -4307,22 +4067,20 @@ cmdRecord opts = do
           Just m -> (metaChapterNumber m, metaChapterTitle m, metaPartInChapter m, metaPartsInChapter m)
           Nothing -> (1, "Chapter ?", 1, 1)
 
-  (curated', preds', pendingRetires, auditBlocks, trackerUpdates) <-
-    resolveAndAuditTurn
-      sessionDir
-      curIdx
-      (stTotalChunks st)
-      chapNum
-      chapTitle
-      True
-      cleanedCommText
-      (stCuratedMemory st)
-      (stPredictions st)
-      (stPredictionAuditWarnings st)
-      mParsedPredUpdates
-      finalMem
-
-  let summaryTxt = fromMaybe (extractFallbackSummary commText) mParsedSummary
+      (curated', preds', pendingRetires, auditBlocks, trackerUpdates) =
+        resolveAndAuditTurn
+          curIdx
+          (stTotalChunks st)
+          chapNum
+          chapTitle
+          True
+          cleanedCommText
+          (stCuratedMemory st)
+          (stPredictions st)
+          (stPredictionAuditWarnings st)
+          mParsedPredUpdates
+          finalMem
+      summaryTxt = fromMaybe (extractFallbackSummary commText) mParsedSummary
       chapDisplay
         | chapNum == 0 = chapTitle
         | "chapter " `T.isPrefixOf` T.toLower (T.strip chapTitle) = chapTitle
@@ -4622,20 +4380,19 @@ cmdDiscuss opts = do
   unless entryExists $
     die ("Error: Recorded entry file not found: " ++ entryFile)
 
-  (curated', preds', _, auditBlocks, trackerUpdates) <-
-    resolveAndAuditTurn
-      sessionDir
-      curIdx
-      (stTotalChunks st)
-      chapNum
-      chapTitle
-      False
-      replyText
-      (stCuratedMemory st)
-      (stPredictions st)
-      (stPredictionAuditWarnings st)
-      mParsedPredUpdates
-      finalMem
+  let (curated', preds', _, auditBlocks, trackerUpdates) =
+        resolveAndAuditTurn
+          curIdx
+          (stTotalChunks st)
+          chapNum
+          chapTitle
+          False
+          replyText
+          (stCuratedMemory st)
+          (stPredictions st)
+          (stPredictionAuditWarnings st)
+          mParsedPredUpdates
+          finalMem
 
   existingEntry <- readTextFileSafe entryFile
   let baseEntry = stripTrailingEntryRule existingEntry

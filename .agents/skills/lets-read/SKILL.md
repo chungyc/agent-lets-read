@@ -161,7 +161,7 @@ For each chunk to be read:
 4. **Invoke or Message `prediction-judge` AND `commentary-critic` in Parallel**:
    - Read `<session_dir>/current_judge_prompt.md` and `<session_dir>/current_critic_prompt.md`.
    - **In the same turn**, dispatch **both** subagents in parallel:
-     - **First chunk (or whenever `blind-reader` was rotated via `"rotate_subagent_recommended": true`)**: Call `invoke_subagent` for `prediction-judge` (`Role: "Impartial Prediction Judge"`) and `invoke_subagent` for `commentary-critic` (`Role: "Commentary Fact-Checker & Coach"`).
+     - **First chunk (or whenever `blind-reader` was rotated via `"rotate_subagent_recommended": true`)**: Call `invoke_subagent` for `prediction-judge` (`Role: "Impartial Prediction Judge"`) and `invoke_subagent` for `commentary-critic` (`Role: "Commentary Critic"`).
      - **Consecutive chunks**: Call `send_message` to the active `prediction-judge` `conversationId` and `send_message` to the active `commentary-critic` `conversationId`.
    - Wait for both subagents to finish before running `LetsRead.hs judge`.
 

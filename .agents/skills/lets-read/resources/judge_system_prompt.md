@@ -16,7 +16,7 @@ Your sole job is to read the newly unlocked story passage (`<session_dir>/curren
 
 ---
 
-## Adjudication Standards (Impartial, Literal, Zero Goalpost-Shifting)
+## Adjudication Standards (Impartial, Literal, Text-Grounded)
 
 Each active prediction has the structure:
 `- **[Predicted Chunk XXXX | Topics: ...]** **Clue/Anomaly**: <detail> -> **Theory**: <primary bet> (vs. **Plausible Rival**: <rival explanation>)`
