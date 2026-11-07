@@ -1,5 +1,6 @@
 # Reader Memory & Notes: <Story Title>
 
+*Session Directory*: `<session_dir>`
 *Reader Persona*: <Persona Description>
 *Progress*: Chunk <X> / <Total> (<Chapter Title>)
 
@@ -14,7 +15,7 @@
 - *(Completed arc archive files `archive/L1_XXXX.md` appear here as the story progresses.)*
 
 ### Current & Recent Arc Chunks
-- **chunk_0001** (Ch. 1: <Chapter Title>, Part 1/1): <1-line summary from `=== CHUNK SUMMARY ===`> ([story](file://<session_dir>/chunks/chunk_0001.md) | [entry](file://<session_dir>/entries/chunk_0001.md) | [memory](file://<session_dir>/archive/memory/chunk_0001.md))
+- **chunk_0001** (Ch. 1: <Chapter Title>, Part 1/1): <1-line summary from `=== CHUNK SUMMARY ===`> ([story](chunks/chunk_0001.md) | [entry](entries/chunk_0001.md) | [memory](archive/memory/chunk_0001.md))
 
 ## Characters & Relationships
 - **<Core Cast Name> (Persistent)**: <Compact 1-line role, evolving psychology, key relationships, and current status (4–6 core cast bullets total; keep persistent across temporary camera cuts)>
@@ -23,14 +24,14 @@
 ## Active Mysteries & Unanswered Questions
 - <What is still unexplained or suspicious in the narrative?>
 
-## Active Predictions & Theories
-- **[Predicted Chunk XXXX]** **Clue/Anomaly**: <concise 1-clause detail (log 1 new non-softball, multi-chapter prediction per chunk; cap active unresolved predictions at 10)> -> **Theory**: <your direct primary bet> (vs. **Plausible Rival**: <concise rival explanation>)
+## Active Prediction Slate & Index (Auto-Maintained by Gatekeeper)
+*(Do not re-emit this section in `=== UPDATED MEMORY ===`; submit only this turn's new prediction and any status transitions in `=== PREDICTION UPDATES ===`.)*
 
-## Hall of Fame & Shame (Major Hits & Misses)
-- **[Predicted Chunk XXXX -> CONFIRMED Chunk YYYY]** <1-line record (<= 200 chars after bracket header) of confirmed long-range predictions (`YYYY - XXXX >= 3`; `<3`-chunk confirmations are tagged `Short-Horizon <3 Chunks — No Hit Credit`). Preserve exact bracket headers and tags verbatim; never delete `CONFIRMED`/`DEBUNKED`/`SUBVERTED` entries.>
-- **[Predicted Chunk XXXX -> DEBUNKED Chunk YYYY]** <1-line record (<= 200 chars after bracket header) of debunked or falsified predictions (`YYYY - XXXX >= 1`)>
-- **[Predicted Chunk XXXX -> SUBVERTED Chunk YYYY]** <1-line record (<= 200 chars after bracket header) of predictions fooled by an authorial fake-out or subversion (`YYYY - XXXX >= 1`)>
-- **[Predicted Chunk XXXX -> RETIRED Chunk YYYY]** <Include when retiring a prediction (most likely to never be resolved or most likely to be debunked) to keep `## Active Predictions & Theories` at <= 10 unresolved predictions; `LetsRead.hs` records it in the commentary entry and automatically prunes `RETIRED` lines from `memory.md`.>
+- **Running Tally**: 0 logged | **0 Major Hits** (>=3 chunks) | 0 Short-Horizon (<3 chunks) | **0 Subverted** | **0 Debunked** | 0 Retired | **0/10 Active**
+- **Prediction Indices (On-Demand `read_file`)**: [Chronological Index](predictions/by_chronology.md) | [Semantic Topic Index](predictions/by_topic.md) | [Prediction Files (`pred_XXXX.md`)](predictions/)
+
+### Currently Active Unresolved Predictions (0/10)
+- **[Predicted Chunk XXXX | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <concise 1-clause detail> -> **Theory**: <your direct primary bet> (vs. **Plausible Rival**: <concise rival explanation>) ([details](predictions/pred_XXXX.md))
 
 ## Notable Quotes, Themes & Running Jokes
 - **Reader Craft Directives & Running Gags (Persistent)**: <1-line ledger (<= 300 chars) of active style/craft feedback from `Reader Discussion` and thread-wide running jokes; update in place, never delete during compaction>
