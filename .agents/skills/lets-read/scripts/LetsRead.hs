@@ -188,7 +188,8 @@ loadVaultChunk path idx = do
 saveState :: FilePath -> SessionState -> IO ()
 saveState sessionDir st = do
   BS.writeFile (sessionDir </> ".state.bin") (BSL.toStrict (encode st))
-  TIO.writeFile (sessionDir </> "state.json") (renderStateJson sessionDir st)
+  hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
+  TIO.writeFile (sessionDir </> "state.json") (renderStateJson sessionDir hasWrapup st)
 
 loadState :: FilePath -> IO SessionState
 loadState sessionDir = do
@@ -250,11 +251,12 @@ renderMetaJson (Just m) =
 
 orchestratorRuleText :: Text
 orchestratorRuleText =
-  "NEVER run python, python3, or ad-hoc shell scripts; NEVER impersonate blind-reader, prediction-judge, or commentary-critic, answer user story questions in your own voice, edit memory.md directly, or paste current_chunk.md/memory.md inline into prompts. Always pass the prompt from <session_dir>/current_prompt.md to blind-reader, record with 'lets-read record', then pass <session_dir>/current_judge_prompt.md to prediction-judge and <session_dir>/current_critic_prompt.md to commentary-critic in parallel and finalize with 'lets-read judge --session <dir> --subagent-log <judge_log> --critic-log <critic_log>' (or record user discussions with 'lets-read discuss')."
+  "NEVER run python, python3, or ad-hoc shell scripts; NEVER impersonate blind-reader, prediction-judge, or commentary-critic, answer user story questions in your own voice, edit memory.md directly, or paste current_chunk.md/memory.md inline into prompts. Always pass the prompt from <session_dir>/current_prompt.md to blind-reader, record with 'lets-read record', then pass <session_dir>/current_judge_prompt.md to prediction-judge and <session_dir>/current_critic_prompt.md to commentary-critic in parallel and finalize with 'lets-read judge --session <dir> --subagent-log <judge_log> --critic-log <critic_log>' (and after the final chunk is judged, run 'lets-read next' + 'lets-read record' for the Final Wrapup Round, or record user discussions with 'lets-read discuss')."
 
-renderStateJson :: FilePath -> SessionState -> Text
-renderStateJson sessionDir st =
-  let isFin = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
+renderStateJson :: FilePath -> Bool -> SessionState -> Text
+renderStateJson sessionDir hasWrapup st =
+  let storyChunksDone = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
+      isFin = storyChunksDone && hasWrapup
       activeCnt = length [pr | pr <- stPredictions st, prStatus pr == PredStatusActive]
       totalPreds = length (stPredictions st)
    in jsonObject
@@ -268,6 +270,7 @@ renderStateJson sessionDir st =
         , ("current_recorded", jsonBool (stCurrentRecorded st))
         , ("current_judged", jsonBool (stCurrentJudged st))
         , ("completed_chunks_count", jsonInt (length (stCompletedChunks st)))
+        , ("wrapup_recorded", jsonBool hasWrapup)
         , ("is_finished", jsonBool isFin)
         , ("active_predictions_count", jsonInt activeCnt)
         , ("total_predictions_count", jsonInt totalPreds)
@@ -282,11 +285,12 @@ renderStateJson sessionDir st =
         , ("chunks_dir", jsonStr (T.pack (sessionDir </> "chunks")))
         , ("story_so_far_file", jsonStr (T.pack (sessionDir </> "story_so_far.md")))
         , ("entries_dir", jsonStr (T.pack (sessionDir </> "entries")))
+        , ("wrapup_file", if hasWrapup then jsonStr (T.pack (sessionDir </> "entries" </> "wrapup.md")) else "null")
         , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
         , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
         , ("predictions_by_chronology_file", jsonStr (T.pack (sessionDir </> "predictions" </> "by_chronology.md")))
         , ("predictions_by_topic_file", jsonStr (T.pack (sessionDir </> "predictions" </> "by_topic.md")))
-        , ("hall_of_fame_file", if isFin then jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")) else "null")
+        , ("hall_of_fame_file", if storyChunksDone then jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")) else "null")
         , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
         , ("log_file", jsonStr (T.pack (sessionDir </> "lets_read_log.md")))
         , ("orchestrator_rule", jsonStr orchestratorRuleText)
@@ -2955,9 +2959,9 @@ countActivePredictions preds =
 renderPredictionSlateNote :: Int -> Int -> Int -> Text
 renderPredictionSlateNote curIdx totalChunks activeCount
   | curIdx >= totalChunks =
-      "*Prediction Slate*: Final chunk ("
+      "*Prediction Slate*: Final story chunk ("
         <> jsonInt activeCount
-        <> "/10 active unresolved predictions in `memory.md`). React in `=== COMMENTARY ===` to any `prediction-judge` rulings from the previous chunk (`### Latest Prediction Judge Rulings` in `memory.md`). No new prediction is required on the final chunk (`prediction-judge` will evaluate all remaining active predictions against the finale; output `- None (story complete!).` in `=== PREDICTION UPDATES ===`)."
+        <> "/10 active unresolved predictions in `memory.md`). Focus `=== COMMENTARY ===` purely on your live reaction to this final story passage (and any `prediction-judge` rulings from the previous chunk) — do NOT write a whole-story retrospective yet, as a dedicated Final Wrapup Round will follow after `prediction-judge` evaluates the finale! No new prediction is required on the final chunk (`prediction-judge` will evaluate all remaining active predictions against the finale; output `- None (story complete!).` in `=== PREDICTION UPDATES ===`)."
   | activeCount < 10 =
       let curPad = T.pack (padChunkNumber curIdx)
        in "*Prediction Slate*: "
@@ -3315,6 +3319,52 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
                , "4. Prediction Quota, Cross-Thread Synthesis ($A + B -> C$), Conciseness Cap & Conditional Retirement: Do NOT emit `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` tags (`prediction-judge` evaluates all active predictions after your turn). On every chunk before the final chunk, log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total after bracket tag: `- **[Predicted Chunk " <> curPad <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <detail A in current_chunk.md + earlier thread/mystery/canon B, <= 120 chars, no inline quotes> -> **Theory**: <direct non-linear outcome C, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`) in both `=== COMMENTARY ===` and `=== PREDICTION UPDATES ===`. Never log single-beat linear extrapolations (\"X happened here so more of X will happen later\"). If `memory.md` already has 10/10 active predictions, also nominate 1 conditional retirement candidate (`- **[Predicted Chunk XXXX -> RETIRED Chunk " <> curPad <> "]** <reason>`); it will only be retired if >10 remain active after `prediction-judge`'s verdicts."
                , "5. Stay *inside* the story in your active Persona (Zero Play-by-Play Recaps unless Persona explicitly calls for recaps): curate 3–5 standout moments using tight 2–6 line verbatim `>` blockquotes (`[...]` to pair setup with punchline; never quote half a scene and narrate the rest in prose). Do not write multi-sentence plot transitions bridging scenes (use at most a 1-clause conversational hook before the next `>` quote), and whenever referencing an unquoted detail, presuppose the beat (talk back to the character, question the motive, or subordinate the detail inside your reaction) rather than making \"what the character did/said\" the main clause. Avoid `# Chunk X/Y` top headers, multiple `###` subheadings (save `### Theory & Mystery Notes` for the end), double-telling/sportscasting, review jargon (\"masterclass\"/\"emotional axis\"), and textbook truisms. Verify earlier-chapter callbacks via `memory.md` / `chunks/chunk_XXXX.md`, and quarantine external `search_web` canon lore from in-story facts."
                , "6. Output all four required sections: `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===` (1 line), `=== PREDICTION UPDATES ===` (new prediction + optional conditional `RETIRED` nomination), and `=== UPDATED MEMORY ===` (only the 4 narrative sections)."
+               ]
+  TIO.writeFile promptPath promptText
+  pure promptPath
+
+writeWrapupPromptFile :: FilePath -> SessionState -> IO FilePath
+writeWrapupPromptFile sessionDir st = do
+  absSession <- canonicalizePath sessionDir
+  let criticFeedbackPath = absSession </> "critic_feedback.md"
+  hasCriticFeedback <- doesFileExist criticFeedbackPath
+  let totalChunks = stTotalChunks st
+      criticContextLines =
+        if hasCriticFeedback
+          then
+            [ "- Peer Critic & Fact-Check Notes from Chunk "
+                <> jsonInt totalChunks
+                <> " (MANDATORY READ — verify disputed facts against primary source; overrule if wrong; apply style coaching silently): "
+                <> T.pack criticFeedbackPath
+            ]
+          else []
+      promptPath = sessionDir </> "current_prompt.md"
+      promptText =
+        T.unlines $
+          [ "All "
+              <> jsonInt totalChunks
+              <> " story chunks of *"
+              <> stTitle st
+              <> "* have been read and `prediction-judge` has rendered its final rulings! Please write your dedicated **Final Wrapup & Retrospective** for the Let's Read session."
+          , "- Reader Memory File (mandatory read — includes `### Latest Prediction Judge Rulings` from the finale): " <> T.pack (absSession </> "memory.md")
+          , "- Prediction Hall of Fame & Shame (mandatory read — complete final scoreboard, Major Hits, Subverted Twists, and Debunked Misses): " <> T.pack (absSession </> "predictions" </> "hall_of_fame.md")
+          ]
+            ++ criticContextLines
+            ++ [ "- Multi-Level Memory & Index Archive (on-demand read_file): " <> T.pack (absSession </> "archive")
+               , "- Predictions Directory (on-demand read_file): " <> T.pack (absSession </> "predictions")
+               , "- Unlocked Story Chunks Archive (on-demand read_file): " <> T.pack (absSession </> "chunks")
+               , "- Previous Commentary Entries (on-demand read_file): " <> T.pack (absSession </> "entries")
+               , "- Active Persona: " <> expandPersonaPreset (stPersona st)
+               , ""
+               , "Key Instructions for the Final Wrapup Round:"
+               , "1. Read `memory.md` and `predictions/hall_of_fame.md` first (plus `critic_feedback.md` if listed above, and any `archive/L1_XXXX.md` or `predictions/pred_XXXX.md` files you want to reference)."
+               , "2. Stay in your active Persona as a conversational forum liveblogger wrapping up a thread (do NOT write a stiff academic essay or use banned review jargon like \"masterclass\" or \"tour de force\"; do NOT start with a top `# Final Wrapup` heading as `LetsRead.hs` prepends the section header automatically)."
+               , "3. Cover these four angles naturally in `=== COMMENTARY ===`:"
+               , "   - **Finale Verdicts & Immediate Aftermath**: React to `prediction-judge`'s final rulings from the last chunk (`### Latest Prediction Judge Rulings` in `memory.md`) and any final disputed-fact walkback verified from `critic_feedback.md`."
+               , "   - **Whole-Story & Character Retrospective**: Trace how the premise evolved from Chunk 1 to the finale, which characters (including original or supporting cast) stole the show, and how the central mysteries, themes, or canon crossovers locked together."
+               , "   - **The Corkboard Autopsy (`hall_of_fame.md`)**: Review your final prediction scoreboard with good humor—highlighting your proudest multi-chunk `CONFIRMED` hits, your favorite authorial `SUBVERTED` twists/red herrings, and your funniest `DEBUNKED` conspiracy theories or early Chunk 1–3 misconceptions."
+               , "   - **Running Gags, Lingering Hooks & Closing Sign-Off**: Call back to the thread's favorite running jokes and standout moments, note any open sequel hooks, and sign off warmly."
+               , "4. Output `=== COMMENTARY ===` (and optionally `=== UPDATED MEMORY ===` if fixing a final disputed fact from `critic_feedback.md`; `=== CHUNK SUMMARY ===` and `=== PREDICTION UPDATES ===` are not needed)."
                ]
   TIO.writeFile promptPath promptText
   pure promptPath
@@ -3739,7 +3789,8 @@ stripLeadingChunkHeading txt =
     (firstLine : restLines)
       | Just (_, hTitle) <- parseMarkdownHeading firstLine
       , let cleaned = T.strip (T.dropWhile (not . isAlphaNum) hTitle)
-      , "chunk " `T.isPrefixOf` T.toLower cleaned ->
+      , let low = T.toLower cleaned
+      , "chunk " `T.isPrefixOf` low || "final wrapup" `T.isPrefixOf` low ->
           T.strip (T.unlines restLines)
     _ -> T.strip txt
 
@@ -3788,16 +3839,37 @@ cmdNext rawSessionDir forceFlag = do
         ++ "Run 'judge' first (or pass --force to override)."
 
   if curIdx >= totalChunks
-    then
-      TIO.putStrLn $
-        jsonObject
-          [ ("status", jsonStr "finished")
-          , ("current_index", jsonInt curIdx)
-          , ("total_chunks", jsonInt totalChunks)
-          , ("hall_of_fame_file", jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")))
-          , ("orchestrator_rule", jsonStr orchestratorRuleText)
-          , ("message", jsonStr "All chunks have been read! The Let's Read is complete.")
-          ]
+    then do
+      let wrapupPath = sessionDir </> "entries" </> "wrapup.md"
+      hasWrapup <- doesFileExist wrapupPath
+      if not hasWrapup || forceFlag
+        then do
+          promptFile <- writeWrapupPromptFile sessionDir st
+          TIO.putStrLn $
+            jsonObject
+              [ ("status", jsonStr "wrapup_unlocked")
+              , ("current_index", jsonInt curIdx)
+              , ("total_chunks", jsonInt totalChunks)
+              , ("subagent_prompt_file", jsonStr (T.pack promptFile))
+              , ("hall_of_fame_file", jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")))
+              , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
+              , ("entries_dir", jsonStr (T.pack (sessionDir </> "entries")))
+              , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
+              , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
+              , ("orchestrator_rule", jsonStr orchestratorRuleText)
+              , ("next_step_hint", jsonStr "Pass subagent_prompt_file to blind-reader for the Final Wrapup & Retrospective, then record with 'LetsRead.hs record --session <dir> --subagent-log <reader_log>'.")
+              ]
+        else
+          TIO.putStrLn $
+            jsonObject
+              [ ("status", jsonStr "finished")
+              , ("current_index", jsonInt curIdx)
+              , ("total_chunks", jsonInt totalChunks)
+              , ("wrapup_file", jsonStr (T.pack wrapupPath))
+              , ("hall_of_fame_file", jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")))
+              , ("orchestrator_rule", jsonStr orchestratorRuleText)
+              , ("message", jsonStr "All chunks and the Final Wrapup have been completed! The Let's Read is complete.")
+              ]
     else do
       let nextIdx = curIdx + 1
           activeCount = countActivePredictions (stPredictions st)
@@ -3877,7 +3949,10 @@ rebuildMasterLog sessionDir st = do
           , "chunk_" `isPrefixOf` f
           , ".md" `isSuffixOf` f
           ]
+      wrapupPath = entriesDir </> "wrapup.md"
   entryContents <- mapM readTextFileSafe chunkFiles
+  hasWrapup <- doesFileExist wrapupPath
+  wrapupContent <- if hasWrapup then readTextFileSafe wrapupPath else pure ""
   let isFinished = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
       hofSuffix =
         if isFinished && not (null (stPredictions st))
@@ -3890,7 +3965,7 @@ rebuildMasterLog sessionDir st = do
           <> stPersona st
           <> "\n\n---\n\n"
       logPath = sessionDir </> "lets_read_log.md"
-  TIO.writeFile logPath (logHeader <> T.concat entryContents <> hofSuffix)
+  TIO.writeFile logPath (logHeader <> T.concat entryContents <> wrapupContent <> hofSuffix)
   pure logPath
 
 formatPredictionTrackerCallout :: [Text] -> Text
@@ -4097,119 +4172,159 @@ cmdRecord opts = do
           Just m -> Just m
           Nothing -> mParsedMem
       cleanedCommText = stripLeadingChunkHeading commText
-      (chapNum, chapTitle, partNum, partsTotal) =
-        case stCurrentMeta st of
-          Just m -> (metaChapterNumber m, metaChapterTitle m, metaPartInChapter m, metaPartsInChapter m)
-          Nothing -> (1, "Chapter ?", 1, 1)
-
-      (curated', preds', pendingRetires, auditBlocks, trackerUpdates) =
-        resolveAndAuditTurn
-          curIdx
-          (stTotalChunks st)
-          chapNum
-          chapTitle
-          True
-          cleanedCommText
-          (stCuratedMemory st)
-          (stPredictions st)
-          (stPredictionAuditWarnings st)
-          mParsedPredUpdates
-          finalMem
-      mNewlyLoggedPred =
-        listToMaybe
-          [ pr
-          | pr <- preds'
-          , prOriginChunk pr == curIdx
-          , all (\oldPr -> prOriginChunk oldPr /= curIdx) (stPredictions st)
-          ]
-      linterWarnings = lintReaderCommentary cleanedCommText mNewlyLoggedPred
-      summaryTxt = fromMaybe (extractFallbackSummary commText) mParsedSummary
-      chapDisplay
-        | chapNum == 0 = chapTitle
-        | "chapter " `T.isPrefixOf` T.toLower (T.strip chapTitle) = chapTitle
-        | otherwise = "Chapter " <> jsonInt chapNum <> ": " <> chapTitle
-      entryHeader =
-        "## Chunk "
-          <> jsonInt curIdx
-          <> "/"
-          <> jsonInt (stTotalChunks st)
-          <> " — "
-          <> chapDisplay
-          <> " (Part "
-          <> jsonInt partNum
-          <> "/"
-          <> jsonInt partsTotal
-          <> ")\n\n"
-      trackerCallout = formatPredictionTrackerCallout trackerUpdates
-      auditCallout = formatAuditEntryCallout auditBlocks
-      entryContent = entryHeader <> cleanedCommText <> trackerCallout <> auditCallout <> "\n\n---\n\n"
+      isWrapupTurn = curIdx >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
       entriesDir = sessionDir </> "entries"
-      entryFile = entriesDir </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")
 
-  createDirectoryIfMissing True entriesDir
-  TIO.writeFile entryFile entryContent
+  if isWrapupTurn
+    then do
+      let curated' = mergeCuratedNarrativeMemory (stCuratedMemory st) finalMem
+          st' = st {stCuratedMemory = curated'}
+          wrapupHeader = "## Final Wrapup & Retrospective — " <> stTitle st <> "\n\n"
+          wrapupContent = wrapupHeader <> cleanedCommText <> "\n\n---\n\n"
+          wrapupFile = entriesDir </> "wrapup.md"
 
-  let completed' =
-        if curIdx `elem` stCompletedChunks st
-          then stCompletedChunks st
-          else sort (curIdx : stCompletedChunks st)
-      newIndexEntry =
-        ChunkIndexEntry
-          { cieChunkIndex = curIdx
-          , cieChapterNumber = chapNum
-          , cieChapterTitle = chapTitle
-          , ciePartInChapter = partNum
-          , ciePartsInChapter = partsTotal
-          , cieSummary = summaryTxt
-          }
-      chunkIndex' =
-        sortOn
-          cieChunkIndex
-          (newIndexEntry : filter (\e -> cieChunkIndex e /= curIdx) (stChunkIndex st))
-      st' =
-        st
-          { stCurrentRecorded = True
-          , stCurrentJudged = False
-          , stCompletedChunks = completed'
-          , stChunkIndex = chunkIndex'
-          , stCuratedMemory = curated'
-          , stPredictions = preds'
-          , stPendingRetirements = pendingRetires
-          , stPendingLinterWarnings = linterWarnings
-          , stPredictionAuditWarnings = auditBlocks
-          }
+      createDirectoryIfMissing True entriesDir
+      TIO.writeFile wrapupFile wrapupContent
+      (needsCompaction, curLines, curBytes) <- syncMemoryAndArchives sessionDir st'
+      logPath <- rebuildMasterLog sessionDir st'
+      saveState sessionDir st'
 
-  judgePromptFile <- writeCurrentJudgePromptFile sessionDir st'
-  criticPromptFile <- writeCurrentCriticPromptFile sessionDir st' summaryTxt
-  (needsCompaction, curLines, curBytes) <- syncMemoryAndArchives sessionDir st'
-  logPath <- rebuildMasterLog sessionDir st'
-  saveState sessionDir st'
+      TIO.putStrLn $
+        jsonObject
+          [ ("status", jsonStr "wrapup_recorded")
+          , ("chunk_index", jsonInt curIdx)
+          , ("total_chunks", jsonInt (stTotalChunks st))
+          , ("remaining_chunks", jsonInt 0)
+          , ("is_finished", jsonBool True)
+          , ("wrapup_recorded", jsonBool True)
+          , ("entry_file", jsonStr (T.pack wrapupFile))
+          , ("wrapup_file", jsonStr (T.pack wrapupFile))
+          , ("hall_of_fame_file", jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")))
+          , ("log_file", jsonStr (T.pack logPath))
+          , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
+          , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
+          , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
+          , ("active_predictions_count", jsonInt (countActivePredictions (stPredictions st')))
+          , ("total_predictions_count", jsonInt (length (stPredictions st')))
+          , ("memory_compaction_needed", jsonBool needsCompaction)
+          , ("curated_memory_lines", jsonInt curLines)
+          , ("curated_memory_bytes", jsonInt curBytes)
+          , ("orchestrator_rule", jsonStr orchestratorRuleText)
+          , ("next_step_hint", jsonStr "The Let's Read and Final Wrapup are complete! Present the Final Wrapup and Hall of Fame & Shame to the user (or use 'LetsRead.hs discuss' if the user replies with post-story questions).")
+          ]
+    else do
+      let (chapNum, chapTitle, partNum, partsTotal) =
+            case stCurrentMeta st of
+              Just m -> (metaChapterNumber m, metaChapterTitle m, metaPartInChapter m, metaPartsInChapter m)
+              Nothing -> (1, "Chapter ?", 1, 1)
 
-  TIO.putStrLn $
-    jsonObject
-      [ ("status", jsonStr "awaiting_judge")
-      , ("chunk_index", jsonInt curIdx)
-      , ("total_chunks", jsonInt (stTotalChunks st))
-      , ("remaining_chunks", jsonInt (stTotalChunks st - curIdx))
-      , ("is_finished", jsonBool False)
-      , ("entry_file", jsonStr (T.pack entryFile))
-      , ("log_file", jsonStr (T.pack logPath))
-      , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
-      , ("judge_prompt_file", jsonStr (T.pack judgePromptFile))
-      , ("critic_prompt_file", jsonStr (T.pack criticPromptFile))
-      , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
-      , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
-      , ("active_predictions_count", jsonInt (countActivePredictions preds'))
-      , ("pending_retirements_count", jsonInt (length pendingRetires))
-      , ("linter_warnings_count", jsonInt (length linterWarnings))
-      , ("total_predictions_count", jsonInt (length preds'))
-      , ("prediction_audit_warnings_count", jsonInt (length auditBlocks))
-      , ("memory_compaction_needed", jsonBool needsCompaction)
-      , ("curated_memory_lines", jsonInt curLines)
-      , ("curated_memory_bytes", jsonInt curBytes)
-      , ("orchestrator_rule", jsonStr orchestratorRuleText)
-      , ("next_step_hint", jsonStr "Send judge_prompt_file to prediction-judge and critic_prompt_file to commentary-critic in parallel, then run 'LetsRead.hs judge --session <dir> --subagent-log <judge_log> --critic-log <critic_log>'.")
-      ]
+          (curated', preds', pendingRetires, auditBlocks, trackerUpdates) =
+            resolveAndAuditTurn
+              curIdx
+              (stTotalChunks st)
+              chapNum
+              chapTitle
+              True
+              cleanedCommText
+              (stCuratedMemory st)
+              (stPredictions st)
+              (stPredictionAuditWarnings st)
+              mParsedPredUpdates
+              finalMem
+          mNewlyLoggedPred =
+            listToMaybe
+              [ pr
+              | pr <- preds'
+              , prOriginChunk pr == curIdx
+              , all (\oldPr -> prOriginChunk oldPr /= curIdx) (stPredictions st)
+              ]
+          linterWarnings = lintReaderCommentary cleanedCommText mNewlyLoggedPred
+          summaryTxt = fromMaybe (extractFallbackSummary commText) mParsedSummary
+          chapDisplay
+            | chapNum == 0 = chapTitle
+            | "chapter " `T.isPrefixOf` T.toLower (T.strip chapTitle) = chapTitle
+            | otherwise = "Chapter " <> jsonInt chapNum <> ": " <> chapTitle
+          entryHeader =
+            "## Chunk "
+              <> jsonInt curIdx
+              <> "/"
+              <> jsonInt (stTotalChunks st)
+              <> " — "
+              <> chapDisplay
+              <> " (Part "
+              <> jsonInt partNum
+              <> "/"
+              <> jsonInt partsTotal
+              <> ")\n\n"
+          trackerCallout = formatPredictionTrackerCallout trackerUpdates
+          auditCallout = formatAuditEntryCallout auditBlocks
+          entryContent = entryHeader <> cleanedCommText <> trackerCallout <> auditCallout <> "\n\n---\n\n"
+          entryFile = entriesDir </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")
+
+      createDirectoryIfMissing True entriesDir
+      TIO.writeFile entryFile entryContent
+
+      let completed' =
+            if curIdx `elem` stCompletedChunks st
+              then stCompletedChunks st
+              else sort (curIdx : stCompletedChunks st)
+          newIndexEntry =
+            ChunkIndexEntry
+              { cieChunkIndex = curIdx
+              , cieChapterNumber = chapNum
+              , cieChapterTitle = chapTitle
+              , ciePartInChapter = partNum
+              , ciePartsInChapter = partsTotal
+              , cieSummary = summaryTxt
+              }
+          chunkIndex' =
+            sortOn
+              cieChunkIndex
+              (newIndexEntry : filter (\e -> cieChunkIndex e /= curIdx) (stChunkIndex st))
+          st' =
+            st
+              { stCurrentRecorded = True
+              , stCurrentJudged = False
+              , stCompletedChunks = completed'
+              , stChunkIndex = chunkIndex'
+              , stCuratedMemory = curated'
+              , stPredictions = preds'
+              , stPendingRetirements = pendingRetires
+              , stPendingLinterWarnings = linterWarnings
+              , stPredictionAuditWarnings = auditBlocks
+              }
+
+      judgePromptFile <- writeCurrentJudgePromptFile sessionDir st'
+      criticPromptFile <- writeCurrentCriticPromptFile sessionDir st' summaryTxt
+      (needsCompaction, curLines, curBytes) <- syncMemoryAndArchives sessionDir st'
+      logPath <- rebuildMasterLog sessionDir st'
+      saveState sessionDir st'
+
+      TIO.putStrLn $
+        jsonObject
+          [ ("status", jsonStr "awaiting_judge")
+          , ("chunk_index", jsonInt curIdx)
+          , ("total_chunks", jsonInt (stTotalChunks st))
+          , ("remaining_chunks", jsonInt (stTotalChunks st - curIdx))
+          , ("is_finished", jsonBool False)
+          , ("entry_file", jsonStr (T.pack entryFile))
+          , ("log_file", jsonStr (T.pack logPath))
+          , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
+          , ("judge_prompt_file", jsonStr (T.pack judgePromptFile))
+          , ("critic_prompt_file", jsonStr (T.pack criticPromptFile))
+          , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
+          , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
+          , ("active_predictions_count", jsonInt (countActivePredictions preds'))
+          , ("pending_retirements_count", jsonInt (length pendingRetires))
+          , ("linter_warnings_count", jsonInt (length linterWarnings))
+          , ("total_predictions_count", jsonInt (length preds'))
+          , ("prediction_audit_warnings_count", jsonInt (length auditBlocks))
+          , ("memory_compaction_needed", jsonBool needsCompaction)
+          , ("curated_memory_lines", jsonInt curLines)
+          , ("curated_memory_bytes", jsonInt curBytes)
+          , ("orchestrator_rule", jsonStr orchestratorRuleText)
+          , ("next_step_hint", jsonStr "Send judge_prompt_file to prediction-judge and critic_prompt_file to commentary-critic in parallel, then run 'LetsRead.hs judge --session <dir> --subagent-log <judge_log> --critic-log <critic_log>'.")
+          ]
 
 cmdJudge :: JudgeOptions -> IO ()
 cmdJudge opts = do
@@ -4290,7 +4405,13 @@ cmdJudge opts = do
   logPath <- rebuildMasterLog sessionDir st'
   saveState sessionDir st'
 
-  let isFin = curIdx >= stTotalChunks st
+  hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
+  let storyChunksDone = curIdx >= stTotalChunks st
+      isFin = storyChunksDone && hasWrapup
+      nextHint =
+        if storyChunksDone && not hasWrapup
+          then "All story chunks have been judged! Run 'LetsRead.hs next --session <dir>' to unlock the dedicated Final Wrapup Round for blind-reader."
+          else "Run 'LetsRead.hs next --session <dir>' to unlock the next chunk (or present the commentary to the user)."
   TIO.putStrLn $
     jsonObject
       [ ("status", jsonStr "judged")
@@ -4298,6 +4419,8 @@ cmdJudge opts = do
       , ("total_chunks", jsonInt (stTotalChunks st))
       , ("remaining_chunks", jsonInt (stTotalChunks st - curIdx))
       , ("is_finished", jsonBool isFin)
+      , ("wrapup_recorded", jsonBool hasWrapup)
+      , ("wrapup_pending", jsonBool (storyChunksDone && not hasWrapup))
       , ("entry_file", jsonStr (T.pack entryFile))
       , ("log_file", jsonStr (T.pack logPath))
       , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
@@ -4306,7 +4429,7 @@ cmdJudge opts = do
       , ("rejected_unverified_critic_quotes_count", jsonInt rejectedCriticQuotesCount)
       , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
       , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
-      , ("hall_of_fame_file", if isFin then jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")) else "null")
+      , ("hall_of_fame_file", if storyChunksDone then jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")) else "null")
       , ("active_predictions_count", jsonInt (countActivePredictions preds'))
       , ("total_predictions_count", jsonInt (length preds'))
       , ("judge_audit_warnings_count", jsonInt (length judgeAuditBlocks))
@@ -4315,6 +4438,7 @@ cmdJudge opts = do
       , ("curated_memory_lines", jsonInt curLines)
       , ("curated_memory_bytes", jsonInt curBytes)
       , ("orchestrator_rule", jsonStr orchestratorRuleText)
+      , ("next_step_hint", jsonStr nextHint)
       , ("discussion_command_hint", jsonStr "If the user replies with comments, questions, or theories before asking to continue, forward their message to blind-reader and record the exchange using 'LetsRead.hs discuss --session <dir> --user-message \"...\" --response-file <path>'.")
       ]
 
@@ -4413,11 +4537,17 @@ cmdDiscuss opts = do
           Just m -> Just m
           Nothing -> mParsedMem
       entriesDir = sessionDir </> "entries"
-      entryFile = entriesDir </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")
+      wrapupPath = entriesDir </> "wrapup.md"
       (chapNum, chapTitle) =
         case stCurrentMeta st of
           Just m -> (metaChapterNumber m, metaChapterTitle m)
           Nothing -> (1, "Chapter ?")
+
+  hasWrapup <- doesFileExist wrapupPath
+  let entryFile =
+        if hasWrapup && curIdx >= stTotalChunks st
+          then wrapupPath
+          else entriesDir </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")
 
   entryExists <- doesFileExist entryFile
   unless entryExists $
@@ -4500,7 +4630,8 @@ cmdStatus :: FilePath -> IO ()
 cmdStatus rawSessionDir = do
   sessionDir <- canonicalizePath rawSessionDir
   st <- loadState sessionDir
-  TIO.putStr (renderStateJson sessionDir st)
+  hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
+  TIO.putStr (renderStateJson sessionDir hasWrapup st)
 
 -- ---------------------------------------------------------------------------
 -- Argument Parsing & Entrypoint

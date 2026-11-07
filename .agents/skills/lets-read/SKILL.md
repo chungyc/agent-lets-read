@@ -189,14 +189,29 @@ For each chunk to be read:
      - Otherwise, writes `<session_dir>/critic_feedback.md` (and `<session_dir>/archive/critic/chunk_XXXX.md`) exclusively for `blind-reader` on Chunk $N+1$ (never adding critic notes to `entries/chunk_XXXX.md` or `lets_read_log.md`).
    - Appends `> [!NOTE]\n> **Prediction Judge Rulings (Chunk XXXX)**:` to `<session_dir>/entries/chunk_XXXX.md` and rebuilds `<session_dir>/lets_read_log.md`.
    - Updates `### Latest Prediction Judge Rulings` in `<session_dir>/memory.md` (and `<session_dir>/archive/memory/chunk_XXXX.md`), `<session_dir>/predictions/pred_XXXX.md`, `<session_dir>/predictions/by_chronology.md`, and `<session_dir>/predictions/by_topic.md` so `blind-reader` sees the Judge's rulings at the start of Chunk $N+1$.
-   - When the final chunk of the story is judged (`is_finished: true`), generates `<session_dir>/predictions/hall_of_fame.md` and appends the complete **Prediction Hall of Fame & Shame** retrospective to `<session_dir>/lets_read_log.md`.
+   - When the final story chunk (`Chunk N/N`) is judged, generates `<session_dir>/predictions/hall_of_fame.md` and outputs `"wrapup_pending": true` so you can unlock the dedicated **Final Wrapup Round** via `lets-read next`.
    - Outputs `"status": "judged"`, `"critic_feedback_written"`, `"critic_notes_count"`, and `"rejected_unverified_critic_quotes_count"`.
+
+6. **Dedicated Final Wrapup Round (After Final Story Chunk `N/N` Is Judged)**:
+   - Once `Chunk N/N` has been recorded and judged (`"wrapup_pending": true`), run `next` one more time to unlock the **Final Wrapup Round**:
+     ```bash
+     .agents/skills/lets-read/.bin/lets-read next --session "<session_dir>"
+     ```
+     This outputs `"status": "wrapup_unlocked"` and writes the Final Wrapup prompt to `<session_dir>/current_prompt.md`.
+   - Read `<session_dir>/current_prompt.md` and send it to `blind-reader` via `send_message` (so `blind-reader` can read `<session_dir>/predictions/hall_of_fame.md` and `<session_dir>/memory.md` and write its whole-story retrospective without diluting `Chunk N/N`'s live reaction).
+   - Record the Final Wrapup using `record`:
+     ```bash
+     .agents/skills/lets-read/.bin/lets-read record \
+       --session "<session_dir>" \
+       --subagent-log "<blind_reader_logAbsoluteUri>"
+     ```
+     This writes `<session_dir>/entries/wrapup.md`, appends both the Final Wrapup and the **Prediction Hall of Fame & Shame** to `<session_dir>/lets_read_log.md`, and outputs `"status": "wrapup_recorded"` and `"is_finished": true`. (No `judge` step is needed after `wrapup_recorded`.)
 
 ### Step 5: Interactive Discussion vs. Batch Progression
 
 - **In Interactive Mode**:
-  - Present the recorded entry (`<session_dir>/entries/chunk_XXXX.md`, which includes both `blind-reader`'s commentary and the `> [!NOTE] **Prediction Judge Rulings (Chunk XXXX)**:` callout) to the user, always prefixed with a third-person host attribution banner (`> **Let's Read Host** — Relaying from \`blind-reader\` & \`prediction-judge\` (Chunk XXXX/YYYY):`), and link to `<session_dir>/lets_read_log.md`, `<session_dir>/memory.md`, `<session_dir>/predictions/by_chronology.md`, and `<session_dir>/predictions/by_topic.md` (plus `<session_dir>/predictions/hall_of_fame.md` when finished). Do **not** read or relay `<session_dir>/critic_feedback.md` to the user unless asked—it is private backstage coaching for `blind-reader`.
-  - If the user replies with comments, questions, or non-spoiler discussion before asking for the next chunk:
+  - Present the recorded entry (`<session_dir>/entries/chunk_XXXX.md` or `<session_dir>/entries/wrapup.md`) to the user, always prefixed with a third-person host attribution banner (`> **Let's Read Host** — Relaying from \`blind-reader\` & \`prediction-judge\` (Chunk XXXX/YYYY):`), and link to `<session_dir>/lets_read_log.md`, `<session_dir>/memory.md`, `<session_dir>/predictions/by_chronology.md`, and `<session_dir>/predictions/by_topic.md` (plus `<session_dir>/entries/wrapup.md` and `<session_dir>/predictions/hall_of_fame.md` when finished). Do **not** read or relay `<session_dir>/critic_feedback.md` to the user unless asked—it is private backstage coaching for `blind-reader`.
+  - If the user replies with comments, questions, or non-spoiler discussion before asking for the next chunk (or after the Final Wrapup):
     1. **Never answer in your own voice**: Forward their message (scrubbed of any spoilers, if applicable) to the `blind-reader` subagent via `send_message` so the reader persona can discuss theories with the user like a live forum thread host. Instruct `blind-reader` that if the exchange establishes or updates a factual/timeline correction, a craft/style course-correction, a running gag, a character status, or a mystery/prediction update, it **MUST** append `=== PREDICTION UPDATES ===` (if predictions changed) and/or a complete `=== UPDATED MEMORY ===` block (the 4 narrative sections) to its reply so `LetsRead.hs discuss` persists them across future subagent rotations.
     2. Run `LetsRead.hs discuss` (passing `--subagent-log "<subagent_logAbsoluteUri>"` or `--response-file "<session_dir>/last_response.md"`, and passing `--user-message "<short comment>"` or `--user-file "<session_dir>/last_user_message.md"`):
        ```bash
@@ -207,5 +222,5 @@ For each chunk to be read:
        ```
     3. Present `blind-reader`'s reply to the user prefixed with the third-person host banner (`> **Let's Read Host** — Relaying discussion reply from \`blind-reader\`:`).
 - **In Batch Mode**:
-  - Repeat Step 4 (`next` $\rightarrow$ `blind-reader` $\rightarrow$ `record` $\rightarrow$ `prediction-judge` + `commentary-critic` in parallel $\rightarrow$ `judge`) until the target number of chunks/chapters (or `"status": "finished"`) is reached.
+  - Repeat Step 4 (`next` $\rightarrow$ `blind-reader` $\rightarrow$ `record` $\rightarrow$ `prediction-judge` + `commentary-critic` in parallel $\rightarrow$ `judge`, followed by the Final Wrapup Round `next` $\rightarrow$ `blind-reader` $\rightarrow$ `record` after `Chunk N/N`) until the target number of chunks/chapters (or `"is_finished": true`) is reached.
   - Whenever `LetsRead.hs next` outputs `"rotate_subagent_recommended": true` (at a chapter boundary after >= 6 chunks), start fresh `blind-reader`, `prediction-judge`, and `commentary-critic` subagent instances via `invoke_subagent` so their context windows stay sharp.
