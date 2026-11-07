@@ -3525,7 +3525,7 @@ writeCurrentCriticPromptFile sessionDir st summaryTxt = do
                , "3. **Mandatory Verifiable Receipts**: Every factual flag in `=== DISPUTED FACTS & MEMORY CHECKS ===` MUST use either:"
                , "   - `- **[In-Story Fact | Source: chunks/chunk_XXXX.md | Quote: \"<exact verbatim substring copied from chunks/chunk_XXXX.md>\"]** <explanation>` (`LetsRead.hs` deterministically verifies the quote against `chunks/chunk_XXXX.md` on disk and drops any fabricated/paraphrased quote!)"
                , "   - `- **[External Canon | Source: search_web(\"<exact query>\") | Work: <Canon Work>]** <explanation>`"
-               , "4. **Exception-Only (`- PASS` Default)**: If there are no genuine factual/memory errors and the entry conforms to the active Reader Persona (no review jargon, textbook truisms, multi-header mini-essays, double-telling, multi-sentence play-by-play plot recaps unless the Persona requests recaps, or tunnel-vision isolation that overlooks a genuinely interesting story/canon/red-herring callback when reacting in a vacuum; never flag 1-clause hooks, concrete story details presupposed inside a reaction/joke, or routine/mundane failed predictions), output ONLY:"
+               , "4. **Exception-Only (`- PASS` Default)**: If there are no genuine factual/memory errors and the entry conforms to the active Reader Persona (no review jargon, textbook truisms, multi-header mini-essays, double-telling, multi-sentence play-by-play plot recaps unless the Persona requests recaps, tunnel-vision isolation that overlooks a genuinely interesting story/canon/red-herring callback when reacting in a vacuum, uncritical conviction that treats speculative leaps/character judgments as slam-dunk facts while ignoring counter-evidence on the page—especially on a cold scoreboard in `memory.md`—or passive/safe surface-level commentary that takes everything at face value and saves all curiosity for the bottom prediction line; never flag 1-clause hooks, concrete story details presupposed inside a reaction/joke, or routine/mundane failed predictions), output ONLY:"
                , "   ```markdown"
                , "   === CRITIC FEEDBACK ==="
                , "   - PASS"
@@ -3586,8 +3586,9 @@ parseCriticSections raw =
       styleBullets =
         [ T.strip l
         | (sec, l) <- tagged
+        , let low = T.toLower l
         , sec == CritSecStyle
-            || (sec == CritSecGeneral && "[persona" `T.isInfixOf` T.toLower l)
+            || (sec == CritSecGeneral && ("[persona" `T.isInfixOf` low || "[skeptical" `T.isInfixOf` low || "[anti-timidity" `T.isInfixOf` low))
         , isBullet l
         ]
    in (factBullets, styleBullets)
@@ -3697,7 +3698,7 @@ renderCriticFeedbackMarkdown sessionDir curIdx verifiedFacts styleCoaching =
         , "> 1. **For Disputed Facts & Memory Checks**: The `commentary-critic` subagent is another AI model and **can also hallucinate, misread jokes/subtext, or confuse external canon with this story's intentional AU divergences**. Treat every factual flag below strictly as a **disputed claim** that you must verify against the primary source (`chunks/chunk_XXXX.md`, Bullet 1 of `## Story Summary So Far` in `memory.md`, or `search_web`) before accepting:"
         , ">    - **If the primary source confirms the critic's point**: Fix the error in `=== UPDATED MEMORY ===` on this turn and, if it was a material misread in your previous commentary, include a brief, natural 1-sentence in-character realization in `=== COMMENTARY ===` (e.g., *\"Wait—looking back at what I wrote last chunk, I misread...\"*)."
         , ">    - **If the primary source, an intentional AU divergence, or context shows your original reading (or joke/speculation) was right**: **Overrule and ignore the critic's flag!**"
-        , "> 2. **For Persona & Style Coaching**: Apply these voice/craft adjustments **silently** as you write this chunk's commentary. **NEVER** apologize for, mention, or meta-reference style feedback inside `=== COMMENTARY ===`."
+        , "> 2. **For Persona, Style & Engagement Coaching (`[Skeptical Pushback]` / `[Anti-Timidity Coaching]`)**: Apply voice, craft, and engagement adjustments **silently** as you write this chunk's commentary (e.g., shifting uncritical certainty into sharp *\"What's the catch?\"* curiosity without performative scoreboard groveling, or taking bolder stances inside the main commentary when flagged for timidity). **NEVER** apologize for, mention, or meta-reference style/coaching feedback inside `=== COMMENTARY ===`. Treat any devil's-advocate counter-question in `[Skeptical Pushback]` as an optional peer stress-test (overrule it if your reading holds up; if it exposes a genuine catch in an ongoing theory **and** that thread is still active in `current_chunk.md`, you may voice that follow-up thought naturally in-character as your own realization, otherwise simply fold any refinement into `memory.md`)."
         , ""
         , "## Disputed Facts & Memory Checks (Verify Against Primary Source Before Accepting)"
         , ""
