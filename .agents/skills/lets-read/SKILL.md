@@ -135,8 +135,8 @@ For each chunk to be read:
    - *Guardrail*: `LetsRead.hs next` will refuse to advance if the previous chunk has not completed **both** `record` and `judge`.
 
 2. **Invoke or Message `blind-reader` (Using `<session_dir>/current_prompt.md`)**:
-   - **First chunk (or at a chapter boundary after >= 6 chunks when `LetsRead.hs next` returns `"rotate_subagent_recommended": true`)**: Call `invoke_subagent` with `TypeName: "blind-reader"` and `Role: "Blind Story Reader"`.
-   - **Consecutive chunks**: Call `send_message` to the active `blind-reader` `conversationId` so it retains immediate conversational momentum across multi-part chapters.
+   - **First chunk (or at a chapter boundary when `LetsRead.hs next` returns `"rotate_reader_recommended": true`)**: Call `invoke_subagent` with `TypeName: "blind-reader"` and `Role: "Blind Story Reader"`.
+   - **Consecutive chunks**: Call `send_message` to the active `blind-reader` `conversationId` so a single reader instance handles the entire chapter.
    - **Prompt to `blind-reader`**: Read `<session_dir>/current_prompt.md` and pass its exact text to `blind-reader` (never paste `current_chunk.md` or `memory.md` inline).
 
 3. **Record `blind-reader`'s Commentary, New Prediction, Conditional Retirement & Memory (`record`)**:
@@ -156,13 +156,13 @@ For each chunk to be read:
    - Splits `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===`, `=== PREDICTION UPDATES ===`, and `=== UPDATED MEMORY ===`.
    - Runs a deterministic style/anti-pattern linter on `=== COMMENTARY ===`.
    - Adds `blind-reader`'s new prediction as `ACTIVE`, stores any conditional `RETIRED` nomination in `.state.bin` (without retiring it yet), and generates **both** `<session_dir>/current_judge_prompt.md` (for `prediction-judge`) and `<session_dir>/current_critic_prompt.md` (for `commentary-critic`).
-   - Outputs `"status": "awaiting_judge"`, `"judge_prompt_file": "<session_dir>/current_judge_prompt.md"`, and `"critic_prompt_file": "<session_dir>/current_critic_prompt.md"`.
+   - Outputs `"status": "awaiting_judge"`, `"judge_prompt_file": "<session_dir>/current_judge_prompt.md"`, `"critic_prompt_file": "<session_dir>/current_critic_prompt.md"`, `"rotate_judge_recommended"` (every 11 chunks), and `"rotate_critic_recommended"` (every 7 chunks).
 
 4. **Invoke or Message `prediction-judge` AND `commentary-critic` in Parallel**:
    - Read `<session_dir>/current_judge_prompt.md` and `<session_dir>/current_critic_prompt.md`.
-   - **In the same turn**, dispatch **both** subagents in parallel:
-     - **First chunk (or whenever `blind-reader` was rotated via `"rotate_subagent_recommended": true`)**: Call `invoke_subagent` for `prediction-judge` (`Role: "Impartial Prediction Judge"`) and `invoke_subagent` for `commentary-critic` (`Role: "Commentary Critic"`).
-     - **Consecutive chunks**: Call `send_message` to the active `prediction-judge` `conversationId` and `send_message` to the active `commentary-critic` `conversationId`.
+   - **In the same turn**, dispatch **both** subagents in parallel (rotating each independently on its own coprime schedule):
+     - **`prediction-judge`**: Call `invoke_subagent` (`Role: "Impartial Prediction Judge"`) on Chunk 1 or when `record` returns `"rotate_judge_recommended": true`; otherwise call `send_message` to the active `prediction-judge` `conversationId`.
+     - **`commentary-critic`**: Call `invoke_subagent` (`Role: "Commentary Critic"`) on Chunk 1 or when `record` returns `"rotate_critic_recommended": true`; otherwise call `send_message` to the active `commentary-critic` `conversationId`.
    - Wait for both subagents to finish before running `LetsRead.hs judge`.
 
 5. **Apply Judge Verdicts, Conditional Retirement & Verified Critic Feedback (`judge`)**:
@@ -223,4 +223,4 @@ For each chunk to be read:
     3. Present `blind-reader`'s reply to the user prefixed with the third-person host banner (`> **Let's Read Host** — Relaying discussion reply from \`blind-reader\`:`).
 - **In Batch Mode**:
   - Repeat Step 4 (`next` $\rightarrow$ `blind-reader` $\rightarrow$ `record` $\rightarrow$ `prediction-judge` + `commentary-critic` in parallel $\rightarrow$ `judge`, followed by the Final Wrapup Round `next` $\rightarrow$ `blind-reader` $\rightarrow$ `record` after `Chunk N/N`) until the target number of chunks/chapters (or `"is_finished": true`) is reached.
-  - Whenever `LetsRead.hs next` outputs `"rotate_subagent_recommended": true` (at a chapter boundary after >= 6 chunks), start fresh `blind-reader`, `prediction-judge`, and `commentary-critic` subagent instances via `invoke_subagent` so their context windows stay sharp.
+  - Rotate each subagent independently when its respective rotation flag triggers (`"rotate_reader_recommended": true` from `next` at chapter boundaries; `"rotate_critic_recommended": true` every 7 chunks and `"rotate_judge_recommended": true` every 11 chunks from `record`) so their context windows stay sharp without simultaneous handoffs.

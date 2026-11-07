@@ -3808,13 +3808,17 @@ computeShouldRotate history chunk =
       stepLastRot lastRot e =
         let idx = cieChunkIndex e
             sinceLast = idx - lastRot
-            rotatedHere = (ciePartInChapter e == 1 && sinceLast >= 6) || sinceLast >= 10
+            rotatedHere =
+              (ciePartInChapter e == 1 && (sinceLast >= 6 || sinceLast + ciePartsInChapter e > 9))
+                || sinceLast >= 15
          in if rotatedHere then idx else lastRot
       lastRotIdx = foldl' stepLastRot 1 priorEntries
       chunksSinceRotation = nextIdx - lastRotIdx
    in nextIdx > 1
-        && ( (isChapterStart chunk && chunksSinceRotation >= 6)
-              || chunksSinceRotation >= 10
+        && ( ( isChapterStart chunk
+                 && (chunksSinceRotation >= 6 || chunksSinceRotation + partsInChapter chunk > 9)
+             )
+               || chunksSinceRotation >= 15
            )
 
 cmdNext :: FilePath -> Bool -> IO ()
@@ -3933,6 +3937,7 @@ cmdNext rawSessionDir forceFlag = do
           , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
           , ("entries_dir", jsonStr (T.pack (sessionDir </> "entries")))
           , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
+          , ("rotate_reader_recommended", jsonBool shouldRotate)
           , ("rotate_subagent_recommended", jsonBool shouldRotate)
           , ("orchestrator_rule", jsonStr orchestratorRuleText)
           ]
@@ -4300,6 +4305,8 @@ cmdRecord opts = do
       logPath <- rebuildMasterLog sessionDir st'
       saveState sessionDir st'
 
+      let rotateCritic = curIdx > 1 && (curIdx - 1) `mod` 7 == 0
+          rotateJudge = curIdx > 1 && (curIdx - 1) `mod` 11 == 0
       TIO.putStrLn $
         jsonObject
           [ ("status", jsonStr "awaiting_judge")
@@ -4312,6 +4319,8 @@ cmdRecord opts = do
           , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
           , ("judge_prompt_file", jsonStr (T.pack judgePromptFile))
           , ("critic_prompt_file", jsonStr (T.pack criticPromptFile))
+          , ("rotate_judge_recommended", jsonBool rotateJudge)
+          , ("rotate_critic_recommended", jsonBool rotateCritic)
           , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
           , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
           , ("active_predictions_count", jsonInt (countActivePredictions preds'))
