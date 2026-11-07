@@ -24,11 +24,14 @@
 ## Active Mysteries & Unanswered Questions
 - <What is still unexplained or suspicious in the narrative?>
 
-## Active Prediction Slate & Index (Auto-Maintained by Gatekeeper)
-*(Do not re-emit this section in `=== UPDATED MEMORY ===`; submit only this turn's new prediction and any status transitions in `=== PREDICTION UPDATES ===`.)*
+## Active Prediction Slate & Index (Auto-Maintained by Gatekeeper & Prediction Judge)
+*(Do not re-emit this section in `=== UPDATED MEMORY ===`; submit only this turn's new prediction and any conditional `RETIRED` nomination in `=== PREDICTION UPDATES ===`. The `prediction-judge` subagent evaluates all active predictions after your turn.)*
 
 - **Running Tally**: 0 logged | **0 Major Hits** (>=3 chunks) | 0 Short-Horizon (<3 chunks) | **0 Subverted** | **0 Debunked** | 0 Retired | **0/10 Active**
 - **Prediction Indices (On-Demand `read_file`)**: [Chronological Index](predictions/by_chronology.md) | [Semantic Topic Index](predictions/by_topic.md) | [Prediction Files (`pred_XXXX.md`)](predictions/)
+
+### Latest Prediction Judge Rulings (React to Any Confirmed / Debunked / Subverted Verdicts in Your Commentary!)
+- *(Appears after Chunk 1 is judged by `prediction-judge`.)*
 
 ### Currently Active Unresolved Predictions (0/10)
 - **[Predicted Chunk XXXX | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <concise 1-clause detail> -> **Theory**: <your direct primary bet> (vs. **Plausible Rival**: <concise rival explanation>) ([details](predictions/pred_XXXX.md))
