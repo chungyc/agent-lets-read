@@ -284,7 +284,6 @@ renderStateJson sessionDir hasWrapup st =
         , ("critic_prompt_file", jsonStr (T.pack (sessionDir </> "current_critic_prompt.md")))
         , ("critic_feedback_file", jsonStr (T.pack (sessionDir </> "critic_feedback.md")))
         , ("chunks_dir", jsonStr (T.pack (sessionDir </> "chunks")))
-        , ("story_so_far_file", jsonStr (T.pack (sessionDir </> "story_so_far.md")))
         , ("entries_dir", jsonStr (T.pack (sessionDir </> "entries")))
         , ("wrapup_file", if hasWrapup then jsonStr (T.pack (sessionDir </> "entries" </> "wrapup.md")) else "null")
         , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
@@ -3234,16 +3233,6 @@ cmdInit opts = do
           <> "\n\n---\n\n"
       )
 
-  let storyPath = sessionDir </> "story_so_far.md"
-  storyExists <- doesFileExist storyPath
-  when (not storyExists || initOverwrite opts) $
-    TIO.writeFile
-      storyPath
-      ( "# Story So Far: "
-          <> bookTitle
-          <> "\n\n---\n\n"
-      )
-
   let avgWords = if totalChunks > 0 then totalWords `div` totalChunks else 0
   TIO.putStrLn $
     jsonObject
@@ -3258,7 +3247,6 @@ cmdInit opts = do
       , ("entries_dir", jsonStr (T.pack entriesDir))
       , ("archive_dir", jsonStr (T.pack archiveDir))
       , ("predictions_dir", jsonStr (T.pack predictionsDir))
-      , ("story_so_far_file", jsonStr (T.pack storyPath))
       , ("memory_file", jsonStr (T.pack memoryPath))
       , ("log_file", jsonStr (T.pack logPath))
       , ("orchestrator_rule", jsonStr orchestratorRuleText)
@@ -3951,22 +3939,6 @@ cmdNext rawSessionDir forceFlag = do
       writeCurrentChunkFile archiveChunkFile chunk totalChunks (stTotalChapters st) activeCount
       promptFile <- writeCurrentPromptFile sessionDir st chunk activeCount
 
-      allChunkNames <- listDirectory chunksDir
-      let unlockedFiles =
-            sort
-              [ chunksDir </> f
-              | f <- allChunkNames
-              , "chunk_" `isPrefixOf` f
-              , ".md" `isSuffixOf` f
-              ]
-      unlockedContents <- mapM readTextFileSafe unlockedFiles
-      let storyHeader =
-            "# Story So Far: "
-              <> stTitle st
-              <> "\n\n---\n\n"
-          storySoFarPath = sessionDir </> "story_so_far.md"
-      TIO.writeFile storySoFarPath (storyHeader <> T.intercalate "\n\n---\n\n" unlockedContents)
-
       let meta = chunkToMeta chunk
           st' =
             st
@@ -4236,7 +4208,6 @@ cmdRecord opts = do
     case recSubagentLog opts of
       Just logPath -> do
         raw <- extractSubagentLogResponse logPath
-        TIO.writeFile (sessionDir </> "last_response.md") (raw <> "\n")
         pure (parseCombinedResponse raw)
       Nothing ->
         case recResponseFile opts of
@@ -4447,10 +4418,7 @@ cmdJudge opts = do
 
   rawJudge <-
     case jdgSubagentLog opts of
-      Just logPath -> do
-        raw <- extractSubagentLogResponse logPath
-        TIO.writeFile (sessionDir </> "last_judge_response.md") (raw <> "\n")
-        pure raw
+      Just logPath -> extractSubagentLogResponse logPath
       Nothing ->
         case jdgResponseFile opts of
           Just respPath -> do
@@ -4465,7 +4433,6 @@ cmdJudge opts = do
       Just fLogPath -> do
         rawF <- extractSubagentLogResponse fLogPath
         usedSearch <- checkSubagentLogUsedSearchWeb fLogPath
-        TIO.writeFile (sessionDir </> "last_fact_check_response.md") (rawF <> "\n")
         pure (Just rawF, usedSearch)
       Nothing ->
         case jdgFactCheckResponseFile opts of
@@ -4480,7 +4447,6 @@ cmdJudge opts = do
     case jdgCriticLog opts of
       Just cLogPath -> do
         rawC <- extractSubagentLogResponse cLogPath
-        TIO.writeFile (sessionDir </> "last_critic_response.md") (rawC <> "\n")
         pure (Just rawC)
       Nothing ->
         case jdgCriticResponseFile opts of
@@ -4607,7 +4573,6 @@ cmdDiscuss opts = do
     case discSubagentLog opts of
       Just logPath -> do
         raw <- extractSubagentLogResponse logPath
-        TIO.writeFile (sessionDir </> "last_response.md") (raw <> "\n")
         pure (parseCombinedResponse raw)
       Nothing ->
         case discResponseFile opts of

@@ -142,7 +142,7 @@ For each chunk to be read:
    ```bash
    .agents/skills/lets-read/.bin/lets-read next --session "<session_dir>"
    ```
-   This unlocks the next chunk into `<session_dir>/current_chunk.md`, writes the canonical reader prompt to `<session_dir>/current_prompt.md` (automatically linking `<session_dir>/critic_feedback.md` from the previous turn), archives a permanent copy into `<session_dir>/chunks/chunk_XXXX.md`, updates `<session_dir>/story_so_far.md` (containing only chunks `1..current`), and prints spoiler-free metadata (`chunk_index`, `total_chunks`, `chapter_number`, `chapter_title`, `part_in_chapter`, `parts_in_chapter`, `word_count`, `subagent_prompt_file`).
+   This unlocks the next chunk into `<session_dir>/current_chunk.md`, writes the canonical reader prompt to `<session_dir>/current_prompt.md` (automatically linking `<session_dir>/critic_feedback.md` from the previous turn), archives a permanent copy into `<session_dir>/chunks/chunk_XXXX.md`, and prints spoiler-free metadata (`chunk_index`, `total_chunks`, `chapter_number`, `chapter_title`, `part_in_chapter`, `parts_in_chapter`, `word_count`, `subagent_prompt_file`).
    - *Guardrail*: `LetsRead.hs next` will refuse to advance if the previous chunk has not completed **both** `record` and `judge`.
 
 2. **Invoke or Message `blind-reader` (Using `<session_dir>/current_prompt.md`)**:
@@ -151,17 +151,11 @@ For each chunk to be read:
    - **Prompt to `blind-reader`**: Read `<session_dir>/current_prompt.md` and pass its exact text to `blind-reader` (never paste `current_chunk.md` or `memory.md` inline).
 
 3. **Record `blind-reader`'s Commentary, New Prediction, Conditional Retirement & Memory (`record`)**:
-   Pass `blind-reader`'s `logAbsoluteUri` directly via `--subagent-log` (or write its full reply to `<session_dir>/last_response.md` and pass `--response-file`):
+   Pass `blind-reader`'s `logAbsoluteUri` directly via `--subagent-log`:
    ```bash
-   # Option A (Direct extraction from subagent log — zero file-writing or Python needed):
    .agents/skills/lets-read/.bin/lets-read record \
      --session "<session_dir>" \
      --subagent-log "<blind_reader_logAbsoluteUri>"
-
-   # Option B (From last_response.md written via write_file):
-   .agents/skills/lets-read/.bin/lets-read record \
-     --session "<session_dir>" \
-     --response-file "<session_dir>/last_response.md"
    ```
    `LetsRead.hs record` automatically:
    - Splits `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===`, `=== PREDICTION UPDATES ===`, and `=== UPDATED MEMORY ===`.
@@ -180,19 +174,11 @@ For each chunk to be read:
 5. **Apply Judge Verdicts, Conditional Retirement, Verified Fact-Check Receipts & Persona Critique (`judge`)**:
    Pass `prediction-judge`'s `logAbsoluteUri` via `--subagent-log`, `fact-checker`'s `logAbsoluteUri` via `--fact-check-log`, and `commentary-critic`'s `logAbsoluteUri` via `--critic-log`:
    ```bash
-   # Option A (Direct extraction from subagent logs):
    .agents/skills/lets-read/.bin/lets-read judge \
      --session "<session_dir>" \
      --subagent-log "<prediction_judge_logAbsoluteUri>" \
      --fact-check-log "<fact_checker_logAbsoluteUri>" \
      --critic-log "<commentary_critic_logAbsoluteUri>"
-
-   # Option B (From response files written via write_file):
-   .agents/skills/lets-read/.bin/lets-read judge \
-     --session "<session_dir>" \
-     --response-file "<session_dir>/last_judge_response.md" \
-     --fact-check-response-file "<session_dir>/last_fact_check_response.md" \
-     --critic-response-file "<session_dir>/last_critic_response.md"
    ```
    `LetsRead.hs judge` automatically:
    - Applies `prediction-judge`'s `CONFIRMED`, `DEBUNKED`, `SUBVERTED`, and `ACTIVE` verdicts to all active predictions (including any prediction `blind-reader` nominated for retirement).
