@@ -18,7 +18,7 @@
 module Main (main) where
 
 import Control.Exception (IOException, catch)
-import Control.Monad (forM, forM_, unless, when)
+import Control.Monad (filterM, forM, forM_, unless, when)
 import Data.Binary (Binary, decode, encode)
 import Data.Bits (xor)
 import qualified Data.ByteString as BS
@@ -189,7 +189,8 @@ saveState :: FilePath -> SessionState -> IO ()
 saveState sessionDir st = do
   BS.writeFile (sessionDir </> ".state.bin") (BSL.toStrict (encode st))
   hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
-  TIO.writeFile (sessionDir </> "state.json") (renderStateJson sessionDir hasWrapup st)
+  hasFactCheckPending <- doesFileExist (sessionDir </> "current_discussion_prompt.md")
+  TIO.writeFile (sessionDir </> "state.json") (renderStateJson sessionDir hasWrapup hasFactCheckPending st)
 
 loadState :: FilePath -> IO SessionState
 loadState sessionDir = do
@@ -251,11 +252,11 @@ renderMetaJson (Just m) =
 
 orchestratorRuleText :: Text
 orchestratorRuleText =
-  "NEVER run python, python3, or ad-hoc shell scripts; NEVER impersonate blind-reader, prediction-judge, fact-checker, or commentary-critic, answer user story questions in your own voice, edit memory.md directly, or paste current_chunk.md/memory.md inline into prompts. Always pass the prompt from <session_dir>/current_prompt.md to blind-reader, record with 'lets-read record', then pass <session_dir>/current_judge_prompt.md to prediction-judge, <session_dir>/current_fact_check_prompt.md to fact-checker, and <session_dir>/current_critic_prompt.md to commentary-critic in parallel and finalize with 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log>' (and after the final chunk is judged, run 'lets-read next' + 'lets-read record' for the Final Wrapup Round, or record user discussions with 'lets-read discuss')."
+  "NEVER run python, python3, or ad-hoc shell scripts; NEVER impersonate blind-reader, prediction-judge, fact-checker, or commentary-critic, answer user story questions in your own voice, edit memory.md directly, or paste current_chunk.md/memory.md inline into prompts. Always pass the prompt from <session_dir>/current_prompt.md to blind-reader, record with 'lets-read record', then pass <session_dir>/current_judge_prompt.md to prediction-judge, <session_dir>/current_fact_check_prompt.md to fact-checker, and <session_dir>/current_critic_prompt.md to commentary-critic in parallel and finalize with 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log>'. If 'judge' outputs fact_check_discussion_pending: true, send <session_dir>/current_discussion_prompt.md to blind-reader via send_message and record with 'lets-read discuss --session <dir> --subagent-log <reader_log>' BEFORE running 'lets-read next' (and after the final chunk is judged and any fact-check discussion is resolved, run 'lets-read next' + 'lets-read record' for the Final Wrapup Round, or record user discussions with 'lets-read discuss')."
 
-renderStateJson :: FilePath -> Bool -> SessionState -> Text
-renderStateJson sessionDir hasWrapup st =
-  let storyChunksDone = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
+renderStateJson :: FilePath -> Bool -> Bool -> SessionState -> Text
+renderStateJson sessionDir hasWrapup hasFactCheckPending st =
+  let storyChunksDone = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st && not hasFactCheckPending
       isFin = storyChunksDone && hasWrapup
       activeCnt = length [pr | pr <- stPredictions st, prStatus pr == PredStatusActive]
       totalPreds = length (stPredictions st)
@@ -269,6 +270,7 @@ renderStateJson sessionDir hasWrapup st =
         , ("total_words", jsonInt (stTotalWords st))
         , ("current_recorded", jsonBool (stCurrentRecorded st))
         , ("current_judged", jsonBool (stCurrentJudged st))
+        , ("fact_check_discussion_pending", jsonBool hasFactCheckPending)
         , ("completed_chunks_count", jsonInt (length (stCompletedChunks st)))
         , ("wrapup_recorded", jsonBool hasWrapup)
         , ("is_finished", jsonBool isFin)
@@ -282,6 +284,8 @@ renderStateJson sessionDir hasWrapup st =
         , ("judge_prompt_file", jsonStr (T.pack (sessionDir </> "current_judge_prompt.md")))
         , ("fact_check_prompt_file", jsonStr (T.pack (sessionDir </> "current_fact_check_prompt.md")))
         , ("critic_prompt_file", jsonStr (T.pack (sessionDir </> "current_critic_prompt.md")))
+        , ("discussion_prompt_file", if hasFactCheckPending then jsonStr (T.pack (sessionDir </> "current_discussion_prompt.md")) else "null")
+        , ("fact_check_questions_file", if hasFactCheckPending then jsonStr (T.pack (sessionDir </> "current_fact_check_questions.md")) else "null")
         , ("critic_feedback_file", jsonStr (T.pack (sessionDir </> "critic_feedback.md")))
         , ("chunks_dir", jsonStr (T.pack (sessionDir </> "chunks")))
         , ("entries_dir", jsonStr (T.pack (sessionDir </> "entries")))
@@ -1294,6 +1298,29 @@ canonicalizeResolvedLine c1 c2 rKind body =
             "Predicted Chunk " <> c1Str <> " -> RETIRED Chunk " <> c2Str
    in "- **[" <> tag <> "]** " <> T.strip body
 
+coalesceBulletLines :: [Text] -> [Text]
+coalesceBulletLines = go Nothing
+  where
+    isNewBullet t = "- " `T.isPrefixOf` t || "* " `T.isPrefixOf` t
+    isBoundary t =
+      T.null t
+        || "#" `T.isPrefixOf` t
+        || "===" `T.isPrefixOf` t
+        || "```" `T.isPrefixOf` t
+        || ">" `T.isPrefixOf` t
+    flush Nothing = []
+    flush (Just acc) = [acc]
+    go mAcc [] = flush mAcc
+    go mAcc (rawL : ls) =
+      let t = T.strip rawL
+       in if isNewBullet t
+            then flush mAcc ++ go (Just t) ls
+            else if isBoundary t
+              then flush mAcc ++ (rawL : go Nothing ls)
+              else case mAcc of
+                Just acc -> go (Just (acc <> " " <> t)) ls
+                Nothing -> rawL : go Nothing ls
+
 stripFileLinkSuffix :: Text -> Text
 stripFileLinkSuffix txt =
   let s = T.strip txt
@@ -1470,7 +1497,7 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle isRecordTurn
           Nothing -> []
           Just b ->
             [ parsePredictionLine trimmed
-            | rawL <- T.lines b
+            | rawL <- coalesceBulletLines (T.lines b)
             , let trimmed = T.strip rawL
             , not (isPlaceholderLine trimmed)
             , "- " `T.isPrefixOf` trimmed || "* " `T.isPrefixOf` trimmed
@@ -1505,8 +1532,9 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle isRecordTurn
 
       classifyActiveBullet :: ParsedPrediction -> Either (Int, ParsedPrediction) (Maybe Text)
       classifyActiveBullet p@(PredValidActive c1 _ clue theory rival canonL bodyAfter)
-        | any (\pr -> prOriginChunk pr == c1) prevRecords =
-            -- Once recorded in stPredictions, a prediction record's text is strictly immutable.
+        | any (\pr -> prOriginChunk pr == c1) prevRecords && (isRecordTurn || c1 /= curIdx) =
+            -- Once a chunk is completed, earlier chunks' prediction records are strictly immutable.
+            -- (During 'discuss' on the current chunk curIdx, blind-reader may amend curIdx's newly logged prediction.)
             Right Nothing
         | c1 /= curIdx =
             let newCStr = T.pack (padChunkNumber c1)
@@ -1617,14 +1645,13 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle isRecordTurn
       toPredictionRecord _ =
         error "toPredictionRecord: expected PredValidActive"
 
-      newActiveRecords =
-        [ toPredictionRecord p
-        | p <- validNewActiveParsed
-        , all (\pr -> prOriginChunk pr /= ppOrigChunk p) prevRecords
-        ]
+      newOrAmendedRecords = map toPredictionRecord validNewActiveParsed
+      replacedOrigins = map prOriginChunk newOrAmendedRecords
 
       candidateRecords =
-        sortOn prOriginChunk (prevRecords ++ newActiveRecords)
+        sortOn
+          prOriginChunk
+          ([pr | pr <- prevRecords, prOriginChunk pr `notElem` replacedOrigins] ++ newOrAmendedRecords)
 
       activePoolBeforeJudge = [pr | pr <- candidateRecords, prStatus pr == PredStatusActive]
 
@@ -1726,7 +1753,7 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle isRecordTurn
           ++ missingNewPredAuditBlocks
 
       commLower = T.toLower commText
-      turnEvents = map renderRecordActiveLine newActiveRecords
+      turnEvents = map renderRecordActiveLine newOrAmendedRecords
       trackerUpdateLines =
         [ evLine
         | evLine <- turnEvents
@@ -1764,7 +1791,7 @@ applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
       judgeBody = extractJudgeSection rawJudgeTxt
       parsedLines =
         [ parsePredictionLine trimmed
-        | rawL <- T.lines judgeBody
+        | rawL <- coalesceBulletLines (T.lines judgeBody)
         , let trimmed = T.strip rawL
         , not (isPlaceholderLine trimmed)
         , "- " `T.isPrefixOf` trimmed || "* " `T.isPrefixOf` trimmed
@@ -3266,9 +3293,9 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
       criticContextLines =
         if hasCriticFeedback
           then
-            [ "- Peer Fact-Check & Persona Critique Notes from Chunk "
+            [ "- Persona & Style Critique Notes from Chunk "
                 <> jsonInt (max 1 (curIdx - 1))
-                <> " (MANDATORY READ — verify disputed facts against primary source; overrule if wrong; apply persona/style critique silently): "
+                <> " (MANDATORY READ — apply persona/style coaching silently; never mention in commentary): "
                 <> T.pack criticFeedbackPath
             ]
           else []
@@ -3303,11 +3330,12 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
                , ""
                , "Key Reminders:"
                , "1. Read `current_chunk.md` and `memory.md` first (plus `critic_feedback.md` if listed above, and `chunks/chunk_(N-1).md` ONLY if you are a newly rotated subagent or picking up mid-chapter). Do NOT read `entries/chunk_(N-1).md` unless checking a specific thread callback."
-               , "2. If `critic_feedback.md` is present: (a) Verify any disputed factual claim against the cited `chunks/chunk_XXXX.md` quote, Bullet 1 of `## Story Summary So Far` (for AU divergences), or `search_web` before accepting; if verified, fix `=== UPDATED MEMORY ===` and include a natural 1-sentence in-character walkback in `=== COMMENTARY ===`, or overrule and ignore the flag if your original reading/joke was right. (b) Read `commentary-critic`'s `Persona & Style Critique` and apply useful voice/craft adjustments silently—never apologize for or mention style feedback in `=== COMMENTARY ===`."
+               , "2. If `critic_feedback.md` is present, read `commentary-critic`'s `Persona & Style Critique` and apply useful voice/craft adjustments silently as you write this chunk's commentary—never apologize for or mention style feedback in `=== COMMENTARY ===`."
                , "3. Check `### Latest Prediction Judge Rulings` in `memory.md` and weave your reaction to any `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` verdicts from the previous chunk naturally into `=== COMMENTARY ===` where relevant (owning `DEBUNKED`/`SUBVERTED` misses with good humor, and avoiding victory laps on 1–2 chunk short-horizon calls)."
-               , "4. Prediction Quota, Cross-Thread Synthesis ($A + B -> C$), Conciseness Cap & Conditional Retirement: On every chunk before the final chunk, log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total after bracket tag: `- **[Predicted Chunk " <> curPad <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <detail A in current_chunk.md + earlier thread/mystery/canon B, <= 120 chars, no inline quotes> -> **Theory**: <direct non-linear outcome C, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`) at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`. Never log single-beat linear extrapolations (\"X happened here so more of X will happen later\"). If `memory.md` already has 10/10 active predictions, also nominate 1 conditional retirement candidate (`- **[Predicted Chunk XXXX -> RETIRED Chunk " <> curPad <> "]** <reason>`) in `=== PREDICTION UPDATES ===`."
-               , "5. Stay true to your Active Persona (and any user style directives in `- **Reader Craft Directives & Running Gags (Persistent)**:` in `memory.md`): curate 3–5 standout moments using tight 2–6 line verbatim `>` blockquotes (`[...]` to pair setup with punchline), do not paraphrase what a quote says right before or after quoting it, and avoid generic book-review puffery (\"masterclass\"/\"tour de force\") and fortune-cookie truisms. Verify earlier-chapter callbacks via `memory.md` / `chunks/chunk_XXXX.md`, and quarantine external `search_web` canon lore from in-story facts."
-               , "6. Output all four required sections: `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===` (1 line), `=== PREDICTION UPDATES ===` (new prediction + optional conditional `RETIRED` nomination), and `=== UPDATED MEMORY ===` (only the 4 narrative sections)."
+               , "4. Proactive Fact-Checking Before Submission: Whenever you reference a specific detail, count, character title/role, or timeline sequence from an earlier chunk that is not verbatim in `current_chunk.md`, call `read_file` on `<session_dir>/chunks/chunk_XXXX.md` first (never guess from condensed `memory.md` bullets). Whenever you characterize an external canon event, relationship, or power mechanic, call `search_web` with a neutral query first and strictly quarantine external canon from in-story facts."
+               , "5. Prediction Quota, Cross-Thread Synthesis ($A + B -> C$), Conciseness Cap & Conditional Retirement: On every chunk before the final chunk, log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total after bracket tag: `- **[Predicted Chunk " <> curPad <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <verified detail A in current_chunk.md + earlier thread/mystery/canon B, <= 120 chars, no inline quotes> -> **Theory**: <direct non-linear outcome C, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`) at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`. Ensure the factual and chronological premise in `**Clue/Anomaly**` (*who knew what, and when*) is strictly accurate. Never log single-beat linear extrapolations (\"X happened here so more of X will happen later\"). If `memory.md` already has 10/10 active predictions, also nominate 1 conditional retirement candidate (`- **[Predicted Chunk XXXX -> RETIRED Chunk " <> curPad <> "]** <reason>`) in `=== PREDICTION UPDATES ===`."
+               , "6. Stay true to your Active Persona (and any user style directives in `- **Reader Craft Directives & Running Gags (Persistent)**:` in `memory.md`): curate 3–5 standout moments using tight 2–6 line verbatim `>` blockquotes (`[...]` to pair setup with punchline), do not paraphrase what a quote says right before or after quoting it, and avoid generic book-review puffery (\"masterclass\"/\"tour de force\") and fortune-cookie truisms."
+               , "7. Output all four required sections: `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===` (1 line), `=== PREDICTION UPDATES ===` (new prediction + optional conditional `RETIRED` nomination), and `=== UPDATED MEMORY ===` (only the 4 narrative sections)."
                ]
   TIO.writeFile promptPath promptText
   pure promptPath
@@ -3321,9 +3349,9 @@ writeWrapupPromptFile sessionDir st = do
       criticContextLines =
         if hasCriticFeedback
           then
-            [ "- Peer Critic & Fact-Check Notes from Chunk "
+            [ "- Persona & Style Critique Notes from Chunk "
                 <> jsonInt totalChunks
-                <> " (MANDATORY READ — verify disputed facts against primary source; overrule if wrong; apply style coaching silently): "
+                <> " (MANDATORY READ — apply style coaching silently): "
                 <> T.pack criticFeedbackPath
             ]
           else []
@@ -3349,11 +3377,11 @@ writeWrapupPromptFile sessionDir st = do
                , "1. Read `memory.md` and `predictions/hall_of_fame.md` first (plus `critic_feedback.md` if listed above, and any `archive/L1_XXXX.md` or `predictions/pred_XXXX.md` files you want to reference)."
                , "2. Stay in your active Persona as a conversational forum liveblogger wrapping up a thread (do NOT write a stiff academic essay or use banned review jargon like \"masterclass\" or \"tour de force\"; do NOT start with a top `# Final Wrapup` heading as `LetsRead.hs` prepends the section header automatically)."
                , "3. Cover these four angles naturally in `=== COMMENTARY ===`:"
-               , "   - **Finale Verdicts & Immediate Aftermath**: React to `prediction-judge`'s final rulings from the last chunk (`### Latest Prediction Judge Rulings` in `memory.md`) and any final disputed-fact walkback verified from `critic_feedback.md`."
+               , "   - **Finale Verdicts & Immediate Aftermath**: React to `prediction-judge`'s final rulings from the last chunk (`### Latest Prediction Judge Rulings` in `memory.md`)."
                , "   - **Whole-Story & Character Retrospective**: Trace how the premise evolved from Chunk 1 to the finale, which characters (including original or supporting cast) stole the show, and how the central mysteries, themes, or canon crossovers locked together."
                , "   - **The Corkboard Autopsy (`hall_of_fame.md`)**: Review your final prediction scoreboard with good humor—highlighting your proudest multi-chunk `CONFIRMED` hits, your favorite authorial `SUBVERTED` twists/red herrings, and your funniest `DEBUNKED` conspiracy theories or early Chunk 1–3 misconceptions."
                , "   - **Running Gags, Lingering Hooks & Closing Sign-Off**: Call back to the thread's favorite running jokes and standout moments, note any open sequel hooks, and sign off warmly."
-               , "4. Output `=== COMMENTARY ===` (and optionally `=== UPDATED MEMORY ===` if fixing a final disputed fact from `critic_feedback.md`; `=== CHUNK SUMMARY ===` and `=== PREDICTION UPDATES ===` are not needed)."
+               , "4. Output `=== COMMENTARY ===` (and optionally `=== UPDATED MEMORY ===`; `=== CHUNK SUMMARY ===` and `=== PREDICTION UPDATES ===` are not needed)."
                ]
   TIO.writeFile promptPath promptText
   pure promptPath
@@ -3530,10 +3558,15 @@ writeCurrentFactCheckPromptFile sessionDir st summaryTxt = do
       curPadTxt = T.pack curPad
       totalChunks = stTotalChunks st
       entryPath = absSession </> "entries" </> ("chunk_" ++ curPad ++ ".md")
+      mNewPred = listToMaybe [pr | pr <- stPredictions st, prOriginChunk pr == curIdx]
+      predLine =
+        case mNewPred of
+          Nothing -> "- Submitted New Prediction: *(None logged on this chunk)*"
+          Just pr -> "- Submitted New Prediction (audit its `**Clue/Anomaly**` and chronological premise): `" <> renderRecordActiveLine pr <> "`"
       factPromptPath = sessionDir </> "current_fact_check_prompt.md"
       factPromptText =
         T.unlines
-          [ "Please fact-check `blind-reader`'s newly recorded commentary, 1-line chunk summary, and updated memory for Chunk "
+          [ "Please fact-check `blind-reader`'s newly recorded commentary, 1-line chunk summary, new prediction premise, and updated memory for Chunk "
               <> jsonInt curIdx
               <> " of "
               <> jsonInt totalChunks
@@ -3545,19 +3578,23 @@ writeCurrentFactCheckPromptFile sessionDir st summaryTxt = do
           , "- Unlocked Story Chunks Archive (on-demand `read_file` for earlier-chunk verification): " <> T.pack (absSession </> "chunks")
           , "- Multi-Level Memory & Index Archive (on-demand `read_file`): " <> T.pack (absSession </> "archive")
           , "- Submitted 1-Line Chunk Summary: `" <> summaryTxt <> "`"
+          , predLine
           , ""
           , "## Instructions Reminder"
           , "1. Read `current_chunk.md`, `entries/chunk_" <> curPadTxt <> ".md`, and `memory.md` (do NOT read `SKILL.md` or system prompt files)."
-          , "2. Check the concrete factual claims made by `blind-reader` against the three general sources of truth:"
-          , "   - **Current Passage (`current_chunk.md`)**: Does every claim about what was said, done, or stated in the current passage match `current_chunk.md`?"
-          , "   - **Earlier Passages (`chunks/chunk_XXXX.md` & `memory.md`)**: Do references or callbacks to earlier events in the story match the earlier unlocked chunks?"
-          , "   - **External Reference / Canon (`search_web`, when applicable)**: Explicit story text and Bullet 1 of `## Story Summary So Far` (AU baseline) always override external canon for what is true in this story (never flag AU divergences or `\"Unlike in canon...\"` contrasts as errors). Invoke the `search_web` tool (never searching for the story being read) to verify external canon/reference claims before citing `Source: search_web(\"<query>\")`, and flag false external trivia or unestablished external canon stated as in-story fact."
-          , "   - Never flag jokes, hyperbole, sarcasm, or labeled speculation/theories as factual errors."
+          , "2. Keep a strict boundary between **Outputs Under Audit** (`entries/chunk_" <> curPadTxt <> ".md` reaction prose, `=== CHUNK SUMMARY ===`, the `**Clue/Anomaly**` premise of `=== PREDICTION UPDATES ===`, and `memory.md`) and the **Three Primary Sources of Truth**:"
+          , "   - **Current Passage (`current_chunk.md`)**: Does every claim in `blind-reader`'s reaction prose (not just the blockquotes!) about what was said, done, or stated in the current passage match `current_chunk.md`?"
+          , "   - **Earlier Unlocked Passages (`chunks/chunk_XXXX.md` via `read_file` — NEVER `memory.md` alone)**: Whenever `blind-reader` references, quotes, counts, or summarizes an earlier chunk (or carries a specific claim in `memory.md` or a prediction's `**Clue/Anomaly**` premise) that is not verbatim in `current_chunk.md`, call `read_file` on `<session_dir>/chunks/chunk_XXXX.md`. Audit the factual and chronological premises (`**Clue/Anomaly**` and *who knew what, when*) of the new prediction."
+          , "   - **External Reference / Canon (`search_web`, when applicable)**: Explicit story text and Bullet 1 of `## Story Summary So Far` (AU baseline) always override external canon for what is true in this story (never flag AU divergences or `\"Unlike in canon...\"` contrasts as errors, and never leak unrevealed canon identities/spoilers). Invoke `search_web` using a **neutral, open query** (never searching for the story being read) to verify affirmative external canon/reference claims before citing `Source: search_web(\"<query>\")`."
+          , "   - **Hyperbole vs. Misinformation & Unstated Premises (Advisory Peer Stance)**: Your flags are **strictly advisory peer questions** that `blind-reader` can freely rebut or accommodate—so **never rationalize away a spotted conflation or unstated premise in your reasoning just to output `- PASS`**:"
+          , "     1. *True Hyperbole (`[OK]`)*: Exaggerating the scale or emotional impact of an accurate underlying fact (e.g. calling a sharp verbal takedown at a parliamentary hearing *\"verbal homicide at the podium\"*), or the speculative future `**Theory**` of a prediction, is normal liveblog expression."
+          , "     2. *Misinformation / Event Conflation Inside Banter (`[DISPUTED]`)*: Conflating distinct events, locations, characters, or public vs. classified knowledge—**even inside a joke or colorful reaction line** (e.g. joking that a civilian recognized a character from televised parliamentary footage as *\"the woman who turned foreign special forces into red mist on national television\"*, conflating a televised hearing with a classified night battle at another site)—is a factual error, **not** hyperbole, and **must** be flagged as `[DISPUTED]`!"
+          , "     3. *Inference-to-Fact Drift / Unstated Premise (`[DISPUTED]`)*: Claiming an earlier chunk or prop (e.g. a wall calendar, report, or dialogue line) explicitly stated a timeframe, count, or detail that does not actually appear in `chunks/chunk_XXXX.md` (e.g. claiming *\"her calendar had a 2–3 day transit gap\"* when `chunk_XXXX.md` only noted a planned two-month trip without specifying transit duration) **must** be flagged as `[DISPUTED]` by quoting the actual passage from `chunks/chunk_XXXX.md` where that prop/scene was described."
           , "3. Output **both** required sections:"
-          , "   - First, `=== VERIFIED CLAIMS LOG ===`: list the key concrete factual claims you extracted and checked (`- [OK | Source: ...]` or `- [DISPUTED | Source: ...]`). Only write `Source: search_web(\"<query>\")` if you actually called the `search_web` tool on this turn."
-          , "   - Second, `=== DISPUTED FACTS & MEMORY CHECKS ===`: output `- PASS` if all checked claims held up, or output receipt-backed bullets for any `[DISPUTED ...]` items:"
-          , "     - `- **[In-Story Fact | Source: chunks/chunk_XXXX.md | Quote: \"<exact verbatim substring copied from chunks/chunk_XXXX.md>\"]** <explanation>` (`LetsRead.hs` deterministically verifies the quote against `chunks/chunk_XXXX.md` on disk and drops any fabricated/paraphrased quote!)"
-          , "     - `- **[External Canon | Source: search_web(\"<exact query>\") | Work: <Canon/Reference Work>]** <explanation>` (`LetsRead.hs` verifies that `search_web` was actually called in your subagent log and drops any `[External Canon]` dispute if `search_web` was not called!)"
+          , "   - First, `=== VERIFIED CLAIMS LOG ===`: decompose and log the concrete factual claims in `blind-reader`'s reaction prose, chunk summary, prediction premise, and memory (`- [OK | Source: ...]` or `- [DISPUTED | Source: ...]`). Only write `Source: search_web(\"<query>\")` if you actually called the `search_web` tool on this turn."
+          , "   - Second, `=== DISPUTED FACTS & MEMORY CHECKS ===`: output `- PASS` if all checked claims held up, or output receipt-backed bullets phrased as **polite, skeptical advisory peer questions** pointing out the discrepancy or unstated premise so `blind-reader` can independently re-check the source in `Reader Discussion`:"
+          , "     - `- **[In-Story Fact | Source: chunks/chunk_XXXX.md | Quote: \"<exact verbatim substring copied from chunks/chunk_XXXX.md>\"]** <1-2 sentence peer question pointing out how the claim conflicts with or goes beyond what this passage states>` (`LetsRead.hs` deterministically verifies the quote against `chunks/chunk_XXXX.md` on disk and drops any fabricated/paraphrased quote!)"
+          , "     - `- **[External Canon | Source: search_web(\"<exact neutral query>\") | Work: <Canon/Reference Work>]** <1-2 sentence peer question pointing out the external canon detail or unestablished canon assumption>` (`LetsRead.hs` verifies that `search_web` was actually called in your subagent log and drops any `[External Canon]` dispute if `search_web` was not called!)"
           ]
   TIO.writeFile factPromptPath factPromptText
   pure factPromptPath
@@ -3643,7 +3680,7 @@ parseCriticAndFactSections raw =
         case classifyHeader l of
           Just newSec -> go newSec ls
           Nothing -> (curSec, l) : go curSec ls
-      tagged = go CritSecGeneral (T.lines raw)
+      tagged = go CritSecGeneral (coalesceBulletLines (T.lines raw))
       isBullet l =
         let t = T.strip l
          in ("- " `T.isPrefixOf` t || "* " `T.isPrefixOf` t) && not (isCriticPassLine t)
@@ -3657,7 +3694,7 @@ parseCriticAndFactSections raw =
         [ T.strip l
         | (sec, l) <- tagged
         , sec == CritSecFacts
-            || (sec == CritSecGeneral && ("[in-story fact" `T.isInfixOf` T.toLower l || "[external canon" `T.isInfixOf` T.toLower l))
+            || (sec == CritSecGeneral && ("[in-story fact" `T.isInfixOf` T.toLower l || "[external canon" `T.isInfixOf` T.toLower l || "[peer verification query" `T.isInfixOf` T.toLower l))
         , isBullet l
         ]
       styleBullets =
@@ -3700,8 +3737,14 @@ extractSourceAndQuote hdr =
           | p <- parts
           , pfx `T.isPrefixOf` T.toLower p
           ]
-      mSrc = findPrefix "source:"
-      mRawQuote = findPrefix "quote:"
+      mSrc =
+        case findPrefix "source:" of
+          Just s -> Just s
+          Nothing -> findPrefix "cited passage:"
+      mRawQuote =
+        case findPrefix "quote:" of
+          Just q -> Just q
+          Nothing -> findPrefix "verbatim excerpt:"
       cleanQuotes q =
         let s = T.strip q
             s1 =
@@ -3719,6 +3762,34 @@ extractSourceAndQuote hdr =
                 else Just (cleanSrc, cleanQ)
         _ -> Nothing
 
+formatFactBulletAsPeerQuery :: Text -> Text
+formatFactBulletAsPeerQuery rawBullet =
+  let s = T.strip rawBullet
+      (_, afterOpen) = T.breakOn "[" s
+      (inside, afterClose) = T.breakOn "]" (T.drop 1 afterOpen)
+   in if T.null afterOpen || T.null afterClose
+        then s
+        else
+          let bodyAfter = T.strip (T.dropWhile (\c -> c == '*' || c == ':') (T.drop 1 afterClose))
+              parts = map T.strip (T.splitOn "|" inside)
+              rewritePart idx p =
+                let low = T.toLower p
+                 in if idx == (0 :: Int) && ("in-story fact" `T.isPrefixOf` low || "external canon" `T.isPrefixOf` low || "peer verification query" `T.isPrefixOf` low)
+                      then "Peer Verification Query"
+                      else if "source:" `T.isPrefixOf` low
+                        then
+                          let val = T.strip (T.drop 7 p)
+                           in if "search_web" `T.isInfixOf` T.toLower val
+                                then "Fact-Checker Search: " <> val
+                                else "Cited Passage: " <> val
+                        else if "quote:" `T.isPrefixOf` low
+                          then "Verbatim Excerpt: " <> T.strip (T.drop 6 p)
+                          else if "work:" `T.isPrefixOf` low
+                            then "Reference Work: " <> T.strip (T.drop 5 p)
+                            else p
+              newHeader = T.intercalate " | " (zipWith rewritePart [0 ..] parts)
+           in "- **[" <> newHeader <> "]** " <> bodyAfter
+
 verifyAndFilterCriticFactBullets :: FilePath -> Bool -> [Text] -> IO ([Text], Int)
 verifyAndFilterCriticFactBullets sessionDir hasSearchWebCall bullets = do
   results <- forM bullets $ \b -> do
@@ -3726,50 +3797,103 @@ verifyAndFilterCriticFactBullets sessionDir hasSearchWebCall bullets = do
       Nothing -> pure (Left ())
       Just hdr ->
         let hdrLow = T.toLower hdr
-         in if "external canon" `T.isInfixOf` hdrLow && "search_web" `T.isInfixOf` hdrLow
+         in if ("external canon" `T.isInfixOf` hdrLow || "fact-checker search" `T.isInfixOf` hdrLow) && "search_web" `T.isInfixOf` hdrLow
               then
                 if hasSearchWebCall
-                  then pure (Right b)
+                  then pure (Right (formatFactBulletAsPeerQuery b))
                   else pure (Left ())
               else case extractSourceAndQuote hdr of
                 Nothing -> pure (Left ())
                 Just (relSrc, quoteTxt) -> do
-                  let baseName = takeFileName relSrc
-                      candidatePath
-                        | baseName == "current_chunk.md" = sessionDir </> "current_chunk.md"
-                        | "chunk_" `isPrefixOf` baseName && ".md" `isSuffixOf` baseName =
-                            sessionDir </> "chunks" </> baseName
-                        | otherwise = sessionDir </> relSrc
-                  exists <- doesFileExist candidatePath
-                  if not exists
+                  let rawSrcTokens =
+                        filter (not . null) $
+                          map (T.unpack . T.dropAround (\c -> c == '`' || c == '"' || c == '\'' || c == ',' || c == ';') . T.strip) $
+                            concatMap (T.splitOn "&") (concatMap (T.splitOn " and ") (T.splitOn "," (T.pack relSrc)))
+                      resolveCandidate tok =
+                        let baseName = takeFileName tok
+                         in if baseName == "current_chunk.md"
+                              then sessionDir </> "current_chunk.md"
+                              else
+                                if "chunk_" `isPrefixOf` baseName && ".md" `isSuffixOf` baseName
+                                  then sessionDir </> "chunks" </> baseName
+                                  else sessionDir </> tok
+                      candidatePaths = map resolveCandidate (if null rawSrcTokens then [relSrc] else rawSrcTokens)
+                  existingPaths <- filterM doesFileExist candidatePaths
+                  if null existingPaths
                     then pure (Left ())
                     else do
-                      chunkContent <- readTextFileSafe candidatePath
-                      let normChunk = normalizeForQuoteCheck chunkContent
+                      chunkContents <- mapM readTextFileSafe existingPaths
+                      let normChunk = normalizeForQuoteCheck (T.unlines chunkContents)
                           rawSegs = concatMap (T.splitOn "...") (T.splitOn "[...]" quoteTxt)
                           normSegs = [normalizeForQuoteCheck s | s <- rawSegs, not (T.null (T.strip s))]
                           hasSubstantialSeg = any (\s -> T.length s >= 6) normSegs
                           allMatch = not (null normSegs) && hasSubstantialSeg && all (`T.isInfixOf` normChunk) normSegs
                        in if allMatch
-                            then pure (Right b)
+                            then pure (Right (formatFactBulletAsPeerQuery b))
                             else pure (Left ())
   let verified = [b | Right b <- results]
       rejected = length [() | Left () <- results]
   pure (verified, rejected)
 
+writeFactCheckDiscussionPromptFile :: FilePath -> SessionState -> [Text] -> IO (FilePath, FilePath)
+writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
+  absSession <- canonicalizePath sessionDir
+  let curIdx = stCurrentIndex st
+      curPad = T.pack (padChunkNumber curIdx)
+      totalChunks = stTotalChunks st
+      questionsPath = sessionDir </> "current_fact_check_questions.md"
+      discPromptPath = sessionDir </> "current_discussion_prompt.md"
+      questionsContent = T.unlines peerQueries
+      discPromptText =
+        T.unlines $
+          [ "Before unlocking the next chunk, please review and respond to the following **Fact-Check Peer Query** on your Chunk "
+              <> jsonInt curIdx
+              <> "/"
+              <> jsonInt totalChunks
+              <> " entry as a `Reader Discussion` reply."
+          , "- Session Directory: `" <> T.pack absSession <> "`"
+          , "- Current Story Chunk (`chunks/chunk_" <> curPad <> ".md`): " <> T.pack (absSession </> "current_chunk.md")
+          , "- Reader Memory File: " <> T.pack (absSession </> "memory.md")
+          , "- Unlocked Story Chunks Archive (for `read_file` verification): " <> T.pack (absSession </> "chunks")
+          , "- Active Persona: " <> expandPersonaPreset (stPersona st)
+          , ""
+          , "## Fact-Check Peer Query (Unspoiled AI Peer — Do NOT Treat as Authoritative!)"
+          , ""
+          ]
+            ++ peerQueries
+            ++ [ ""
+               , "## Mandatory Verification & Response Protocol"
+               , "1. **Non-Authoritative AI Peer**: The query above was generated by the automated `fact-checker` subagent (another unspoiled AI model), **NOT** the human user. `fact-checker` has no access to future chapters and can misread jokes/hyperbole, miss surrounding paragraph context in `chunks/chunk_XXXX.md`, or confuse external canon with this story's intentional AU divergences."
+               , "2. **Mandatory Independent Tool Check Before Replying**: Do **not** take `fact-checker`'s word for it. Before writing your reply, you **must** perform your own independent verification:"
+               , "   - Call `read_file` on the cited `<session_dir>/chunks/chunk_XXXX.md` (or `current_chunk.md`) to inspect the full surrounding scene context beyond the quoted excerpt; **and/or**"
+               , "   - Call `search_web` using your own **neutral, independent query** (never copy a leading query from `fact-checker`, and never search for the specific story being read)."
+               , "3. **Verify, Then Concede, Rebut, or Nuance in Character (`=== COMMENTARY ===`)**:"
+               , "   - **If your own `read_file` / `search_web` check confirms a material misread or timeline error**: Own it naturally in character in your `=== COMMENTARY ===` discussion reply, output `=== UPDATED MEMORY ===` (the 4 narrative sections) to clean up `memory.md`, and if the error affected Chunk " <> curPad <> "'s 1-line summary or newly logged prediction (`[Predicted Chunk " <> curPad <> "]`), also output a revised `=== CHUNK SUMMARY ===` and/or `=== PREDICTION UPDATES ===` (`- **[Predicted Chunk " <> curPad <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)`)."
+               , "   - **If your own `read_file` / `search_web` check shows your original reading, figurative joke, or AU baseline was right (or that `fact-checker` cherry-picked a quote out of context)**: **Hold your ground and push back in character**, quoting the primary text from `chunks/chunk_XXXX.md` or your `search_web` findings to rebut the query!"
+               , "   - **If the text is genuinely ambiguous**: Note both readings as live possibilities without treating the query as settled fact."
+               ]
+  TIO.writeFile questionsPath questionsContent
+  TIO.writeFile discPromptPath discPromptText
+  pure (questionsPath, discPromptPath)
+
 renderCriticFeedbackMarkdown :: FilePath -> Int -> Bool -> [Text] -> [Text] -> [Text] -> Text
-renderCriticFeedbackMarkdown sessionDir curIdx includeVerifiedLog verifiedLog verifiedFacts styleCoaching =
+renderCriticFeedbackMarkdown sessionDir curIdx isArchiveDoc verifiedLog peerQueries styleCoaching =
   let curPad = T.pack (padChunkNumber curIdx)
-      factLines =
-        if null verifiedFacts
-          then ["- *(None flagged on Chunk " <> curPad <> ".)*"]
-          else verifiedFacts
       styleLines =
         if null styleCoaching
           then ["- *(None flagged on Chunk " <> curPad <> " — persona and style were on target.)*"]
           else styleCoaching
+      factArchiveSection =
+        if not isArchiveDoc
+          then []
+          else
+            [ ""
+            , "## Fact-Checker Peer Verification Queries (Delivered via Pre-Next `Reader Discussion`)"
+            , ""
+            ]
+              ++ (if null peerQueries then ["- *(None flagged on Chunk " <> curPad <> ".)*"] else peerQueries)
       verifiedLogSection =
-        if not includeVerifiedLog || null verifiedLog
+        if not isArchiveDoc || null verifiedLog
           then []
           else
             [ ""
@@ -3778,30 +3902,23 @@ renderCriticFeedbackMarkdown sessionDir curIdx includeVerifiedLog verifiedLog ve
             ]
               ++ verifiedLog
    in T.unlines $
-        [ "# Peer Fact-Check & Persona Critique Notes (From Chunk " <> curPad <> ")"
+        [ "# Persona & Style Critique Notes (From Chunk " <> curPad <> ")"
         , ""
         , "*Session Directory*: `" <> T.pack sessionDir <> "`"
         , ""
         , "> [!IMPORTANT]"
         , "> **HOW TO USE THIS FILE**:"
-        , "> 1. **For Disputed Facts & Memory Checks (`fact-checker`)**: The `fact-checker` subagent is another AI model and **can also misread jokes/subtext or confuse external canon with this story's intentional AU divergences**. Treat every factual flag below strictly as a **disputed claim** that you must verify against the primary source (`chunks/chunk_XXXX.md`, Bullet 1 of `## Story Summary So Far` in `memory.md`, or `search_web`) before accepting:"
-        , ">    - **If the primary source confirms the fact-checker's point**: Fix the error in `=== UPDATED MEMORY ===` on this turn and, if it was a material misread in your previous commentary, include a brief, natural 1-sentence in-character realization in `=== COMMENTARY ===` (e.g., *\"Wait—looking back at what I wrote last chunk, I misread...\"*)."
-        , ">    - **If the primary source, an intentional AU divergence, or context shows your original reading (or joke/speculation) was right**: **Overrule and ignore the flag!**"
-        , "> 2. **For Persona & Style Critique (`commentary-critic`)**: Read `commentary-critic`'s editorial review of how your previous entry aligned with your Active Persona. Apply useful voice and craft adjustments **silently** as you write this chunk's commentary (while retaining editorial autonomy over what fits the current scene). **NEVER** apologize for, mention, or meta-reference style/coaching feedback inside `=== COMMENTARY ===`."
+        , "> Read `commentary-critic`'s editorial review of how your previous entry aligned with your Active Persona. Apply useful voice and craft adjustments **silently** as you write this chunk's commentary (while retaining editorial autonomy over what fits the current scene). **NEVER** apologize for, mention, or meta-reference style/coaching feedback inside `=== COMMENTARY ===`."
         , ""
-        , "## Disputed Facts & Memory Checks (Verify Against Primary Source Before Accepting)"
+        , "## Persona & Style Critique (Apply Silently — Never Mention in Commentary)"
         , ""
         ]
-          ++ factLines
-          ++ [ ""
-             , "## Persona & Style Critique (Apply Silently — Never Mention in Commentary)"
-             , ""
-             ]
           ++ styleLines
+          ++ factArchiveSection
           ++ verifiedLogSection
 
-processCriticFeedback :: FilePath -> Int -> Bool -> [Text] -> Maybe Text -> Maybe Text -> IO (Bool, Int, Int)
-processCriticFeedback sessionDir curIdx hasSearchWebCall linterWarnings mRawFactCheck mRawCritic = do
+processCriticFeedback :: FilePath -> SessionState -> Int -> Bool -> [Text] -> Maybe Text -> Maybe Text -> IO (Bool, Int, Bool, Int, Int)
+processCriticFeedback sessionDir st curIdx hasSearchWebCall linterWarnings mRawFactCheck mRawCritic = do
   let (factVerLog1, rawFacts1, rawStyles1) =
         case mRawFactCheck of
           Nothing -> ([], [], [])
@@ -3817,24 +3934,37 @@ processCriticFeedback sessionDir curIdx hasSearchWebCall linterWarnings mRawFact
       allVerifiedLog = map annotateSearchWeb (factVerLog1 ++ factVerLog2)
       allRawFacts = rawFacts1 ++ rawFacts2
       allRawStyles = rawStyles1 ++ rawStyles2
-  (verifiedFacts, rejectedCount) <- verifyAndFilterCriticFactBullets sessionDir hasSearchWebCall allRawFacts
+  (peerQueries, rejectedCount) <- verifyAndFilterCriticFactBullets sessionDir hasSearchWebCall allRawFacts
   let combinedStyles = linterWarnings ++ allRawStyles
-      totalActiveNotes = length verifiedFacts + length combinedStyles
+      totalStyleNotes = length combinedStyles
+      factQueriesCount = length peerQueries
+      hasFactQueries = factQueriesCount > 0
       feedbackPath = sessionDir </> "critic_feedback.md"
+      questionsPath = sessionDir </> "current_fact_check_questions.md"
+      discPromptPath = sessionDir </> "current_discussion_prompt.md"
       criticArchDir = sessionDir </> "archive" </> "critic"
-  when (totalActiveNotes > 0 || not (null allVerifiedLog)) $ do
+  when (totalStyleNotes > 0 || hasFactQueries || not (null allVerifiedLog)) $ do
     createDirectoryIfMissing True criticArchDir
-    let archivedDoc = renderCriticFeedbackMarkdown sessionDir curIdx True allVerifiedLog verifiedFacts combinedStyles
+    let archivedDoc = renderCriticFeedbackMarkdown sessionDir curIdx True allVerifiedLog peerQueries combinedStyles
     TIO.writeFile (criticArchDir </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")) archivedDoc
-  if totalActiveNotes == 0
+  if hasFactQueries
+    then do
+      _ <- writeFactCheckDiscussionPromptFile sessionDir st peerQueries
+      pure ()
+    else do
+      qExists <- doesFileExist questionsPath
+      when qExists (removeFile questionsPath `catch` (\(_ :: IOException) -> pure ()))
+      dExists <- doesFileExist discPromptPath
+      when dExists (removeFile discPromptPath `catch` (\(_ :: IOException) -> pure ()))
+  if totalStyleNotes == 0
     then do
       fbExists <- doesFileExist feedbackPath
       when fbExists (removeFile feedbackPath `catch` (\(_ :: IOException) -> pure ()))
-      pure (False, 0, rejectedCount)
+      pure (False, 0, hasFactQueries, factQueriesCount, rejectedCount)
     else do
-      let rendered = renderCriticFeedbackMarkdown sessionDir curIdx False [] verifiedFacts combinedStyles
+      let rendered = renderCriticFeedbackMarkdown sessionDir curIdx False [] [] combinedStyles
       TIO.writeFile feedbackPath rendered
-      pure (True, totalActiveNotes, rejectedCount)
+      pure (True, totalStyleNotes, hasFactQueries, factQueriesCount, rejectedCount)
 
 stripLeadingChunkHeading :: Text -> Text
 stripLeadingChunkHeading txt =
@@ -3880,6 +4010,8 @@ cmdNext rawSessionDir forceFlag = do
   st <- loadState sessionDir
   let curIdx = stCurrentIndex st
       totalChunks = stTotalChunks st
+      questionsPath = sessionDir </> "current_fact_check_questions.md"
+      discPromptPath = sessionDir </> "current_discussion_prompt.md"
 
   when (curIdx > 0 && not (stCurrentRecorded st) && not forceFlag) $
     die $
@@ -3894,6 +4026,20 @@ cmdNext rawSessionDir forceFlag = do
         ++ show curIdx
         ++ " commentary has been recorded, but prediction-judge verdicts have not been recorded yet. "
         ++ "Run 'judge' first (or pass --force to override)."
+
+  hasFactCheckPending <- doesFileExist discPromptPath
+  when (curIdx > 0 && hasFactCheckPending && not forceFlag) $
+    die $
+      "Error: Chunk "
+        ++ show curIdx
+        ++ " has a pending Fact-Check Peer Query in "
+        ++ discPromptPath
+        ++ ". Send current_discussion_prompt.md to blind-reader via send_message and record the response with 'LetsRead.hs discuss --session <dir> --subagent-log <reader_log>' before running 'next' (or pass --force to override)."
+
+  when (hasFactCheckPending && forceFlag) $ do
+    qExists <- doesFileExist questionsPath
+    when qExists (removeFile questionsPath `catch` (\(_ :: IOException) -> pure ()))
+    removeFile discPromptPath `catch` (\(_ :: IOException) -> pure ())
 
   if curIdx >= totalChunks
     then do
@@ -4146,6 +4292,37 @@ checkSubagentLogUsedSearchWeb rawLogPath = do
               && ("\"name\":\"search_web\"" `T.isInfixOf` l || "\"name\": \"search_web\"" `T.isInfixOf` l)
       pure (any hasSearchCall currentTurnLines)
 
+checkSubagentLogUsedVerificationTools :: FilePath -> IO Bool
+checkSubagentLogUsedVerificationTools rawLogPath = do
+  let cleanPath = stripFileUriPrefix rawLogPath
+      fullCandidate = takeDirectory cleanPath </> "transcript_full.jsonl"
+  hasFull <- doesFileExist fullCandidate
+  targetPath <-
+    if hasFull
+      then pure fullCandidate
+      else do
+        hasClean <- doesFileExist cleanPath
+        if hasClean
+          then pure cleanPath
+          else pure ""
+  if null targetPath
+    then pure False
+    else do
+      raw <- readTextFileSafe targetPath
+      let isTurnStart l =
+            let t = extractJsonStringField "type" l
+             in t == Just "SYSTEM_MESSAGE" || t == Just "USER_INPUT"
+          revLines = reverse (T.lines raw)
+          currentTurnLines = takeWhile (not . isTurnStart) revLines
+          hasVerifyCall l =
+            extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
+              && ( "\"name\":\"read_file\"" `T.isInfixOf` l
+                     || "\"name\": \"read_file\"" `T.isInfixOf` l
+                     || "\"name\":\"search_web\"" `T.isInfixOf` l
+                     || "\"name\": \"search_web\"" `T.isInfixOf` l
+                 )
+      pure (any hasVerifyCall currentTurnLines)
+
 extractSubagentLogResponse :: FilePath -> IO Text
 extractSubagentLogResponse rawLogPath = do
   let cleanPath = stripFileUriPrefix rawLogPath
@@ -4160,9 +4337,17 @@ extractSubagentLogResponse rawLogPath = do
           then pure cleanPath
           else die ("Error: Subagent transcript log not found: " ++ rawLogPath)
   raw <- readTextFileSafe targetPath
-  let isPlannerResponseLine l =
+  let isTurnStart l =
+        let t = extractJsonStringField "type" l
+         in t == Just "SYSTEM_MESSAGE" || t == Just "USER_INPUT"
+      isPlannerResponseLine l =
         extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
-      revLines = filter isPlannerResponseLine (reverse (T.lines raw))
+      allRevLines = reverse (T.lines raw)
+      currentTurnPlannerLines = filter isPlannerResponseLine (takeWhile (not . isTurnStart) allRevLines)
+      revLines =
+        if null currentTurnPlannerLines
+          then filter isPlannerResponseLine allRevLines
+          else currentTurnPlannerLines
       lineTexts l =
         [ T.strip m
         | Just m <- [extractJsonStringField "Message" l, extractJsonStringField "content" l]
@@ -4457,8 +4642,8 @@ cmdJudge opts = do
             pure (Just rawC)
           Nothing -> pure Nothing
 
-  (criticFeedbackWritten, criticNotesCount, rejectedCriticQuotesCount) <-
-    processCriticFeedback sessionDir curIdx hasFactCheckSearchWeb (stPendingLinterWarnings st) mRawFactCheck mRawCritic
+  (criticFeedbackWritten, criticNotesCount, factCheckPending, factQueriesCount, rejectedCriticQuotesCount) <-
+    processCriticFeedback sessionDir st curIdx hasFactCheckSearchWeb (stPendingLinterWarnings st) mRawFactCheck mRawCritic
 
   let judgeSec = extractJudgeSection rawJudge
       (preds', judgeAuditBlocks, judgeSummaryLines) =
@@ -4498,20 +4683,32 @@ cmdJudge opts = do
 
   hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
   let storyChunksDone = curIdx >= stTotalChunks st
-      isFin = storyChunksDone && hasWrapup
-      nextHint =
-        if storyChunksDone && not hasWrapup
-          then "All story chunks have been judged! Run 'LetsRead.hs next --session <dir>' to unlock the dedicated Final Wrapup Round for blind-reader."
-          else "Run 'LetsRead.hs next --session <dir>' to unlock the next chunk (or present the commentary to the user)."
+      isFin = storyChunksDone && hasWrapup && not factCheckPending
+      statusStr = if factCheckPending then "awaiting_fact_check_response" else "judged"
+      nextHint
+        | factCheckPending =
+            "Fact-checker raised "
+              <> jsonInt factQueriesCount
+              <> " peer verification query(ies) on Chunk "
+              <> jsonInt curIdx
+              <> "! Read <session_dir>/current_discussion_prompt.md and send it via send_message to the active blind-reader subagent so it can independently verify with read_file/search_web and reply, then record the response using 'LetsRead.hs discuss --session <dir> --subagent-log <reader_log>' BEFORE running 'next'."
+        | storyChunksDone && not hasWrapup =
+            "All story chunks have been judged! Run 'LetsRead.hs next --session <dir>' to unlock the dedicated Final Wrapup Round for blind-reader."
+        | otherwise =
+            "Run 'LetsRead.hs next --session <dir>' to unlock the next chunk (or present the commentary to the user)."
   TIO.putStrLn $
     jsonObject
-      [ ("status", jsonStr "judged")
+      [ ("status", jsonStr statusStr)
       , ("chunk_index", jsonInt curIdx)
       , ("total_chunks", jsonInt (stTotalChunks st))
       , ("remaining_chunks", jsonInt (stTotalChunks st - curIdx))
       , ("is_finished", jsonBool isFin)
       , ("wrapup_recorded", jsonBool hasWrapup)
-      , ("wrapup_pending", jsonBool (storyChunksDone && not hasWrapup))
+      , ("wrapup_pending", jsonBool (storyChunksDone && not hasWrapup && not factCheckPending))
+      , ("fact_check_discussion_pending", jsonBool factCheckPending)
+      , ("fact_check_questions_count", jsonInt factQueriesCount)
+      , ("discussion_prompt_file", if factCheckPending then jsonStr (T.pack (sessionDir </> "current_discussion_prompt.md")) else "null")
+      , ("fact_check_questions_file", if factCheckPending then jsonStr (T.pack (sessionDir </> "current_fact_check_questions.md")) else "null")
       , ("entry_file", jsonStr (T.pack entryFile))
       , ("log_file", jsonStr (T.pack logPath))
       , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
@@ -4530,7 +4727,7 @@ cmdJudge opts = do
       , ("curated_memory_bytes", jsonInt curBytes)
       , ("orchestrator_rule", jsonStr orchestratorRuleText)
       , ("next_step_hint", jsonStr nextHint)
-      , ("discussion_command_hint", jsonStr "If the user replies with comments, questions, or theories before asking to continue, forward their message to blind-reader and record the exchange using 'LetsRead.hs discuss --session <dir> --user-message \"...\" --response-file <path>'.")
+      , ("discussion_command_hint", jsonStr "If fact_check_discussion_pending is true, send discussion_prompt_file to blind-reader and run 'LetsRead.hs discuss --session <dir> --subagent-log <reader_log>'. If the user replies with comments or questions, forward their message to blind-reader and record with 'LetsRead.hs discuss --session <dir> --user-message \"...\" --subagent-log <reader_log>'.")
       ]
 
 data DiscussOptions = DiscussOptions
@@ -4559,11 +4756,22 @@ formatUserQuote msg =
         ("> **User**: " <> firstLine)
           : [if T.null (T.strip l) then ">" else "> " <> l | l <- restLines]
 
+formatPeerFactCheckQuote :: Text -> Text
+formatPeerFactCheckQuote msg =
+  case [T.stripEnd l | l <- T.lines (T.strip msg), not (T.null (T.strip l))] of
+    [] -> ""
+    ls ->
+      T.unlines $
+        "> **Fact-Check Peer Query (Unspoiled AI Peer — Verify Against Primary Source)**:"
+          : ["> " <> l | l <- ls]
+
 cmdDiscuss :: DiscussOptions -> IO ()
 cmdDiscuss opts = do
   sessionDir <- canonicalizePath (discSession opts)
   st <- loadState sessionDir
   let curIdx = stCurrentIndex st
+      questionsPath = sessionDir </> "current_fact_check_questions.md"
+      discPromptPath = sessionDir </> "current_discussion_prompt.md"
   when (curIdx < 1) $
     die "Error: No chunk is currently unlocked. Run 'next' first."
   unless (stCurrentRecorded st) $
@@ -4594,15 +4802,32 @@ cmdDiscuss opts = do
   when (T.null replyText) $
     die "Error: Discussion reply content is empty."
 
+  hasPendingFactCheck <- doesFileExist questionsPath
+  let userFileIsFactCheck =
+        case discUserFile opts of
+          Nothing -> False
+          Just uPath ->
+            let base = takeFileName uPath
+             in base == "current_fact_check_questions.md" || base == "current_discussion_prompt.md"
+      hasExplicitCustomUser =
+        (case discUserMessage opts of Just m -> not (T.null (T.strip m)); Nothing -> False)
+          || (isJust (discUserFile opts) && not userFileIsFactCheck)
+      isFactCheckDiscussion = hasPendingFactCheck && not hasExplicitCustomUser
+
   mUserFromFile <-
-    case discUserFile opts of
-      Nothing -> pure Nothing
-      Just uPath -> do
-        exists <- doesFileExist uPath
-        unless exists $ die ("Error: User message file not found: " ++ uPath)
-        txt <- readTextFileSafe uPath
+    if isFactCheckDiscussion
+      then do
+        txt <- readTextFileSafe questionsPath
         let stripped = T.strip txt
         pure (if T.null stripped then Nothing else Just stripped)
+      else case discUserFile opts of
+        Nothing -> pure Nothing
+        Just uPath -> do
+          exists <- doesFileExist uPath
+          unless exists $ die ("Error: User message file not found: " ++ uPath)
+          txt <- readTextFileSafe uPath
+          let stripped = T.strip txt
+          pure (if T.null stripped then Nothing else Just stripped)
 
   let mUserMsg =
         case discUserMessage opts of
@@ -4664,13 +4889,23 @@ cmdDiscuss opts = do
       userBlock =
         case mUserMsg of
           Nothing -> ""
-          Just u -> formatUserQuote u <> "\n"
+          Just u
+            | isFactCheckDiscussion -> formatPeerFactCheckQuote u <> "\n"
+            | otherwise -> formatUserQuote u <> "\n"
       trackerCallout = formatPredictionTrackerCallout trackerUpdates
       auditCallout = formatAuditEntryCallout auditBlocks
-      appendedSection = headingPrefix <> userBlock <> replyText <> trackerCallout <> auditCallout
+      appendedSection = headingPrefix <> userBlock <> stripLeadingChunkHeading replyText <> trackerCallout <> auditCallout
       updatedEntry = baseEntry <> "\n\n" <> appendedSection <> "\n\n---\n\n"
 
   TIO.writeFile entryFile updatedEntry
+
+  when isFactCheckDiscussion $ do
+    qExists <- doesFileExist questionsPath
+    when qExists (removeFile questionsPath `catch` (\(_ :: IOException) -> pure ()))
+    dExists <- doesFileExist discPromptPath
+    when dExists (removeFile discPromptPath `catch` (\(_ :: IOException) -> pure ()))
+
+  usedVerifyTools <- maybe (pure False) checkSubagentLogUsedVerificationTools (discSubagentLog opts)
 
   let chunkIndex' =
         case mParsedSummary of
@@ -4696,13 +4931,26 @@ cmdDiscuss opts = do
 
   (needsCompaction, curLines, curBytes) <- syncMemoryAndArchives sessionDir st'
   logPath <- rebuildMasterLog sessionDir st'
-  when memUpdated $
+  when (memUpdated || isFactCheckDiscussion) $
     saveState sessionDir st'
+
+  stillPending <- doesFileExist discPromptPath
+  let storyChunksDone = curIdx >= stTotalChunks st && stCurrentRecorded st' && stCurrentJudged st' && not stillPending
+      nextHint
+        | stillPending =
+            "A Fact-Check Peer Query is still pending in current_discussion_prompt.md. Send it to blind-reader and run 'discuss' before 'next'."
+        | storyChunksDone && not hasWrapup =
+            "Fact-check discussion resolved and all story chunks are judged! Run 'LetsRead.hs next --session <dir>' to unlock the dedicated Final Wrapup Round."
+        | otherwise =
+            "Discussion recorded! Run 'LetsRead.hs next --session <dir>' to unlock the next chunk (or present the commentary and discussion to the user)."
 
   TIO.putStrLn $
     jsonObject
       [ ("status", jsonStr "discussed")
       , ("chunk_index", jsonInt curIdx)
+      , ("fact_check_discussion_resolved", jsonBool isFactCheckDiscussion)
+      , ("fact_check_discussion_pending", jsonBool stillPending)
+      , ("reader_verified_with_tools", jsonBool usedVerifyTools)
       , ("entry_file", jsonStr (T.pack entryFile))
       , ("log_file", jsonStr (T.pack logPath))
       , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
@@ -4714,6 +4962,7 @@ cmdDiscuss opts = do
       , ("curated_memory_lines", jsonInt curLines)
       , ("curated_memory_bytes", jsonInt curBytes)
       , ("orchestrator_rule", jsonStr orchestratorRuleText)
+      , ("next_step_hint", jsonStr nextHint)
       ]
 
 cmdStatus :: FilePath -> IO ()
@@ -4721,7 +4970,8 @@ cmdStatus rawSessionDir = do
   sessionDir <- canonicalizePath rawSessionDir
   st <- loadState sessionDir
   hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
-  TIO.putStr (renderStateJson sessionDir hasWrapup st)
+  hasFactCheckPending <- doesFileExist (sessionDir </> "current_discussion_prompt.md")
+  TIO.putStr (renderStateJson sessionDir hasWrapup hasFactCheckPending st)
 
 -- ---------------------------------------------------------------------------
 -- Argument Parsing & Entrypoint
