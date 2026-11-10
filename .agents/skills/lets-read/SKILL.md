@@ -124,20 +124,26 @@ hallucinations, and persona/tone drift—by combining a **Haskell Gatekeeper**
      - `.agents/skills/lets-read/resources/commentary_template.md` (flexible
        commentary structure guide — allowed on-demand via `read_file`)
 
+     - `<session_dir>/chunks/` (unlocked story chunks `chunk_0001.md` ..
+       `chunk_XXXX.md`, plus auto-maintained multi-layer chronological and
+       semantic topic indices `by_chronology.md`, `by_topic.md`,
+       `archive/chronology/`, and `archive/topics/` — allowed on-demand via
+       `read_file` to verify callbacks and quotes without hallucinating)
+
+     - `<session_dir>/entries/` (recorded Let's Read commentary `chunk_0001.md`
+       .. `chunk_XXXX.md` and `wrapup.md`, plus auto-maintained multi-layer
+       chronological and semantic topic indices `by_chronology.md`,
+       `by_topic.md`, `archive/chronology/`, and `archive/topics/` — allowed
+       on-demand via `read_file`)
+
      - `<session_dir>/predictions/` (auto-indexed prediction files:
-       `by_chronology.md`, `by_topic.md`, `pred_XXXX.md`, and upon story
-       completion `hall_of_fame.md` — allowed on-demand via `read_file`)
+       `by_chronology.md`, `by_topic.md`, `archive/chronology/`,
+       `archive/topics/`, `pred_XXXX.md`, and upon story completion
+       `hall_of_fame.md` — allowed on-demand via `read_file`)
 
-     - `<session_dir>/archive/` (multi-level arc archive files `L1_XXXX.md`,
-       `L2_XXXX.md`, and historical memory snapshots
-       `archive/memory/chunk_XXXX.md` — allowed on-demand via `read_file`)
-
-     - `<session_dir>/chunks/` (previously unlocked story chunks
-       `chunk_0001.md` .. `chunk_XXXX.md` — allowed on-demand via `read_file` to
-       verify callbacks and quotes without hallucinating)
-
-     - `<session_dir>/entries/` (previously recorded Let's Read commentary
-       `chunk_0001.md` .. `chunk_XXXX.md` — allowed on-demand via `read_file`)
+     - `<session_dir>/archive/memory/` (end-of-arc curated memory snapshots
+       `curated_XXXX.md` and per-chunk full memory snapshots `chunk_XXXX.md` —
+       allowed on-demand via `read_file`)
 
 6. **NEVER Impersonate Subagents, Answer Story Questions Directly, Edit `memory.md` Directly, or Paste Chunks/Memory Inline**:
 
@@ -345,8 +351,10 @@ For each chunk to be read:
 
    `LetsRead.hs record` automatically:
 
-   - Splits `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===`,
-     `=== PREDICTION UPDATES ===`, and `=== UPDATED MEMORY ===`.
+   - Splits `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===` (`[Story | Topics: ...]`
+     and `[Entry | Topics: ...]`), `=== PREDICTION UPDATES ===`, and
+     `=== UPDATED MEMORY ===`, and syncs the multi-layer chronological and
+     semantic topic indices across `chunks/`, `entries/`, and `predictions/`.
 
    - Runs a deterministic style/anti-pattern linter on `=== COMMENTARY ===`.
 
@@ -476,7 +484,9 @@ For each chunk to be read:
         This appends the exchange under `### Reader Discussion` in
         `<session_dir>/entries/chunk_XXXX.md` (labeled
         `> **Fact-Check Peer Query (Unspoiled AI Peer — Verify Against Primary Source)**:`),
-        updates `memory.md` and `predictions/pred_XXXX.md` if amended, and clears
+        appends the `[Discussion | Topics: ...]` summary to `entries/by_chronology.md`
+        and `entries/by_topic.md`, updates `memory.md`, `chunks/`, and
+        `predictions/pred_XXXX.md` if amended, and clears
         `"fact_check_discussion_pending": false`.
 
 7. **Dedicated Final Wrapup Round (After Final Story Chunk `N/N` Is Judged and Any Fact-Check Query Is Resolved)**:

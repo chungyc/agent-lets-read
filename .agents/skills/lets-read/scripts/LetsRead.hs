@@ -24,10 +24,10 @@ import Data.Bits (xor)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import Data.Char (chr, isAlphaNum, isDigit, isHexDigit, isSpace, isUpper, toLower)
-import Data.List (foldl', groupBy, isPrefixOf, isSuffixOf, nub, sort, sortOn)
+import Data.List (foldl', groupBy, isPrefixOf, isSuffixOf, maximumBy, nub, sort, sortOn)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
-import Data.Ord (Down (..))
+import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
+import Data.Ord (Down (..), comparing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -39,7 +39,10 @@ import Numeric (readHex)
 import System.Directory
   ( canonicalizePath
   , createDirectoryIfMissing
+  , doesDirectoryExist
   , doesFileExist
+  , getHomeDirectory
+  , getModificationTime
   , listDirectory
   , removeFile
   )
@@ -102,17 +105,42 @@ chunkToMeta c =
     , metaWordCount = wordCount c
     }
 
-data ChunkIndexEntry = ChunkIndexEntry
-  { cieChunkIndex :: !Int
-  , cieChapterNumber :: !Int
-  , cieChapterTitle :: !Text
-  , ciePartInChapter :: !Int
-  , ciePartsInChapter :: !Int
-  , cieSummary :: !Text
+data StoryChunkRecord = StoryChunkRecord
+  { scrChunkIndex :: !Int
+  , scrChapterNumber :: !Int
+  , scrChapterTitle :: !Text
+  , scrPartInChapter :: !Int
+  , scrPartsInChapter :: !Int
+  , scrTopics :: ![Text]
+  , scrSummary :: !Text
   }
   deriving (Show, Eq, Generic)
 
-instance Binary ChunkIndexEntry
+instance Binary StoryChunkRecord
+
+data EntryDiscussionRecord = EntryDiscussionRecord
+  { edrIsFactCheck :: !Bool
+  , edrTopics :: ![Text]
+  , edrSummary :: !Text
+  }
+  deriving (Show, Eq, Generic)
+
+instance Binary EntryDiscussionRecord
+
+data EntryLogRecord = EntryLogRecord
+  { elrEntryIndex :: !Int
+  , elrIsWrapup :: !Bool
+  , elrChapterNumber :: !Int
+  , elrChapterTitle :: !Text
+  , elrPartInChapter :: !Int
+  , elrPartsInChapter :: !Int
+  , elrTopics :: ![Text]
+  , elrSummary :: !Text
+  , elrDiscussions :: ![EntryDiscussionRecord]
+  }
+  deriving (Show, Eq, Generic)
+
+instance Binary EntryLogRecord
 
 data PredictionStatus
   = PredStatusActive
@@ -128,6 +156,8 @@ data PredictionRecord = PredictionRecord
   { prOriginChunk :: !Int
   , prChapterNumber :: !Int
   , prChapterTitle :: !Text
+  , prPartInChapter :: !Int
+  , prPartsInChapter :: !Int
   , prTopics :: ![Text]
   , prClue :: !Text
   , prTheory :: !Text
@@ -152,7 +182,8 @@ data SessionState = SessionState
   , stCurrentJudged :: !Bool
   , stCurrentMeta :: !(Maybe ChunkMeta)
   , stCompletedChunks :: ![Int]
-  , stChunkIndex :: ![ChunkIndexEntry]
+  , stStoryRecords :: ![StoryChunkRecord]
+  , stEntryRecords :: ![EntryLogRecord]
   , stCuratedMemory :: ![(Text, Text)]
   , stPredictions :: ![PredictionRecord]
   , stPendingRetirements :: ![(Int, Text)]
@@ -288,7 +319,11 @@ renderStateJson sessionDir hasWrapup hasFactCheckPending st =
         , ("fact_check_questions_file", if hasFactCheckPending then jsonStr (T.pack (sessionDir </> "current_fact_check_questions.md")) else "null")
         , ("critic_feedback_file", jsonStr (T.pack (sessionDir </> "critic_feedback.md")))
         , ("chunks_dir", jsonStr (T.pack (sessionDir </> "chunks")))
+        , ("chunks_by_chronology_file", jsonStr (T.pack (sessionDir </> "chunks" </> "by_chronology.md")))
+        , ("chunks_by_topic_file", jsonStr (T.pack (sessionDir </> "chunks" </> "by_topic.md")))
         , ("entries_dir", jsonStr (T.pack (sessionDir </> "entries")))
+        , ("entries_by_chronology_file", jsonStr (T.pack (sessionDir </> "entries" </> "by_chronology.md")))
+        , ("entries_by_topic_file", jsonStr (T.pack (sessionDir </> "entries" </> "by_topic.md")))
         , ("wrapup_file", if hasWrapup then jsonStr (T.pack (sessionDir </> "entries" </> "wrapup.md")) else "null")
         , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
         , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
@@ -1059,6 +1094,7 @@ classifyMemoryHeading rawHeading =
   let h = T.toLower (T.strip rawHeading)
    in if "chunk index" `T.isInfixOf` h
         || "memory archive" `T.isInfixOf` h
+        || "session index" `T.isInfixOf` h
         || "index tree" `T.isInfixOf` h
         || "prediction slate" `T.isInfixOf` h
         || "auto-maintained" `T.isInfixOf` h
@@ -1474,12 +1510,14 @@ auditAndApplyPredictionUpdates
   -> Int
   -> Int
   -> Text
+  -> Int
+  -> Int
   -> Bool
   -> Text
   -> [PredictionRecord]
   -> Maybe Text
   -> ([PredictionRecord], [(Int, Text)], [Text], [Text])
-auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle isRecordTurn commText prevRecords mPredUpdatesTxt =
+auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum partsTotal isRecordTurn commText prevRecords mPredUpdatesTxt =
   let curStr = T.pack (padChunkNumber (max 1 curIdx))
       nextStr = T.pack (padChunkNumber (max 1 curIdx + 1))
       prevActives = [pr | pr <- prevRecords, prStatus pr == PredStatusActive]
@@ -1634,6 +1672,8 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle isRecordTurn
           { prOriginChunk = c1
           , prChapterNumber = chapNum
           , prChapterTitle = chapTitle
+          , prPartInChapter = partNum
+          , prPartsInChapter = partsTotal
           , prTopics = topics
           , prClue = clue
           , prTheory = theory
@@ -2020,6 +2060,8 @@ resolveAndAuditTurn
   -> Int
   -> Int
   -> Text
+  -> Int
+  -> Int
   -> Bool
   -> Text
   -> [(Text, Text)]
@@ -2028,7 +2070,7 @@ resolveAndAuditTurn
   -> Maybe Text
   -> Maybe Text
   -> ([(Text, Text)], [PredictionRecord], [(Int, Text)], [Text], [Text])
-resolveAndAuditTurn curIdx totalChunks chapNum chapTitle isRecordTurn commText prevSections prevPreds prevWarns mPredUpdates mMemTxt =
+resolveAndAuditTurn curIdx totalChunks chapNum chapTitle partNum partsTotal isRecordTurn commText prevSections prevPreds prevWarns mPredUpdates mMemTxt =
   let curated' = mergeCuratedNarrativeMemory prevSections mMemTxt
       (preds', pendingRetires, auditBlocks, trackerUpdates) =
         if isRecordTurn || isJust mPredUpdates
@@ -2038,6 +2080,8 @@ resolveAndAuditTurn curIdx totalChunks chapNum chapTitle isRecordTurn commText p
               totalChunks
               chapNum
               chapTitle
+              partNum
+              partsTotal
               isRecordTurn
               commText
               prevPreds
@@ -2061,14 +2105,27 @@ checkMemoryCompaction sections =
       byteCount = BS.length (TE.encodeUtf8 rendered)
    in (lineCount > 80 || byteCount > 8000, lineCount, byteCount)
 
-groupChunksIntoArcs :: [ChunkIndexEntry] -> [[ChunkIndexEntry]]
-groupChunksIntoArcs = go [] [] (0 :: Int)
+formatChapLabel :: Int -> Text -> Text
+formatChapLabel chapNum chapTitle
+  | chapNum == 0 = chapTitle
+  | "chapter " `T.isPrefixOf` T.toLower (T.strip chapTitle) = chapTitle
+  | otherwise = "Ch. " <> jsonInt chapNum <> ": " <> chapTitle
+
+groupsOfList :: Int -> [a] -> [[a]]
+groupsOfList _ [] = []
+groupsOfList n xs =
+  let (h, t) = splitAt n xs
+   in h : groupsOfList n t
+
+groupItemsIntoArcs :: (a -> (Int, Text)) -> (a -> (Int, Int)) -> [a] -> [[a]]
+groupItemsIntoArcs getChap getPart = go [] [] (0 :: Int)
   where
     go [] _ _ [] = []
     go cur _ _ [] = [reverse cur]
     go cur chapsInCur countInCur (e : es) =
-      let chap = cieChapterNumber e
-          isNewChap = ciePartInChapter e == 1 && chap `notElem` chapsInCur
+      let (chap, _) = getChap e
+          (partInC, _) = getPart e
+          isNewChap = partInC == 1 && chap `notElem` chapsInCur
           shouldSplit =
             countInCur >= 25
               || (isNewChap && (length chapsInCur >= 10 || countInCur >= 18))
@@ -2078,110 +2135,29 @@ groupChunksIntoArcs = go [] [] (0 :: Int)
               let chaps' = if chap `elem` chapsInCur then chapsInCur else chap : chapsInCur
                in go (e : cur) chaps' (countInCur + 1) es
 
-formatChapLabel :: Int -> Text -> Text
-formatChapLabel chapNum chapTitle
-  | chapNum == 0 = chapTitle
-  | "chapter " `T.isPrefixOf` T.toLower (T.strip chapTitle) = chapTitle
-  | otherwise = "Ch. " <> jsonInt chapNum <> ": " <> chapTitle
+cleanArchiveDirectory :: FilePath -> IO ()
+cleanArchiveDirectory dir = do
+  exists <- doesDirectoryExist dir
+  when exists $ do
+    names <- listDirectory dir
+    forM_ names $ \f ->
+      when ("L" `isPrefixOf` f && ".md" `isSuffixOf` f) $
+        removeFile (dir </> f) `catch` (\(_ :: IOException) -> pure ())
 
-renderChunkIndexLine :: ChunkIndexEntry -> Text
-renderChunkIndexLine e =
-  let padStr = padChunkNumber (cieChunkIndex e)
-      idxStr = T.pack padStr
-      chapStr = formatChapLabel (cieChapterNumber e) (cieChapterTitle e)
-      partStr = "Part " <> jsonInt (ciePartInChapter e) <> "/" <> jsonInt (ciePartsInChapter e)
-      storyPath = T.pack ("chunks" </> ("chunk_" ++ padStr ++ ".md"))
-      entryPath = T.pack ("entries" </> ("chunk_" ++ padStr ++ ".md"))
-      memPath = T.pack ("archive" </> "memory" </> ("chunk_" ++ padStr ++ ".md"))
-   in "- **chunk_"
-        <> idxStr
-        <> "** ("
-        <> chapStr
-        <> ", "
-        <> partStr
-        <> "): "
-        <> cieSummary e
-        <> " ([story]("
-        <> storyPath
-        <> ") | [entry]("
-        <> entryPath
-        <> ") | [memory]("
-        <> memPath
-        <> "))"
-
-writeL1Archive :: FilePath -> Int -> [ChunkIndexEntry] -> IO (FilePath, Text, Text)
-writeL1Archive sessionDir grpIdx entries = do
-  let (startChk, startChap) =
-        case entries of
-          (firstE : _) -> (cieChunkIndex firstE, cieChapterNumber firstE)
-          [] -> (1, 1)
-      (endChk, endChap) =
-        case reverse entries of
-          (lastE : _) -> (cieChunkIndex lastE, cieChapterNumber lastE)
-          [] -> (1, 1)
-      chapRange
-        | startChap == 0 && endChap == 0 = "Front Matter"
-        | startChap == endChap = "Ch. " <> jsonInt startChap
-        | otherwise = "Ch. " <> jsonInt startChap <> "–" <> jsonInt endChap
-      chunkRange =
-        if startChk == endChk
-          then "Chunk " <> T.pack (padChunkNumber startChk)
-          else "Chunks " <> T.pack (padChunkNumber startChk) <> "–" <> T.pack (padChunkNumber endChk)
-      label = "Arc " <> jsonInt grpIdx <> " (" <> chapRange <> " | " <> chunkRange <> ")"
-      distinctChaps = nub [(cieChapterNumber e, cieChapterTitle e) | e <- entries]
-      summaryLine = "Chapters: *" <> T.intercalate "; " [formatChapLabel cn ct | (cn, ct) <- distinctChaps] <> "*"
-      byChapter = groupBy (\a b -> cieChapterNumber a == cieChapterNumber b) entries
-      renderChapGroup [] = ""
-      renderChapGroup grp@(firstE : _) =
-        "### "
-          <> formatChapLabel (cieChapterNumber firstE) (cieChapterTitle firstE)
-          <> "\n"
-          <> T.unlines (map renderChunkIndexLine grp)
-      curatedSnapPath = sessionDir </> "archive" </> "memory" </> ("curated_" ++ padChunkNumber endChk ++ ".md")
-  hasSnap <- doesFileExist curatedSnapPath
-  snapContent <- if hasSnap then readTextFileSafe curatedSnapPath else pure ""
-  let fileName = "L1_" ++ padChunkNumber grpIdx ++ ".md"
-      relPath = "archive" </> fileName
-      fullPath = sessionDir </> relPath
-      archiveDoc =
-        T.unlines
-          [ "# " <> label
-          , ""
-          , "*Session Directory*: `" <> T.pack sessionDir <> "`"
-          , ""
-          , summaryLine
-          , ""
-          , "## Chapter & Chunk Index"
-          , ""
-          , T.intercalate "\n" (map renderChapGroup byChapter)
-          , "---"
-          , ""
-          , "## Historical Reader Memory Snapshot (As of Chunk " <> T.pack (padChunkNumber endChk) <> ")"
-          , ""
-          , if T.null (T.strip snapContent) then "*(No snapshot recorded.)*" else T.strip snapContent
-          ]
-  TIO.writeFile fullPath archiveDoc
-  pure (relPath, label, summaryLine)
-
-groupsOfList :: Int -> [a] -> [[a]]
-groupsOfList _ [] = []
-groupsOfList n xs =
-  let (h, t) = splitAt n xs
-   in h : groupsOfList n t
-
-rollupArchiveLevels :: FilePath -> Int -> [(FilePath, Text, Text)] -> IO [(FilePath, Text, Text)]
-rollupArchiveLevels sessionDir level nodes
+rollupIndexLevels :: FilePath -> FilePath -> Text -> Int -> [(FilePath, Text, Text)] -> IO [(FilePath, Text, Text)]
+rollupIndexLevels sessionDir relArcDir dirHeading level nodes
   | length nodes <= 25 = pure nodes
   | otherwise = do
       let groups = groupsOfList 25 nodes
       parents <- forM (zip [1 :: Int ..] groups) $ \(grpIdx, children) -> do
         let fileName = "L" ++ show level ++ "_" ++ padChunkNumber grpIdx ++ ".md"
-            relPath = "archive" </> fileName
+            relPath = relArcDir </> fileName
             fullPath = sessionDir </> relPath
             firstLbl = case children of ((_, l, _) : _) -> l; [] -> ""
             lastLbl = case reverse children of ((_, l, _) : _) -> l; [] -> ""
             parentLabel =
-              "Archive Directory L"
+              dirHeading
+                <> " L"
                 <> jsonInt level
                 <> "."
                 <> jsonInt grpIdx
@@ -2204,7 +2180,7 @@ rollupArchiveLevels sessionDir level nodes
                   , ""
                   , "*Session Directory*: `" <> T.pack sessionDir <> "`"
                   , ""
-                  , "Read the linked archive files below to inspect chapter/chunk indices and historical memory snapshots:"
+                  , "Read the linked archive files below to inspect detailed entries:"
                   , ""
                   ]
                     ++ [ "- **"
@@ -2220,7 +2196,539 @@ rollupArchiveLevels sessionDir level nodes
                 )
         TIO.writeFile fullPath doc
         pure (relPath, parentLabel, parentSummary)
-      rollupArchiveLevels sessionDir (level + 1) parents
+      rollupIndexLevels sessionDir relArcDir dirHeading (level + 1) parents
+
+extractCanonicalCharacterNames :: [(Text, Text)] -> [Text]
+extractCanonicalCharacterNames curated =
+  let charSec = fromMaybe "" (lookup "Characters & Relationships" curated)
+      stripPersistent s =
+        let s1 = T.strip s
+            low = T.toLower s1
+         in if "(persistent)" `T.isSuffixOf` low
+              then T.strip (T.dropEnd 12 s1)
+              else s1
+      parseBullet l =
+        let s = T.strip l
+         in if not ("- **" `T.isPrefixOf` s || "* **" `T.isPrefixOf` s)
+              then []
+              else
+                let afterStars = T.drop 4 s
+                    (boldPart, rest) = T.breakOn "**" afterStars
+                    cleanHead = stripPersistent boldPart
+                 in if "supporting cast" `T.isInfixOf` T.toLower cleanHead
+                      then
+                        let afterColon = T.drop 1 (snd (T.breakOn ":" rest))
+                            parts = T.splitOn ";" afterColon
+                            extractName p =
+                              cleanTopicTag (fst (T.breakOn "(" (T.strip p)))
+                         in filter (\n -> T.length n >= 3) (map extractName parts)
+                      else
+                        filter (\n -> T.length n >= 3) (map (cleanTopicTag . stripPersistent) (T.splitOn "/" cleanHead))
+   in nub (concatMap parseBullet (T.lines charSec))
+
+topicNormKey :: Text -> Text
+topicNormKey raw =
+  let low = T.toLower (cleanTopicTag raw)
+      normEva =
+        T.replace "unit 0" "eva-0"
+          $ T.replace "unit-0" "eva-0"
+          $ T.replace "eva 0" "eva-0" low
+   in T.unwords (T.words normEva)
+
+canonicalizeTopicTag :: [Text] -> [Text] -> Text -> Text
+canonicalizeTopicTag charNames allMultiWordTags rawTag =
+  let cleaned = cleanTopicTag rawTag
+      tWords = map T.toLower (T.words cleaned)
+      candidates = nub (charNames ++ [t | t <- allMultiWordTags, length (T.words t) >= 2])
+      matchingFull =
+        [ full
+        | full <- candidates
+        , let fWords = map T.toLower (T.words full)
+        , not (null tWords)
+        , all (\w -> T.length w >= 3 && w `elem` fWords) tWords
+        ]
+      normEvaDisplay s =
+        let low = T.toLower s
+         in if "unit 0" `T.isPrefixOf` low && T.length s == 7
+              then "EVA-0" <> T.drop 6 s
+              else s
+   in case nub matchingFull of
+        [singleMatch] -> singleMatch
+        _ -> normEvaDisplay cleaned
+
+data IndexSpec a = IndexSpec
+  { isDomainDir :: !FilePath
+  , isDomainTitle :: !Text
+  , isChronIntro :: !Text
+  , isTopicIntro :: !Text
+  , isItemIndex :: !(a -> Int)
+  , isItemChapter :: !(a -> (Int, Text))
+  , isItemPart :: !(a -> (Int, Int))
+  , isItemTopics :: !(a -> [Text])
+  , isDefaultTopic :: !Text
+  , isRenderChronBullet :: !(FilePath -> a -> Text)
+  , isRenderTopicBullet :: !(FilePath -> a -> Text)
+  , isSummarizeArc :: !([a] -> Text)
+  , isArcExtraFooter :: !(FilePath -> [a] -> IO [Text])
+  }
+
+writeChronArcFile :: FilePath -> IndexSpec a -> Int -> [a] -> IO (FilePath, Text, Text)
+writeChronArcFile sessionDir spec grpIdx arcItems = do
+  let (startIdx, startChap) =
+        case arcItems of
+          (firstE : _) -> (isItemIndex spec firstE, fst (isItemChapter spec firstE))
+          [] -> (1, 1)
+      (endIdx, endChap) =
+        case reverse arcItems of
+          (lastE : _) -> (isItemIndex spec lastE, fst (isItemChapter spec lastE))
+          [] -> (1, 1)
+      chapRange
+        | startChap == 0 && endChap == 0 = "Front Matter"
+        | startChap == endChap = "Ch. " <> jsonInt startChap
+        | otherwise = "Ch. " <> jsonInt startChap <> "–" <> jsonInt endChap
+      itemRange =
+        if startIdx == endIdx
+          then "Chunk " <> T.pack (padChunkNumber startIdx)
+          else "Chunks " <> T.pack (padChunkNumber startIdx) <> "–" <> T.pack (padChunkNumber endIdx)
+      label = "Arc " <> jsonInt grpIdx <> " — " <> isDomainTitle spec <> " (" <> chapRange <> " | " <> itemRange <> ")"
+      summaryLine = isSummarizeArc spec arcItems
+      byChapter = groupBy (\a b -> fst (isItemChapter spec a) == fst (isItemChapter spec b)) arcItems
+      renderChapGroup [] = ""
+      renderChapGroup grp@(firstE : _) =
+        let (cNum, cTitle) = isItemChapter spec firstE
+         in "### "
+              <> formatChapLabel cNum cTitle
+              <> "\n"
+              <> T.unlines (map (isRenderChronBullet spec sessionDir) grp)
+  extraFooter <- isArcExtraFooter spec sessionDir arcItems
+  let relArcDir = isDomainDir spec </> "archive" </> "chronology"
+      fileName = "L1_" ++ padChunkNumber grpIdx ++ ".md"
+      relPath = relArcDir </> fileName
+      fullPath = sessionDir </> relPath
+      doc =
+        T.unlines $
+          [ "# " <> label
+          , ""
+          , "- **Session Directory**: `" <> T.pack sessionDir <> "`"
+          , "- **Summary**: " <> summaryLine
+          , ""
+          , "## " <> isDomainTitle spec <> " by Chapter"
+          , ""
+          , if null arcItems
+              then "- *(No entries recorded in this arc.)*"
+              else T.intercalate "\n" (map renderChapGroup byChapter)
+          ]
+            ++ extraFooter
+  createDirectoryIfMissing True (sessionDir </> relArcDir)
+  TIO.writeFile fullPath doc
+  pure (relPath, label, summaryLine)
+
+syncChronologicalTree :: FilePath -> SessionState -> IndexSpec a -> [a] -> IO ()
+syncChronologicalTree sessionDir st spec items = do
+  let domainPath = sessionDir </> isDomainDir spec
+      relArcDir = isDomainDir spec </> "archive" </> "chronology"
+      fullArcDir = sessionDir </> relArcDir
+  createDirectoryIfMissing True domainPath
+  createDirectoryIfMissing True fullArcDir
+  cleanArchiveDirectory fullArcDir
+
+  let sortedItems = sortOn (isItemIndex spec) items
+      arcs = groupItemsIntoArcs (isItemChapter spec) (isItemPart spec) sortedItems
+      completedArcs = if length arcs <= 1 then [] else init arcs
+  l1Nodes <- forM (zip [1 :: Int ..] completedArcs) $ \(grpIdx, arcItems) ->
+    writeChronArcFile sessionDir spec grpIdx arcItems
+  topArcNodes <- rollupIndexLevels sessionDir relArcDir (isDomainTitle spec <> " Chronology Archive") 2 l1Nodes
+
+  let inlineItems =
+        case reverse arcs of
+          [] -> []
+          [onlyArc] -> onlyArc
+          (lastArc : prevArc : _)
+            | length lastArc < 5 ->
+                let needed = 5 - length lastArc
+                    tailPrev = drop (max 0 (length prevArc - needed)) prevArc
+                 in tailPrev ++ lastArc
+            | otherwise -> lastArc
+      byChap = groupBy (\a b -> fst (isItemChapter spec a) == fst (isItemChapter spec b)) inlineItems
+      renderChapGroup [] = ""
+      renderChapGroup grp@(firstE : _) =
+        let (cNum, cTitle) = isItemChapter spec firstE
+         in "### "
+              <> formatChapLabel cNum cTitle
+              <> "\n"
+              <> T.unlines (map (isRenderChronBullet spec sessionDir) grp)
+      arcLinksSection =
+        if null topArcNodes
+          then
+            [ "- *(All entries so far are listed inline below. Completed arc archive files will appear here as the story progresses.)*"
+            ]
+          else
+            [ "- **"
+                <> lbl
+                <> "**: ["
+                <> T.pack (takeFileName fp)
+                <> "]("
+                <> T.pack fp
+                <> ") — "
+                <> summ
+            | (fp, lbl, summ) <- topArcNodes
+            ]
+      chronologyDoc =
+        T.unlines $
+          [ "# " <> isDomainTitle spec <> " Index by Story Chronology: " <> stTitle st
+          , ""
+          , "*Session Directory*: `" <> T.pack sessionDir <> "`"
+          , ""
+          , isChronIntro spec
+          , ""
+          , "## Completed Arc Archives"
+          , ""
+          ]
+            ++ arcLinksSection
+            ++ [ ""
+               , "## Current & Recent Arc (" <> isDomainTitle spec <> ")"
+               , ""
+               , if null inlineItems
+                   then "- *(No entries recorded yet.)*"
+                   else T.intercalate "\n" (map renderChapGroup byChap)
+               ]
+  TIO.writeFile (domainPath </> "by_chronology.md") chronologyDoc
+
+packTopicShards :: Int -> Int -> [(Text, [a], Text, Int)] -> [[(Text, [a], Text, Int)]]
+packTopicShards maxLines maxTopics = go [] 0 0
+  where
+    go [] _ _ [] = []
+    go cur _ _ [] = [reverse cur]
+    go cur curLines curCnt (t@(_, _, _, lCnt) : ts)
+      | not (null cur) && (curLines + lCnt > maxLines || curCnt >= maxTopics) =
+          reverse cur : go [t] lCnt 1 ts
+      | otherwise =
+          go (t : cur) (curLines + lCnt) (curCnt + 1) ts
+
+syncTopicTree :: FilePath -> SessionState -> IndexSpec a -> [a] -> IO ()
+syncTopicTree sessionDir st spec items = do
+  let domainPath = sessionDir </> isDomainDir spec
+      relTopicArcDir = isDomainDir spec </> "archive" </> "topics"
+      fullTopicArcDir = sessionDir </> relTopicArcDir
+  createDirectoryIfMissing True domainPath
+  createDirectoryIfMissing True fullTopicArcDir
+  cleanArchiveDirectory fullTopicArcDir
+
+  let charNames = extractCanonicalCharacterNames (stCuratedMemory st)
+      allRawTags = concatMap (isItemTopics spec) items
+      canonTag = canonicalizeTopicTag charNames allRawTags
+      topicPairs =
+        [ (topicNormKey cTag, (cTag, item))
+        | item <- sortOn (isItemIndex spec) items
+        , let rawTags = if null (isItemTopics spec item) then [isDefaultTopic spec] else isItemTopics spec item
+        , tag <- rawTags
+        , let cTag = canonTag tag
+        , not (T.null cTag)
+        ]
+      topicMap =
+        foldl'
+          ( \acc (k, (dispTag, item)) ->
+              case Map.lookup k acc of
+                Nothing -> Map.insert k (dispTag, [item]) acc
+                Just (existingDisp, existingItems) ->
+                  let bestDisp = if T.length dispTag > T.length existingDisp then dispTag else existingDisp
+                      items' =
+                        if any (\x -> isItemIndex spec x == isItemIndex spec item) existingItems
+                          then existingItems
+                          else existingItems ++ [item]
+                   in Map.insert k (bestDisp, items') acc
+          )
+          Map.empty
+          topicPairs
+      sortedTopics = sortOn (T.toLower . fst) (Map.elems topicMap)
+      renderTopicSec (dispTag, grpItems) =
+        let ordered = sortOn (isItemIndex spec) grpItems
+            secTxt =
+              "### "
+                <> dispTag
+                <> " ("
+                <> jsonInt (length ordered)
+                <> ")\n"
+                <> T.unlines (map (isRenderTopicBullet spec sessionDir) ordered)
+         in (dispTag, ordered, secTxt, length (T.lines secTxt) + 1)
+      renderedTopics = map renderTopicSec sortedTopics
+      totalTopicLines = sum [lCnt | (_, _, _, lCnt) <- renderedTopics]
+
+  if totalTopicLines <= 100
+    then do
+      let tocLines =
+            if null renderedTopics
+              then ["- *(No topics indexed yet.)*"]
+              else
+                [ "- **" <> dispTag <> "** (" <> jsonInt (length grpItems) <> ")"
+                | (dispTag, grpItems, _, _) <- renderedTopics
+                ]
+          topicSections =
+            if null renderedTopics
+              then ["*(No entries recorded yet.)*"]
+              else [secTxt | (_, _, secTxt, _) <- renderedTopics]
+          byTopicDoc =
+            T.unlines $
+              [ "# " <> isDomainTitle spec <> " Index by Semantic Topic & Entity: " <> stTitle st
+              , ""
+              , "*Session Directory*: `" <> T.pack sessionDir <> "`"
+              , ""
+              , isTopicIntro spec
+              , ""
+              , "## Indexed Topics (" <> jsonInt (length renderedTopics) <> ")"
+              , ""
+              ]
+                ++ tocLines
+                ++ [ ""
+                   , "## " <> isDomainTitle spec <> " by Topic"
+                   , ""
+                   , T.intercalate "\n" topicSections
+                   ]
+      TIO.writeFile (domainPath </> "by_topic.md") byTopicDoc
+    else do
+      let shards = packTopicShards 80 15 renderedTopics
+      shardDetails <- forM (zip [1 :: Int ..] shards) $ \(grpIdx, shardTopics) -> do
+        let firstT = case shardTopics of ((t, _, _, _) : _) -> t; [] -> ""
+            lastT = case reverse shardTopics of ((t, _, _, _) : _) -> t; [] -> ""
+            totalItemsInShard = sum [length g | (_, g, _, _) <- shardTopics]
+            label = "Topic Shard L1." <> jsonInt grpIdx <> " (" <> firstT <> " – " <> lastT <> ")"
+            summaryLine =
+              jsonInt (length shardTopics)
+                <> " topics, "
+                <> jsonInt totalItemsInShard
+                <> " entries ("
+                <> firstT
+                <> " through "
+                <> lastT
+                <> ")"
+            fileName = "L1_" ++ padChunkNumber grpIdx ++ ".md"
+            relPath = relTopicArcDir </> fileName
+            fullPath = sessionDir </> relPath
+            shardDoc =
+              T.unlines
+                [ "# " <> label <> " — " <> isDomainTitle spec
+                , ""
+                , "- **Session Directory**: `" <> T.pack sessionDir <> "`"
+                , "- **Summary**: " <> summaryLine
+                , ""
+                , "## Topics in This Shard"
+                , ""
+                , T.intercalate "\n" [secTxt | (_, _, secTxt, _) <- shardTopics]
+                ]
+        TIO.writeFile fullPath shardDoc
+        let tagLinks = [(dispTag, length grpItems, relPath) | (dispTag, grpItems, _, _) <- shardTopics]
+        pure ((relPath, label, summaryLine), tagLinks)
+
+      let l1ShardNodes = map fst shardDetails
+          allTagShardLinks = concatMap snd shardDetails
+      topShardNodes <- rollupIndexLevels sessionDir relTopicArcDir (isDomainTitle spec <> " Topic Archive") 2 l1ShardNodes
+      let curIdx = stCurrentIndex st
+          recentTopics =
+            [ secTxt
+            | (_, grpItems, secTxt, _) <- renderedTopics
+            , any (\x -> isItemIndex spec x >= max 1 (curIdx - 2)) grpItems
+            ]
+          shardLinksLines =
+            [ "- **"
+                <> lbl
+                <> "**: ["
+                <> T.pack (takeFileName fp)
+                <> "]("
+                <> T.pack fp
+                <> ") — "
+                <> summ
+            | (fp, lbl, summ) <- topShardNodes
+            ]
+          tocLines =
+            [ "- **"
+                <> dispTag
+                <> "** ("
+                <> jsonInt cnt
+                <> ") — ["
+                <> T.pack (takeFileName fp)
+                <> "]("
+                <> T.pack fp
+                <> ")"
+            | (dispTag, cnt, fp) <- allTagShardLinks
+            ]
+          byTopicDoc =
+            T.unlines $
+              [ "# " <> isDomainTitle spec <> " Index by Semantic Topic & Entity: " <> stTitle st
+              , ""
+              , "*Session Directory*: `" <> T.pack sessionDir <> "`"
+              , ""
+              , isTopicIntro spec
+              , ""
+              , "## Topic Archive Shards"
+              , ""
+              ]
+                ++ shardLinksLines
+                ++ [ ""
+                   , "## Complete Topic Directory (" <> jsonInt (length allTagShardLinks) <> " Topics)"
+                   , ""
+                   ]
+                ++ tocLines
+                ++ [ ""
+                   , "## Recently Updated Topics (Last 3 Turns Inline)"
+                   , ""
+                   , if null recentTopics
+                       then "*(Read the linked Topic Archive Shards above to inspect topic entries.)*"
+                       else T.intercalate "\n" recentTopics
+                   ]
+      TIO.writeFile (domainPath </> "by_topic.md") byTopicDoc
+
+syncMultiLayerIndex :: FilePath -> SessionState -> IndexSpec a -> [a] -> IO ()
+syncMultiLayerIndex sessionDir st spec items = do
+  syncChronologicalTree sessionDir st spec items
+  syncTopicTree sessionDir st spec items
+
+renderStoryBullet :: FilePath -> StoryChunkRecord -> Text
+renderStoryBullet _ r =
+  let padStr = padChunkNumber (scrChunkIndex r)
+      idxStr = T.pack padStr
+      chapStr = formatChapLabel (scrChapterNumber r) (scrChapterTitle r)
+      partStr = "Part " <> jsonInt (scrPartInChapter r) <> "/" <> jsonInt (scrPartsInChapter r)
+      topicsStr =
+        if null (scrTopics r)
+          then ""
+          else " | *Topics*: " <> T.intercalate ", " (scrTopics r)
+      storyPath = T.pack ("chunks" </> ("chunk_" ++ padStr ++ ".md"))
+      entryPath = T.pack ("entries" </> ("chunk_" ++ padStr ++ ".md"))
+      memPath = T.pack ("archive" </> "memory" </> ("chunk_" ++ padStr ++ ".md"))
+   in "- **[chunk_"
+        <> idxStr
+        <> "]("
+        <> storyPath
+        <> ")** ("
+        <> chapStr
+        <> ", "
+        <> partStr
+        <> topicsStr
+        <> "): "
+        <> scrSummary r
+        <> " ([entry]("
+        <> entryPath
+        <> ") | [memory]("
+        <> memPath
+        <> "))"
+
+storyIndexSpec :: IndexSpec StoryChunkRecord
+storyIndexSpec =
+  IndexSpec
+    { isDomainDir = "chunks"
+    , isDomainTitle = "Story Chunks"
+    , isChronIntro = "Use this index to browse unlocked in-story plot summaries in chronological order by Arc, Chapter, and Chunk."
+    , isTopicIntro = "Use this inverted index to look up unlocked story chunks (`chunks/chunk_XXXX.md`) by character, location, faction, prop, or plot thread."
+    , isItemIndex = scrChunkIndex
+    , isItemChapter = \r -> (scrChapterNumber r, scrChapterTitle r)
+    , isItemPart = \r -> (scrPartInChapter r, scrPartsInChapter r)
+    , isItemTopics = scrTopics
+    , isDefaultTopic = "General Plot"
+    , isRenderChronBullet = renderStoryBullet
+    , isRenderTopicBullet = renderStoryBullet
+    , isSummarizeArc = \rs ->
+        let distinctChaps = nub [(scrChapterNumber r, scrChapterTitle r) | r <- rs]
+         in "Chapters: *" <> T.intercalate "; " [formatChapLabel cn ct | (cn, ct) <- distinctChaps] <> "*"
+    , isArcExtraFooter = \sessionDir rs ->
+        case reverse rs of
+          [] -> pure []
+          (lastR : _) -> do
+            let endChk = scrChunkIndex lastR
+                curatedSnapPath = sessionDir </> "archive" </> "memory" </> ("curated_" ++ padChunkNumber endChk ++ ".md")
+            hasSnap <- doesFileExist curatedSnapPath
+            snapContent <- if hasSnap then readTextFileSafe curatedSnapPath else pure ""
+            pure
+              [ "---"
+              , ""
+              , "## Historical Reader Memory Snapshot (As of Chunk " <> T.pack (padChunkNumber endChk) <> ")"
+              , ""
+              , if T.null (T.strip snapContent) then "*(No snapshot recorded.)*" else T.strip snapContent
+              ]
+    }
+
+allEntryTopics :: EntryLogRecord -> [Text]
+allEntryTopics r =
+  let discTags =
+        concat
+          [ edrTopics d ++ [if edrIsFactCheck d then "Fact-Check Verification" else "Reader Discussion"]
+          | d <- elrDiscussions r
+          ]
+   in nub (elrTopics r ++ discTags)
+
+renderEntryBullet :: FilePath -> EntryLogRecord -> Text
+renderEntryBullet _ r =
+  let padStr = padChunkNumber (elrEntryIndex r)
+      idxStr = T.pack padStr
+      chapStr = formatChapLabel (elrChapterNumber r) (elrChapterTitle r)
+      partStr = "Part " <> jsonInt (elrPartInChapter r) <> "/" <> jsonInt (elrPartsInChapter r)
+      topics = allEntryTopics r
+      topicsStr =
+        if null topics
+          then ""
+          else " | *Topics*: " <> T.intercalate ", " topics
+      discLines =
+        [ "  - **"
+            <> (if edrIsFactCheck d then "Fact-Check Discussion" else "User Discussion")
+            <> "**"
+            <> (if null (edrTopics d) then "" else " (*Topics*: " <> T.intercalate ", " (edrTopics d) <> ")")
+            <> ": "
+            <> edrSummary d
+        | d <- elrDiscussions r
+        ]
+      baseLine =
+        if elrIsWrapup r
+          then
+            let wrapPath = T.pack ("entries" </> "wrapup.md")
+             in "- **[wrapup]("
+                  <> wrapPath
+                  <> ")** (Final Wrapup & Retrospective"
+                  <> topicsStr
+                  <> "): "
+                  <> elrSummary r
+          else
+            let entryPath = T.pack ("entries" </> ("chunk_" ++ padStr ++ ".md"))
+                storyPath = T.pack ("chunks" </> ("chunk_" ++ padStr ++ ".md"))
+             in "- **[entry_"
+                  <> idxStr
+                  <> "]("
+                  <> entryPath
+                  <> ")** ("
+                  <> chapStr
+                  <> ", "
+                  <> partStr
+                  <> topicsStr
+                  <> "): "
+                  <> elrSummary r
+                  <> " ([story]("
+                  <> storyPath
+                  <> "))"
+   in T.intercalate "\n" (baseLine : discLines)
+
+entryIndexSpec :: IndexSpec EntryLogRecord
+entryIndexSpec =
+  IndexSpec
+    { isDomainDir = "entries"
+    , isDomainTitle = "Session Log Entries"
+    , isChronIntro = "Use this index to browse Let's Read commentary entries, running gags, and Reader Discussions in chronological order."
+    , isTopicIntro = "Use this inverted index to look up Let's Read commentary entries (`entries/chunk_XXXX.md`), running gags, craft notes, Fact-Check verifications, and User Discussions by topic."
+    , isItemIndex = elrEntryIndex
+    , isItemChapter = \r -> (elrChapterNumber r, elrChapterTitle r)
+    , isItemPart = \r -> (elrPartInChapter r, elrPartsInChapter r)
+    , isItemTopics = allEntryTopics
+    , isDefaultTopic = "Liveblog Commentary"
+    , isRenderChronBullet = renderEntryBullet
+    , isRenderTopicBullet = renderEntryBullet
+    , isSummarizeArc = \rs ->
+        let discCnt = sum [length (elrDiscussions r) | r <- rs]
+            distinctChaps = nub [(elrChapterNumber r, elrChapterTitle r) | r <- rs]
+         in jsonInt (length rs)
+              <> " entries, "
+              <> jsonInt discCnt
+              <> " discussions (Chapters: *"
+              <> T.intercalate "; " [formatChapLabel cn ct | (cn, ct) <- distinctChaps]
+              <> "*)"
+    , isArcExtraFooter = \_ _ -> pure []
+    }
 
 predStatusBadge :: PredictionRecord -> Text
 predStatusBadge pr =
@@ -2326,6 +2834,8 @@ renderPredSummaryBullet :: PredictionRecord -> Text
 renderPredSummaryBullet pr =
   let origPad = padChunkNumber (prOriginChunk pr)
       predFile = T.pack ("predictions" </> ("pred_" ++ origPad ++ ".md"))
+      storyPath = T.pack ("chunks" </> ("chunk_" ++ origPad ++ ".md"))
+      entryPath = T.pack ("entries" </> ("chunk_" ++ origPad ++ ".md"))
       chapStr = formatChapLabel (prChapterNumber pr) (prChapterTitle pr)
       topicsStr =
         if null (prTopics pr)
@@ -2352,76 +2862,46 @@ renderPredSummaryBullet pr =
         <> "): "
         <> coreTheory
         <> resSuffix
+        <> " ([story]("
+        <> storyPath
+        <> ") | [entry]("
+        <> entryPath
+        <> "))"
 
-writePredArcArchive :: FilePath -> Int -> [ChunkIndexEntry] -> [PredictionRecord] -> IO (FilePath, Text, Text)
-writePredArcArchive sessionDir grpIdx arcEntries allPreds = do
-  let (startChk, startChap) =
-        case arcEntries of
-          (firstE : _) -> (cieChunkIndex firstE, cieChapterNumber firstE)
-          [] -> (1, 1)
-      (endChk, endChap) =
-        case reverse arcEntries of
-          (lastE : _) -> (cieChunkIndex lastE, cieChapterNumber lastE)
-          [] -> (1, 1)
-      chapRange
-        | startChap == 0 && endChap == 0 = "Front Matter"
-        | startChap == endChap = "Ch. " <> jsonInt startChap
-        | otherwise = "Ch. " <> jsonInt startChap <> "–" <> jsonInt endChap
-      chunkRange =
-        if startChk == endChk
-          then "Chunk " <> T.pack (padChunkNumber startChk)
-          else "Chunks " <> T.pack (padChunkNumber startChk) <> "–" <> T.pack (padChunkNumber endChk)
-      label = "Arc " <> jsonInt grpIdx <> " Predictions (" <> chapRange <> " | " <> chunkRange <> ")"
-      arcPreds =
-        [ pr
-        | pr <- allPreds
-        , prOriginChunk pr >= startChk && prOriginChunk pr <= endChk
-        ]
-      activeCnt = length [pr | pr <- arcPreds, prStatus pr == PredStatusActive]
-      confCnt = length [pr | pr <- arcPreds, case prStatus pr of PredStatusConfirmed {} -> True; _ -> False]
-      debCnt = length [pr | pr <- arcPreds, case prStatus pr of PredStatusDebunked {} -> True; _ -> False]
-      subCnt = length [pr | pr <- arcPreds, case prStatus pr of PredStatusSubverted {} -> True; _ -> False]
-      retCnt = length [pr | pr <- arcPreds, case prStatus pr of PredStatusRetired {} -> True; _ -> False]
-      summaryLine =
-        jsonInt (length arcPreds)
-          <> " predictions ("
-          <> jsonInt confCnt
-          <> " Confirmed, "
-          <> jsonInt debCnt
-          <> " Debunked, "
-          <> jsonInt subCnt
-          <> " Subverted, "
-          <> jsonInt retCnt
-          <> " Retired, "
-          <> jsonInt activeCnt
-          <> " Active)"
-      byChap = groupBy (\a b -> prChapterNumber a == prChapterNumber b) arcPreds
-      renderChapGrp [] = ""
-      renderChapGrp grp@(firstP : _) =
-        "### "
-          <> formatChapLabel (prChapterNumber firstP) (prChapterTitle firstP)
-          <> "\n"
-          <> T.unlines (map renderPredSummaryBullet grp)
-      predArchiveDir = sessionDir </> "predictions" </> "archive"
-      fileName = "L1_" ++ padChunkNumber grpIdx ++ ".md"
-      relPath = "predictions" </> "archive" </> fileName
-      fullPath = predArchiveDir </> fileName
-      doc =
-        T.unlines
-          [ "# " <> label
-          , ""
-          , "- **Session Directory**: `" <> T.pack sessionDir <> "`"
-          , "- **Summary**: " <> summaryLine
-          , ""
-          , "## Predictions by Chapter"
-          , ""
-          , if null arcPreds
-              then "- *(No predictions logged in this arc.)*"
-              else T.intercalate "\n" (map renderChapGrp byChap)
-          ]
-  createDirectoryIfMissing True predArchiveDir
-  TIO.writeFile fullPath doc
-  pure (relPath, label, summaryLine)
+predictionIndexSpec :: IndexSpec PredictionRecord
+predictionIndexSpec =
+  IndexSpec
+    { isDomainDir = "predictions"
+    , isDomainTitle = "Predictions"
+    , isChronIntro = "Use this index to browse predictions in chronological order by Arc, Chapter, and Chunk."
+    , isTopicIntro = "Use this inverted index to look up all active and resolved predictions associated with a character, faction, artifact, location, or mystery theme."
+    , isItemIndex = prOriginChunk
+    , isItemChapter = \pr -> (prChapterNumber pr, prChapterTitle pr)
+    , isItemPart = \pr -> (prPartInChapter pr, prPartsInChapter pr)
+    , isItemTopics = prTopics
+    , isDefaultTopic = "General Plot"
+    , isRenderChronBullet = \_ pr -> renderPredSummaryBullet pr
+    , isRenderTopicBullet = \_ pr -> renderPredSummaryBullet pr
+    , isSummarizeArc = \arcPreds ->
+        let activeCnt = length [pr | pr <- arcPreds, prStatus pr == PredStatusActive]
+            confCnt = length [pr | pr <- arcPreds, case prStatus pr of PredStatusConfirmed {} -> True; _ -> False]
+            debCnt = length [pr | pr <- arcPreds, case prStatus pr of PredStatusDebunked {} -> True; _ -> False]
+            subCnt = length [pr | pr <- arcPreds, case prStatus pr of PredStatusSubverted {} -> True; _ -> False]
+            retCnt = length [pr | pr <- arcPreds, case prStatus pr of PredStatusRetired {} -> True; _ -> False]
+         in jsonInt (length arcPreds)
+              <> " predictions ("
+              <> jsonInt confCnt
+              <> " Confirmed, "
+              <> jsonInt debCnt
+              <> " Debunked, "
+              <> jsonInt subCnt
+              <> " Subverted, "
+              <> jsonInt retCnt
+              <> " Retired, "
+              <> jsonInt activeCnt
+              <> " Active)"
+    , isArcExtraFooter = \_ _ -> pure []
+    }
 
 renderHallOfFameMarkdown :: FilePath -> SessionState -> Text
 renderHallOfFameMarkdown sessionDir st =
@@ -2576,144 +3056,18 @@ renderHallOfFameMarkdown sessionDir st =
 syncPredictionsDirectory :: FilePath -> SessionState -> IO ()
 syncPredictionsDirectory sessionDir st = do
   let predDir = sessionDir </> "predictions"
-      predArcDir = predDir </> "archive"
       preds = stPredictions st
   createDirectoryIfMissing True predDir
-  createDirectoryIfMissing True predArcDir
 
-  -- 1. Write individual prediction files: predictions/pred_XXXX.md
+  -- 1. Write individual prediction leaf files: predictions/pred_XXXX.md
   forM_ preds $ \pr -> do
     let fName = "pred_" ++ padChunkNumber (prOriginChunk pr) ++ ".md"
     TIO.writeFile (predDir </> fName) (renderSinglePredictionDoc sessionDir pr)
 
-  -- 2. Write chronological index: predictions/by_chronology.md (+ predictions/archive/L1_XXXX.md for completed arcs)
-  let arcs = groupChunksIntoArcs (stChunkIndex st)
-  arcNodes <-
-    if length arcs <= 1
-      then pure []
-      else
-        forM (zip [1 :: Int ..] (init arcs)) $ \(grpIdx, arcEntries) ->
-          writePredArcArchive sessionDir grpIdx arcEntries preds
+  -- 2. Sync multi-layer chronological and semantic topic trees via shared engine
+  syncMultiLayerIndex sessionDir st predictionIndexSpec preds
 
-  let inlineStartChunk =
-        case reverse arcs of
-          [] -> 1
-          [ _ ] -> 1
-          (lastArc : _) ->
-            case lastArc of
-              (firstE : _) -> cieChunkIndex firstE
-              [] -> 1
-      inlinePreds =
-        if length arcs <= 1
-          then preds
-          else [pr | pr <- preds, prOriginChunk pr >= inlineStartChunk]
-      byChap = groupBy (\a b -> prChapterNumber a == prChapterNumber b) inlinePreds
-      renderChapGroup [] = ""
-      renderChapGroup grp@(firstP : _) =
-        "### "
-          <> formatChapLabel (prChapterNumber firstP) (prChapterTitle firstP)
-          <> "\n"
-          <> T.unlines (map renderPredSummaryBullet grp)
-      arcLinksSection =
-        if null arcNodes
-          then
-            [ "- *(All predictions so far are listed inline below. Completed arc prediction archives will appear here as the story progresses.)*"
-            ]
-          else
-            [ "- **"
-                <> lbl
-                <> "**: ["
-                <> T.pack (takeFileName fp)
-                <> "]("
-                <> T.pack fp
-                <> ") — "
-                <> summ
-            | (fp, lbl, summ) <- arcNodes
-            ]
-      chronologyDoc =
-        T.unlines $
-          [ "# Predictions Index by Story Chronology: " <> stTitle st
-          , ""
-          , "*Session Directory*: `" <> T.pack sessionDir <> "`"
-          , ""
-          , "Use this index to browse predictions in chronological order by Arc, Chapter, and Chunk."
-          , ""
-          , "## Completed Arc Prediction Archives"
-          , ""
-          ]
-            ++ arcLinksSection
-            ++ [ ""
-               , "## Current & Recent Arc Predictions"
-               , ""
-               , if null inlinePreds
-                   then "- *(No predictions logged yet.)*"
-                   else T.intercalate "\n" (map renderChapGroup byChap)
-               ]
-  TIO.writeFile (predDir </> "by_chronology.md") chronologyDoc
-
-  -- 3. Write semantic content index: predictions/by_topic.md
-  let topicPairs :: [(Text, (Text, PredictionRecord))]
-      topicPairs =
-        [ (T.toLower tag, (tag, pr))
-        | pr <- preds
-        , let tags = if null (prTopics pr) then ["General Plot"] else prTopics pr
-        , tag <- tags
-        ]
-      topicMap :: Map.Map Text (Text, [PredictionRecord])
-      topicMap =
-        foldl'
-          ( \acc (k, (dispTag, pr)) ->
-              case Map.lookup k acc of
-                Nothing -> Map.insert k (dispTag, [pr]) acc
-                Just (existingDisp, existingPrs) ->
-                  let prs' =
-                        if any (\x -> prOriginChunk x == prOriginChunk pr) existingPrs
-                          then existingPrs
-                          else existingPrs ++ [pr]
-                   in Map.insert k (existingDisp, prs') acc
-          )
-          Map.empty
-          topicPairs
-      sortedTopics = Map.elems topicMap
-      tocLines =
-        if null sortedTopics
-          then ["- *(No topics indexed yet.)*"]
-          else
-            [ "- **" <> dispTag <> "** (" <> jsonInt (length prs) <> ")"
-            | (dispTag, prs) <- sortedTopics
-            ]
-      topicSections =
-        if null sortedTopics
-          then ["*(No predictions logged yet.)*"]
-          else
-            [ "### "
-                <> dispTag
-                <> " ("
-                <> jsonInt (length prs)
-                <> ")\n"
-                <> T.unlines (map renderPredSummaryBullet (sortOn prOriginChunk prs))
-            | (dispTag, prs) <- sortedTopics
-            ]
-      byTopicDoc =
-        T.unlines $
-          [ "# Predictions Index by Semantic Topic & Entity: " <> stTitle st
-          , ""
-          , "*Session Directory*: `" <> T.pack sessionDir <> "`"
-          , ""
-          , "Use this inverted index to look up all active and resolved predictions associated with a character, faction, artifact, location, or mystery theme."
-          , ""
-          , "## Indexed Topics (" <> jsonInt (length sortedTopics) <> ")"
-          , ""
-          ]
-            ++ tocLines
-            ++ [ ""
-               , "## Predictions by Topic"
-               , ""
-               , T.intercalate "\n" topicSections
-               ]
-  TIO.writeFile (predDir </> "by_topic.md") byTopicDoc
-
-  -- 4. Write end-of-story Hall of Fame & Shame ONLY when all chunks have been recorded and judged
+  -- 3. Write end-of-story Hall of Fame & Shame ONLY when all chunks have been recorded and judged
   let isFinished = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
   when isFinished $ do
     let hofPath = predDir </> "hall_of_fame.md"
@@ -2850,8 +3204,35 @@ renderPredictionSlateSection st =
           ++ activeLines
           ++ warningLines
 
-renderMemoryMarkdown :: FilePath -> SessionState -> [(FilePath, Text, Text)] -> [ChunkIndexEntry] -> Text
-renderMemoryMarkdown sessionDir st topArchiveNodes inlineChunks =
+collectCanonicalSessionTopics :: SessionState -> [Text]
+collectCanonicalSessionTopics st =
+  let charNames = extractCanonicalCharacterNames (stCuratedMemory st)
+      rawTags =
+        concatMap scrTopics (stStoryRecords st)
+          ++ concatMap allEntryTopics (stEntryRecords st)
+          ++ concatMap prTopics (stPredictions st)
+      canon = canonicalizeTopicTag charNames rawTags
+      counts =
+        foldl'
+          ( \acc rawT ->
+              let c = canon rawT
+                  k = topicNormKey c
+               in if T.null c || c == "Reader Discussion" || c == "Fact-Check Verification"
+                    then acc
+                    else
+                      case Map.lookup k acc of
+                        Nothing -> Map.insert k (c, 1 :: Int) acc
+                        Just (oldDisp, n) ->
+                          let bestDisp = if T.length c > T.length oldDisp then c else oldDisp
+                           in Map.insert k (bestDisp, n + 1) acc
+          )
+          Map.empty
+          rawTags
+      ranked = sortOn (\(disp, n) -> (Down n, T.toLower disp)) (Map.elems counts)
+   in take 30 (map fst ranked)
+
+renderMemoryMarkdown :: FilePath -> SessionState -> Text
+renderMemoryMarkdown sessionDir st =
   let curated = if null (stCuratedMemory st) then defaultCuratedMemory else stCuratedMemory st
       (needsCompaction, curLines, curBytes) = checkMemoryCompaction curated
       curIdx = stCurrentIndex st
@@ -2880,40 +3261,34 @@ renderMemoryMarkdown sessionDir st topArchiveNodes inlineChunks =
                 <> jsonInt curLines
                 <> " lines ("
                 <> jsonInt curBytes
-                <> " bytes), exceeding the 80-line / 8,000-byte target. On your next turn, condense older chapters in `## Story Summary So Far` into high-level multi-chapter arc bullets and prune minor resolved mysteries. All earlier chunk summaries, full historical memory snapshots, and predictions are permanently preserved in `<session_dir>/archive/` and `<session_dir>/predictions/`, so condensing `memory.md` will not lose any history."
+                <> " bytes), exceeding the 80-line / 8,000-byte target. On your next turn, condense older chapters in `## Story Summary So Far` into high-level multi-chapter arc bullets and prune minor resolved mysteries. All earlier story chunk summaries, commentary entries, historical memory snapshots, and predictions are permanently preserved in `<session_dir>/chunks/`, `<session_dir>/entries/`, `<session_dir>/predictions/`, and `<session_dir>/archive/`, so condensing `memory.md` will not lose any history."
             ]
         | otherwise = []
       lookupSec name =
         fromMaybe "- *(None yet.)*" (lookup name curated)
-      archivePointersLines
-        | null topArchiveNodes =
-            ["- *(All chunks read so far are listed inline below. Completed arc archive files will appear here as the story progresses.)*"]
-        | otherwise =
-            [ "- **"
-                <> lbl
-                <> "**: ["
-                <> T.pack (takeFileName fp)
-                <> "]("
-                <> T.pack fp
-                <> ") — "
-                <> summ
-            | (fp, lbl, summ) <- topArchiveNodes
-            ]
-      inlineChunkLines
-        | null inlineChunks = ["- *(No chunks read yet.)*"]
-        | otherwise = map renderChunkIndexLine inlineChunks
-      archiveSection =
+      orderedStory = sortOn scrChunkIndex (stStoryRecords st)
+      recentStory = drop (max 0 (length orderedStory - 5)) orderedStory
+      recentStoryLines
+        | null recentStory = ["- *(No story chunks read yet.)*"]
+        | otherwise = map (renderStoryBullet sessionDir) recentStory
+      canonTopics = collectCanonicalSessionTopics st
+      canonTopicsLine
+        | null canonTopics = "- *(Established topic tags will appear here as chunks are recorded.)*"
+        | otherwise = "- **Established Topic Tags (Reuse When Applicable)**: `" <> T.intercalate "`, `" canonTopics <> "`"
+      indexDirectorySection =
         T.unlines $
-          [ "## Memory Archive & Index Tree (Auto-Maintained by Gatekeeper)"
+          [ "## Session Indexes & Recent Story Context (Auto-Maintained by Gatekeeper)"
           , "*(Do not manually re-emit this section in `=== UPDATED MEMORY ===`; `LetsRead.hs` updates it automatically from your `=== CHUNK SUMMARY ===`.)*"
           , ""
-          , "### Completed Arc Archives (Chunk Indices & Historical Memory Snapshots)"
+          , "### Multi-Layer Domain Indexes (On-Demand `read_file`)"
+          , "- **Story Chunks (In-Text Canon)**: [Chronological Index](chunks/by_chronology.md) | [Semantic Topic Index](chunks/by_topic.md) | [Unlocked Chunks (`chunk_XXXX.md`)](chunks/)"
+          , "- **Session Logs (Commentary, Gags & Discussions)**: [Chronological Index](entries/by_chronology.md) | [Semantic Topic Index](entries/by_topic.md) | [Entry Files (`chunk_XXXX.md`)](entries/)"
+          , "- **Predictions (Theories & Verdicts)**: [Chronological Index](predictions/by_chronology.md) | [Semantic Topic Index](predictions/by_topic.md) | [Prediction Files (`pred_XXXX.md`)](predictions/)"
+          , canonTopicsLine
+          , ""
+          , "### Recent Story Chunks (Last 5 Chunks)"
           ]
-            ++ archivePointersLines
-            ++ [ ""
-               , "### Current & Recent Arc Chunks"
-               ]
-            ++ inlineChunkLines
+            ++ recentStoryLines
       predictionSlateSection = renderPredictionSlateSection st
    in T.unlines $
         [ "# Reader Memory & Notes: " <> stTitle st
@@ -2927,7 +3302,7 @@ renderMemoryMarkdown sessionDir st topArchiveNodes inlineChunks =
              , "## Story Summary So Far"
              , T.strip (lookupSec "Story Summary So Far")
              , ""
-             , T.strip archiveSection
+             , T.strip indexDirectorySection
              , ""
              , "## Characters & Relationships"
              , T.strip (lookupSec "Characters & Relationships")
@@ -2946,7 +3321,6 @@ syncMemoryAndArchives sessionDir st = do
   let archiveDir = sessionDir </> "archive"
       memSnapDir = archiveDir </> "memory"
   createDirectoryIfMissing True memSnapDir
-  syncPredictionsDirectory sessionDir st
 
   let curated = if null (stCuratedMemory st) then defaultCuratedMemory else stCuratedMemory st
       curIdx = stCurrentIndex st
@@ -2954,24 +3328,12 @@ syncMemoryAndArchives sessionDir st = do
     let curatedSnapPath = memSnapDir </> ("curated_" ++ padChunkNumber curIdx ++ ".md")
     TIO.writeFile curatedSnapPath (renderCuratedSections curated <> "\n")
 
-  let arcs = groupChunksIntoArcs (stChunkIndex st)
-  l1Nodes <- forM (zip [1 :: Int ..] arcs) $ \(grpIdx, arcEntries) ->
-    writeL1Archive sessionDir grpIdx arcEntries
+  -- Sync all three decoupled multi-layer index trees
+  syncMultiLayerIndex sessionDir st storyIndexSpec (stStoryRecords st)
+  syncMultiLayerIndex sessionDir st entryIndexSpec (stEntryRecords st)
+  syncPredictionsDirectory sessionDir st
 
-  let completedL1Nodes = if length l1Nodes <= 1 then [] else init l1Nodes
-      inlineChunks =
-        case reverse arcs of
-          [] -> []
-          [onlyArc] -> onlyArc
-          (lastArc : prevArc : _)
-            | length lastArc < 5 ->
-                let needed = 5 - length lastArc
-                    tailPrev = drop (max 0 (length prevArc - needed)) prevArc
-                 in tailPrev ++ lastArc
-            | otherwise -> lastArc
-
-  topArchiveNodes <- rollupArchiveLevels sessionDir 2 completedL1Nodes
-  let renderedMem = renderMemoryMarkdown sessionDir st topArchiveNodes inlineChunks
+  let renderedMem = renderMemoryMarkdown sessionDir st
   TIO.writeFile (sessionDir </> "memory.md") renderedMem
   when (curIdx > 0) $ do
     let fullSnapPath = memSnapDir </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")
@@ -3070,6 +3432,16 @@ data ResponseSection
   | SecUpdatedMemory
   deriving (Eq, Show)
 
+data ParsedChunkSummaries = ParsedChunkSummaries
+  { pcsStory :: Maybe ([Text], Text)
+  , pcsEntry :: Maybe ([Text], Text)
+  , pcsDiscussion :: Maybe ([Text], Text)
+  }
+  deriving (Eq, Show)
+
+emptyParsedChunkSummaries :: ParsedChunkSummaries
+emptyParsedChunkSummaries = ParsedChunkSummaries Nothing Nothing Nothing
+
 cleanChunkSummary :: Text -> Text
 cleanChunkSummary raw =
   let oneLine = T.unwords [T.strip l | l <- T.lines raw, not (T.null (T.strip l))]
@@ -3083,6 +3455,37 @@ cleanChunkSummary raw =
         && ("chunk " `T.isPrefixOf` T.toLower (T.strip beforeColon) || "chunk_" `T.isPrefixOf` T.toLower (T.strip beforeColon))
         then T.strip (T.drop 1 afterColon)
         else noBullet
+
+parseChunkSummaries :: Text -> ParsedChunkSummaries
+parseChunkSummaries raw =
+  let bullets = coalesceBulletLines (T.lines raw)
+      step acc line =
+        let s = T.strip line
+            (_, afterOpen) = T.breakOn "[" s
+            (inside, afterClose) = T.breakOn "]" (T.drop 1 afterOpen)
+         in if T.null afterOpen || T.null afterClose
+              then acc
+              else
+                let firstSeg =
+                      case T.splitOn "|" inside of
+                        (h : _) -> T.toLower (T.strip h)
+                        [] -> ""
+                    bodyRaw = T.strip (T.dropWhile (\c -> c == '*' || c == ':' || isSpace c) (T.drop 1 afterClose))
+                    body = cleanChunkSummary bodyRaw
+                    topics = parseTopicsFromBracket inside body
+                 in if T.null body
+                      then acc
+                      else
+                        if "story" `T.isPrefixOf` firstSeg
+                          then acc {pcsStory = Just (topics, body)}
+                          else
+                            if "entry" `T.isPrefixOf` firstSeg || "commentary" `T.isPrefixOf` firstSeg
+                              then acc {pcsEntry = Just (topics, body)}
+                              else
+                                if "discussion" `T.isPrefixOf` firstSeg
+                                  then acc {pcsDiscussion = Just (topics, body)}
+                                  else acc
+   in foldl' step emptyParsedChunkSummaries bullets
 
 extractFallbackSummary :: Text -> Text
 extractFallbackSummary commText =
@@ -3100,13 +3503,13 @@ extractFallbackSummary commText =
         then T.take 157 firstLine <> "..."
         else firstLine
 
-parseCombinedResponse :: Text -> (Maybe Text, Text, Maybe Text, Maybe Text, Maybe Text)
+parseCombinedResponse :: Text -> (Maybe Text, Text, ParsedChunkSummaries, Maybe Text, Maybe Text)
 parseCombinedResponse raw =
   let classifyLine l =
         let s = T.toUpper (T.strip l)
          in if s == "=== USER ===" || s == "=== QUESTION ===" || s == "=== USER MESSAGE ==="
               then Just SecUserQuestion
-              else if s == "=== COMMENTARY ===" || s == "=== REPLY ===" || s == "=== RESPONSE ==="
+              else if s == "=== COMMENTARY ===" || s == "=== REPLY ===" || s == "=== RESPONSE ===" || s == "=== DISCUSSION RESPONSE ===" || s == "=== DISCUSSION ==="
                 then Just SecCommentary
                 else if s == "=== CHUNK SUMMARY ===" || s == "=== CHUNK INDEX ==="
                   then Just SecChunkSummary
@@ -3129,7 +3532,7 @@ parseCombinedResponse raw =
       memPart = extract SecUpdatedMemory
    in ( if T.null userPart then Nothing else Just userPart
       , commPart
-      , if T.null sumPart then Nothing else Just (cleanChunkSummary sumPart)
+      , if T.null sumPart then emptyParsedChunkSummaries else parseChunkSummaries sumPart
       , if T.null predPart then Nothing else Just predPart
       , if T.null memPart then Nothing else Just memPart
       )
@@ -3205,10 +3608,13 @@ cmdInit opts = do
       chunksDir = sessionDir </> "chunks"
       archiveDir = sessionDir </> "archive"
       predictionsDir = sessionDir </> "predictions"
-  createDirectoryIfMissing True entriesDir
-  createDirectoryIfMissing True chunksDir
+  createDirectoryIfMissing True (entriesDir </> "archive" </> "chronology")
+  createDirectoryIfMissing True (entriesDir </> "archive" </> "topics")
+  createDirectoryIfMissing True (chunksDir </> "archive" </> "chronology")
+  createDirectoryIfMissing True (chunksDir </> "archive" </> "topics")
   createDirectoryIfMissing True (archiveDir </> "memory")
-  createDirectoryIfMissing True (predictionsDir </> "archive")
+  createDirectoryIfMissing True (predictionsDir </> "archive" </> "chronology")
+  createDirectoryIfMissing True (predictionsDir </> "archive" </> "topics")
 
   (bookTitle, chunks) <- buildChunksFromSource (initSource opts) (initMaxWords opts) (initTitle opts)
 
@@ -3232,7 +3638,8 @@ cmdInit opts = do
           , stCurrentJudged = True
           , stCurrentMeta = Nothing
           , stCompletedChunks = []
-          , stChunkIndex = []
+          , stStoryRecords = []
+          , stEntryRecords = []
           , stCuratedMemory = defaultCuratedMemory
           , stPredictions = []
           , stPendingRetirements = []
@@ -3314,17 +3721,17 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
               <> jsonInt curIdx
               <> " of "
               <> jsonInt totalChunks
-              <> ") and update your Let's Read commentary, prediction updates, and memory."
+              <> ") and update your Let's Read commentary, chunk & entry summaries, prediction updates, and memory."
           , "- Current Chunk File (mandatory read): " <> T.pack (absSession </> "current_chunk.md")
           , "- Reader Memory File (mandatory read): " <> T.pack (absSession </> "memory.md")
           ]
             ++ criticContextLines
             ++ prevContextLines
             ++ [ "- Commentary Guide Template (flexible reference): " <> T.pack absTemplate
-               , "- Predictions Directory (chronological & semantic topic indices, on-demand read_file): " <> T.pack (absSession </> "predictions")
-               , "- Multi-Level Memory & Index Archive (on-demand read_file): " <> T.pack (absSession </> "archive")
-               , "- Unlocked Story Chunks Archive (on-demand read_file): " <> T.pack (absSession </> "chunks")
-               , "- Previous Commentary Entries (on-demand read_file): " <> T.pack (absSession </> "entries")
+               , "- Story Chunks Indices (`chunks/by_chronology.md` & `chunks/by_topic.md`, on-demand read_file): " <> T.pack (absSession </> "chunks")
+               , "- Session Commentary Entries Indices (`entries/by_chronology.md` & `entries/by_topic.md`, on-demand read_file): " <> T.pack (absSession </> "entries")
+               , "- Predictions Indices (`predictions/by_chronology.md` & `predictions/by_topic.md`, on-demand read_file): " <> T.pack (absSession </> "predictions")
+               , "- Curated Memory Snapshots Archive (`archive/memory/`, on-demand read_file): " <> T.pack (absSession </> "archive")
                , "- Active Persona: " <> expandPersonaPreset (stPersona st)
                , "- " <> slatePromptLine
                , ""
@@ -3332,10 +3739,10 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
                , "1. Read `current_chunk.md` and `memory.md` first (plus `critic_feedback.md` if listed above, and `chunks/chunk_(N-1).md` ONLY if you are a newly rotated subagent or picking up mid-chapter). Do NOT read `entries/chunk_(N-1).md` unless checking a specific thread callback."
                , "2. If `critic_feedback.md` is present, read `commentary-critic`'s `Persona & Style Critique` and apply useful voice/craft adjustments silently as you write this chunk's commentary—never apologize for or mention style feedback in `=== COMMENTARY ===`."
                , "3. Check `### Latest Prediction Judge Rulings` in `memory.md` and weave your reaction to any `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` verdicts from the previous chunk naturally into `=== COMMENTARY ===` where relevant (owning `DEBUNKED`/`SUBVERTED` misses with good humor, and avoiding victory laps on 1–2 chunk short-horizon calls)."
-               , "4. Proactive Fact-Checking Before Submission: Whenever you reference a specific detail, count, character title/role, or timeline sequence from an earlier chunk that is not verbatim in `current_chunk.md`, call `read_file` on `<session_dir>/chunks/chunk_XXXX.md` first (never guess from condensed `memory.md` bullets). Whenever you characterize an external canon event, relationship, or power mechanic, call `search_web` with a neutral query first and strictly quarantine external canon from in-story facts."
+               , "4. Proactive Fact-Checking Before Submission: Whenever you reference a specific detail, count, character title/role, or timeline sequence from an earlier chunk that is not verbatim in `current_chunk.md`, use `chunks/by_topic.md` or `chunks/by_chronology.md` to locate the relevant chunk and call `read_file` on `<session_dir>/chunks/chunk_XXXX.md` first (never guess from condensed `memory.md` bullets). Whenever you characterize an external canon event, relationship, or power mechanic, call `search_web` with a neutral query first and strictly quarantine external canon from in-story facts."
                , "5. Prediction Quota, Cross-Thread Synthesis ($A + B -> C$), Conciseness Cap & Conditional Retirement: On every chunk before the final chunk, log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total after bracket tag: `- **[Predicted Chunk " <> curPad <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <verified detail A in current_chunk.md + earlier thread/mystery/canon B, <= 120 chars, no inline quotes> -> **Theory**: <direct non-linear outcome C, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`) at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`. Ensure the factual and chronological premise in `**Clue/Anomaly**` (*who knew what, and when*) is strictly accurate. Never log single-beat linear extrapolations (\"X happened here so more of X will happen later\"). If `memory.md` already has 10/10 active predictions, also nominate 1 conditional retirement candidate (`- **[Predicted Chunk XXXX -> RETIRED Chunk " <> curPad <> "]** <reason>`) in `=== PREDICTION UPDATES ===`."
                , "6. Stay true to your Active Persona (and any user style directives in `- **Reader Craft Directives & Running Gags (Persistent)**:` in `memory.md`): curate 3–5 standout moments using tight 2–6 line verbatim `>` blockquotes (`[...]` to pair setup with punchline), do not paraphrase what a quote says right before or after quoting it, and avoid generic book-review puffery (\"masterclass\"/\"tour de force\") and fortune-cookie truisms."
-               , "7. Output all four required sections: `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===` (1 line), `=== PREDICTION UPDATES ===` (new prediction + optional conditional `RETIRED` nomination), and `=== UPDATED MEMORY ===` (only the 4 narrative sections)."
+               , "7. Output all four required sections: `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===` (two tagged bullets: `- **[Story | Topics: Tag1, Tag2, Tag3]** <1-line factual summary of in-story events only>` and `- **[Entry | Topics: Tag1, Tag2, Tag3]** <1-line summary of your liveblog reaction, standout quotes, or running gags>`), `=== PREDICTION UPDATES ===` (new prediction + optional conditional `RETIRED` nomination), and `=== UPDATED MEMORY ===` (only the 4 narrative sections)."
                ]
   TIO.writeFile promptPath promptText
   pure promptPath
@@ -3367,14 +3774,14 @@ writeWrapupPromptFile sessionDir st = do
           , "- Prediction Hall of Fame & Shame (mandatory read — complete final scoreboard, Major Hits, Subverted Twists, and Debunked Misses): " <> T.pack (absSession </> "predictions" </> "hall_of_fame.md")
           ]
             ++ criticContextLines
-            ++ [ "- Multi-Level Memory & Index Archive (on-demand read_file): " <> T.pack (absSession </> "archive")
-               , "- Predictions Directory (on-demand read_file): " <> T.pack (absSession </> "predictions")
-               , "- Unlocked Story Chunks Archive (on-demand read_file): " <> T.pack (absSession </> "chunks")
-               , "- Previous Commentary Entries (on-demand read_file): " <> T.pack (absSession </> "entries")
+            ++ [ "- Story Chunks Indices (`chunks/by_chronology.md` & `chunks/by_topic.md`, on-demand read_file): " <> T.pack (absSession </> "chunks")
+               , "- Session Commentary Entries Indices (`entries/by_chronology.md` & `entries/by_topic.md`, on-demand read_file): " <> T.pack (absSession </> "entries")
+               , "- Predictions Indices (`predictions/by_chronology.md` & `predictions/by_topic.md`, on-demand read_file): " <> T.pack (absSession </> "predictions")
+               , "- Curated Memory Snapshots Archive (`archive/memory/`, on-demand read_file): " <> T.pack (absSession </> "archive")
                , "- Active Persona: " <> expandPersonaPreset (stPersona st)
                , ""
                , "Key Instructions for the Final Wrapup Round:"
-               , "1. Read `memory.md` and `predictions/hall_of_fame.md` first (plus `critic_feedback.md` if listed above, and any `archive/L1_XXXX.md` or `predictions/pred_XXXX.md` files you want to reference)."
+               , "1. Read `memory.md` and `predictions/hall_of_fame.md` first (plus `critic_feedback.md` if listed above, and any `chunks/by_chronology.md`, `entries/by_chronology.md`, or `predictions/pred_XXXX.md` files you want to reference)."
                , "2. Stay in your active Persona as a conversational forum liveblogger wrapping up a thread (do NOT write a stiff academic essay or use banned review jargon like \"masterclass\" or \"tour de force\"; do NOT start with a top `# Final Wrapup` heading as `LetsRead.hs` prepends the section header automatically)."
                , "3. Cover these four angles naturally in `=== COMMENTARY ===`:"
                , "   - **Finale Verdicts & Immediate Aftermath**: React to `prediction-judge`'s final rulings from the last chunk (`### Latest Prediction Judge Rulings` in `memory.md`)."
@@ -3472,8 +3879,8 @@ writeCurrentJudgePromptFile sessionDir st = do
   TIO.writeFile judgePromptPath judgePromptText
   pure judgePromptPath
 
-lintReaderCommentary :: Text -> Maybe PredictionRecord -> [Text]
-lintReaderCommentary commText mNewPred =
+lintReaderCommentary :: Text -> ParsedChunkSummaries -> Maybe PredictionRecord -> [Text]
+lintReaderCommentary commText parsedSummaries mNewPred =
   let low = T.toLower commText
       bannedJargon =
         [ "masterclass"
@@ -3523,6 +3930,28 @@ lintReaderCommentary commText mNewPred =
                 <> jsonInt stageEmoteCount
                 <> " bracketed `*[...]*` stage-direction emotes. Express excitement, shock, or humor in natural prose rather than repetitive stage-direction emotes or action sportscasting."
             ]
+      summaryIssues =
+        ( case pcsStory parsedSummaries of
+            Nothing -> ["missing `- **[Story | Topics: Tag1, Tag2, Tag3]** <1-line factual story summary>`"]
+            Just (ts, sBody) ->
+              ["`[Story]` bullet had 0 `Topics:` tags" | null ts]
+                ++ [ "`[Story]` summary included reader-prediction/meta boilerplate (`\"leading me to predict\"`/`\"I predict\"`); keep `[Story]` strictly to in-story events and put reaction/gag highlights in `[Entry]`"
+                   | let sl = T.toLower sBody
+                   , "leading me to predict" `T.isInfixOf` sl || "i predict" `T.isInfixOf` sl
+                   ]
+        )
+          ++ ( case pcsEntry parsedSummaries of
+                 Nothing -> ["missing `- **[Entry | Topics: Tag1, Tag2, Tag3]** <1-line liveblog reaction/gags summary>`"]
+                 Just (ts, _) -> ["`[Entry]` bullet had 0 `Topics:` tags" | null ts]
+             )
+      summaryWarn =
+        if null summaryIssues
+          then []
+          else
+            [ "- **[Deterministic Style Linter (`LetsRead.hs`)]** Your `=== CHUNK SUMMARY ===` section had formatting issues ("
+                <> T.intercalate "; " summaryIssues
+                <> "). Always include both `- **[Story | Topics: Tag1, Tag2, Tag3]** <1-line factual summary of in-story events>` and `- **[Entry | Topics: Tag1, Tag2, Tag3]** <1-line summary of your liveblog reaction, standout quotes, or running gags>`."
+            ]
       predLenWarn =
         case mNewPred of
           Nothing -> []
@@ -3548,10 +3977,10 @@ lintReaderCommentary commText mNewPred =
                         <> T.intercalate "; " issues
                         <> "). On your next turn, keep the prediction body `<= 450 chars` total (`**Clue/Anomaly** <= 120 chars` with no inline quotes, `**Theory** <= 160 chars` stating 1 direct outcome, `**Plausible Rival** <= 120 chars`)."
                     ]
-   in jargonWarn ++ headingWarn ++ emoteWarn ++ predLenWarn
+   in jargonWarn ++ headingWarn ++ emoteWarn ++ summaryWarn ++ predLenWarn
 
-writeCurrentFactCheckPromptFile :: FilePath -> SessionState -> Text -> IO FilePath
-writeCurrentFactCheckPromptFile sessionDir st summaryTxt = do
+writeCurrentFactCheckPromptFile :: FilePath -> SessionState -> Text -> Text -> IO FilePath
+writeCurrentFactCheckPromptFile sessionDir st storySumTxt entrySumTxt = do
   absSession <- canonicalizePath sessionDir
   let curIdx = stCurrentIndex st
       curPad = padChunkNumber curIdx
@@ -3566,7 +3995,7 @@ writeCurrentFactCheckPromptFile sessionDir st summaryTxt = do
       factPromptPath = sessionDir </> "current_fact_check_prompt.md"
       factPromptText =
         T.unlines
-          [ "Please fact-check `blind-reader`'s newly recorded commentary, 1-line chunk summary, new prediction premise, and updated memory for Chunk "
+          [ "Please fact-check `blind-reader`'s newly recorded commentary, 1-line story & entry summaries, new prediction premise, and updated memory for Chunk "
               <> jsonInt curIdx
               <> " of "
               <> jsonInt totalChunks
@@ -3575,23 +4004,24 @@ writeCurrentFactCheckPromptFile sessionDir st summaryTxt = do
           , "- Current Story Chunk (`chunks/chunk_" <> curPadTxt <> ".md` — mandatory read): " <> T.pack (absSession </> "current_chunk.md")
           , "- Recorded Commentary Entry (mandatory read): " <> T.pack entryPath
           , "- Updated Reader Memory File (mandatory read): " <> T.pack (absSession </> "memory.md")
-          , "- Unlocked Story Chunks Archive (on-demand `read_file` for earlier-chunk verification): " <> T.pack (absSession </> "chunks")
-          , "- Multi-Level Memory & Index Archive (on-demand `read_file`): " <> T.pack (absSession </> "archive")
-          , "- Submitted 1-Line Chunk Summary: `" <> summaryTxt <> "`"
+          , "- Unlocked Story Chunks & Indices (`chunks/by_chronology.md` & `chunks/by_topic.md` for earlier-chunk verification): " <> T.pack (absSession </> "chunks")
+          , "- Curated Memory Snapshots Archive (on-demand `read_file`): " <> T.pack (absSession </> "archive")
+          , "- Submitted 1-Line Story Summary (`[Story]`): `" <> storySumTxt <> "`"
+          , "- Submitted 1-Line Entry Summary (`[Entry]`): `" <> entrySumTxt <> "`"
           , predLine
           , ""
           , "## Instructions Reminder"
           , "1. Read `current_chunk.md`, `entries/chunk_" <> curPadTxt <> ".md`, and `memory.md` (do NOT read `SKILL.md` or system prompt files)."
-          , "2. Keep a strict boundary between **Outputs Under Audit** (`entries/chunk_" <> curPadTxt <> ".md` reaction prose, `=== CHUNK SUMMARY ===`, the `**Clue/Anomaly**` premise of `=== PREDICTION UPDATES ===`, and `memory.md`) and the **Three Primary Sources of Truth**:"
-          , "   - **Current Passage (`current_chunk.md`)**: Does every claim in `blind-reader`'s reaction prose (not just the blockquotes!) about what was said, done, or stated in the current passage match `current_chunk.md`?"
-          , "   - **Earlier Unlocked Passages (`chunks/chunk_XXXX.md` via `read_file` — NEVER `memory.md` alone)**: Whenever `blind-reader` references, quotes, counts, or summarizes an earlier chunk (or carries a specific claim in `memory.md` or a prediction's `**Clue/Anomaly**` premise) that is not verbatim in `current_chunk.md`, call `read_file` on `<session_dir>/chunks/chunk_XXXX.md`. Audit the factual and chronological premises (`**Clue/Anomaly**` and *who knew what, when*) of the new prediction."
+          , "2. Keep a strict boundary between **Outputs Under Audit** (`entries/chunk_" <> curPadTxt <> ".md` reaction prose, `=== CHUNK SUMMARY ===` (`[Story]` & `[Entry]`), the `**Clue/Anomaly**` premise of `=== PREDICTION UPDATES ===`, and `memory.md`) and the **Three Primary Sources of Truth**:"
+          , "   - **Current Passage (`current_chunk.md`)**: Does every claim in `blind-reader`'s reaction prose (not just the blockquotes!) and `[Story]` summary about what was said, done, or stated in the current passage match `current_chunk.md`?"
+          , "   - **Earlier Unlocked Passages (`chunks/chunk_XXXX.md` via `read_file` — NEVER `memory.md` alone)**: Whenever `blind-reader` references, quotes, counts, or summarizes an earlier chunk (or carries a specific claim in `memory.md` or a prediction's `**Clue/Anomaly**` premise) that is not verbatim in `current_chunk.md`, check `chunks/by_topic.md` or `chunks/by_chronology.md` and call `read_file` on `<session_dir>/chunks/chunk_XXXX.md`. Audit the factual and chronological premises (`**Clue/Anomaly**` and *who knew what, when*) of the new prediction."
           , "   - **External Reference / Canon (`search_web`, when applicable)**: Explicit story text and Bullet 1 of `## Story Summary So Far` (AU baseline) always override external canon for what is true in this story (never flag AU divergences or `\"Unlike in canon...\"` contrasts as errors, and never leak unrevealed canon identities/spoilers). Invoke `search_web` using a **neutral, open query** (never searching for the story being read) to verify affirmative external canon/reference claims before citing `Source: search_web(\"<query>\")`."
           , "   - **Hyperbole vs. Misinformation & Unstated Premises (Advisory Peer Stance)**: Your flags are **strictly advisory peer questions** that `blind-reader` can freely rebut or accommodate—so **never rationalize away a spotted conflation or unstated premise in your reasoning just to output `- PASS`**:"
           , "     1. *True Hyperbole (`[OK]`)*: Exaggerating the scale or emotional impact of an accurate underlying fact (e.g. calling a sharp verbal takedown at a parliamentary hearing *\"verbal homicide at the podium\"*), or the speculative future `**Theory**` of a prediction, is normal liveblog expression."
           , "     2. *Misinformation / Event Conflation Inside Banter (`[DISPUTED]`)*: Conflating distinct events, locations, characters, or public vs. classified knowledge—**even inside a joke or colorful reaction line** (e.g. joking that a civilian recognized a character from televised parliamentary footage as *\"the woman who turned foreign special forces into red mist on national television\"*, conflating a televised hearing with a classified night battle at another site)—is a factual error, **not** hyperbole, and **must** be flagged as `[DISPUTED]`!"
           , "     3. *Inference-to-Fact Drift / Unstated Premise (`[DISPUTED]`)*: Claiming an earlier chunk or prop (e.g. a wall calendar, report, or dialogue line) explicitly stated a timeframe, count, or detail that does not actually appear in `chunks/chunk_XXXX.md` (e.g. claiming *\"her calendar had a 2–3 day transit gap\"* when `chunk_XXXX.md` only noted a planned two-month trip without specifying transit duration) **must** be flagged as `[DISPUTED]` by quoting the actual passage from `chunks/chunk_XXXX.md` where that prop/scene was described."
           , "3. Output **both** required sections:"
-          , "   - First, `=== VERIFIED CLAIMS LOG ===`: decompose and log the concrete factual claims in `blind-reader`'s reaction prose, chunk summary, prediction premise, and memory (`- [OK | Source: ...]` or `- [DISPUTED | Source: ...]`). Only write `Source: search_web(\"<query>\")` if you actually called the `search_web` tool on this turn."
+          , "   - First, `=== VERIFIED CLAIMS LOG ===`: decompose and log the concrete factual claims in `blind-reader`'s reaction prose, chunk summaries, prediction premise, and memory (`- [OK | Source: ...]` or `- [DISPUTED | Source: ...]`). Only write `Source: search_web(\"<query>\")` if you actually called the `search_web` tool on this turn."
           , "   - Second, `=== DISPUTED FACTS & MEMORY CHECKS ===`: output `- PASS` if all checked claims held up, or output receipt-backed bullets phrased as **polite, skeptical advisory peer questions** pointing out the discrepancy or unstated premise so `blind-reader` can independently re-check the source in `Reader Discussion`:"
           , "     - `- **[In-Story Fact | Source: chunks/chunk_XXXX.md | Quote: \"<exact verbatim substring copied from chunks/chunk_XXXX.md>\"]** <1-2 sentence peer question pointing out how the claim conflicts with or goes beyond what this passage states>` (`LetsRead.hs` deterministically verifies the quote against `chunks/chunk_XXXX.md` on disk and drops any fabricated/paraphrased quote!)"
           , "     - `- **[External Canon | Source: search_web(\"<exact neutral query>\") | Work: <Canon/Reference Work>]** <1-2 sentence peer question pointing out the external canon detail or unestablished canon assumption>` (`LetsRead.hs` verifies that `search_web` was actually called in your subagent log and drops any `[External Canon]` dispute if `search_web` was not called!)"
@@ -3854,7 +4284,7 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
           , "- Session Directory: `" <> T.pack absSession <> "`"
           , "- Current Story Chunk (`chunks/chunk_" <> curPad <> ".md`): " <> T.pack (absSession </> "current_chunk.md")
           , "- Reader Memory File: " <> T.pack (absSession </> "memory.md")
-          , "- Unlocked Story Chunks Archive (for `read_file` verification): " <> T.pack (absSession </> "chunks")
+          , "- Unlocked Story Chunks & Indices (`chunks/by_chronology.md` & `chunks/by_topic.md` for `read_file` verification): " <> T.pack (absSession </> "chunks")
           , "- Active Persona: " <> expandPersonaPreset (stPersona st)
           , ""
           , "## Fact-Check Peer Query (Unspoiled AI Peer — Do NOT Treat as Authoritative!)"
@@ -3867,8 +4297,9 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
                , "2. **Mandatory Independent Tool Check Before Replying**: Do **not** take `fact-checker`'s word for it. Before writing your reply, you **must** perform your own independent verification:"
                , "   - Call `read_file` on the cited `<session_dir>/chunks/chunk_XXXX.md` (or `current_chunk.md`) to inspect the full surrounding scene context beyond the quoted excerpt; **and/or**"
                , "   - Call `search_web` using your own **neutral, independent query** (never copy a leading query from `fact-checker`, and never search for the specific story being read)."
-               , "3. **Verify, Then Concede, Rebut, or Nuance in Character (`=== COMMENTARY ===`)**:"
-               , "   - **If your own `read_file` / `search_web` check confirms a material misread or timeline error**: Own it naturally in character in your `=== COMMENTARY ===` discussion reply, output `=== UPDATED MEMORY ===` (the 4 narrative sections) to clean up `memory.md`, and if the error affected Chunk " <> curPad <> "'s 1-line summary or newly logged prediction (`[Predicted Chunk " <> curPad <> "]`), also output a revised `=== CHUNK SUMMARY ===` and/or `=== PREDICTION UPDATES ===` (`- **[Predicted Chunk " <> curPad <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)`)."
+               , "3. **Verify, Then Concede, Rebut, or Nuance in Character (`=== COMMENTARY ===` & `=== CHUNK SUMMARY ===`)**:"
+               , "   - Always output `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Tag1, Tag2, Tag3]** <1-line summary of the discussion question and takeaway>` so the discussion round is indexed in `entries/by_chronology.md` and `entries/by_topic.md`."
+               , "   - **If your own `read_file` / `search_web` check confirms a material misread or timeline error**: Own it naturally in character in your `=== COMMENTARY ===` discussion reply, output `=== UPDATED MEMORY ===` (the 4 narrative sections) to clean up `memory.md`, and if the error affected Chunk " <> curPad <> "'s 1-line story summary or newly logged prediction (`[Predicted Chunk " <> curPad <> "]`), also include `- **[Story | Topics: Tag1, Tag2, Tag3]** <corrected 1-line factual summary>` in `=== CHUNK SUMMARY ===` and/or `=== PREDICTION UPDATES ===` (`- **[Predicted Chunk " <> curPad <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)`)."
                , "   - **If your own `read_file` / `search_web` check shows your original reading, figurative joke, or AU baseline was right (or that `fact-checker` cherry-picked a quote out of context)**: **Hold your ground and push back in character**, quoting the primary text from `chunks/chunk_XXXX.md` or your `search_web` findings to rebut the query!"
                , "   - **If the text is genuinely ambiguous**: Note both readings as live possibilities without treating the query as settled fact."
                ]
@@ -3977,22 +4408,22 @@ stripLeadingChunkHeading txt =
           T.strip (T.unlines restLines)
     _ -> T.strip txt
 
-computeShouldRotate :: [ChunkIndexEntry] -> Chunk -> Bool
+computeShouldRotate :: [StoryChunkRecord] -> Chunk -> Bool
 computeShouldRotate history chunk =
   let nextIdx = chunkIndex chunk
       priorEntries =
         sortOn
-          cieChunkIndex
+          scrChunkIndex
           [ e
           | e <- history
-          , cieChunkIndex e > 1
-          , cieChunkIndex e < nextIdx
+          , scrChunkIndex e > 1
+          , scrChunkIndex e < nextIdx
           ]
       stepLastRot lastRot e =
-        let idx = cieChunkIndex e
+        let idx = scrChunkIndex e
             sinceLast = idx - lastRot
             rotatedHere =
-              (ciePartInChapter e == 1 && (sinceLast >= 6 || sinceLast + ciePartsInChapter e > 9))
+              (scrPartInChapter e == 1 && (sinceLast >= 6 || sinceLast + scrPartsInChapter e > 9))
                 || sinceLast >= 15
          in if rotatedHere then idx else lastRot
       lastRotIdx = foldl' stepLastRot 1 priorEntries
@@ -4097,7 +4528,7 @@ cmdNext rawSessionDir forceFlag = do
               }
       saveState sessionDir st'
 
-      let shouldRotate = computeShouldRotate (stChunkIndex st) chunk
+      let shouldRotate = computeShouldRotate (stStoryRecords st) chunk
       TIO.putStrLn $
         jsonObject
           [ ("status", jsonStr "unlocked")
@@ -4265,6 +4696,49 @@ extractJsonStringField fieldName line =
                 then parseJsonStringLiteral (T.drop (T.length needle2) after2)
                 else Nothing
 
+extractSubagentIdFromPath :: FilePath -> Maybe Text
+extractSubagentIdFromPath rawPath =
+  let clean = stripFileUriPrefix rawPath
+      segs = map T.pack (wordsBy (== '/') clean)
+      isUuid t = T.length t == 36 && T.count "-" t == 4
+   in listToMaybe (filter isUuid segs)
+  where
+    wordsBy p s =
+      case dropWhile p s of
+        "" -> []
+        s' -> let (w, s'') = break p s' in w : wordsBy p s''
+
+findSubagentMessageFromParent :: Text -> IO (Maybe Text)
+findSubagentMessageFromParent subId = do
+  homeDir <- getHomeDirectory
+  let brainDir = homeDir </> ".gemini" </> "antigravity-cli" </> "brain"
+  brainExists <- doesDirectoryExist brainDir
+  if not brainExists
+    then pure Nothing
+    else do
+      convs <- listDirectory brainDir
+      let msgDirs = [brainDir </> c </> ".system_generated" </> "messages" | c <- convs]
+      existingMsgDirs <- filterM doesDirectoryExist msgDirs
+      allMsgFiles <- concatMapM listJsonFiles existingMsgDirs
+      matches <- forM allMsgFiles $ \f -> do
+        txt <- readTextFileSafe f
+        let senderField = extractJsonStringField "sender" txt
+            contentField = extractJsonStringField "content" txt
+        if senderField == Just subId && isJust contentField
+          then do
+            mtime <- getModificationTime f
+            pure (Just (mtime, fromMaybe "" contentField))
+          else pure Nothing
+      let valid = [ (m, c) | Just (m, c) <- matches, not (T.null c) ]
+      if null valid
+        then pure Nothing
+        else pure (Just (snd (maximumBy (comparing fst) valid)))
+  where
+    listJsonFiles d = do
+      names <- listDirectory d
+      pure [d </> n | n <- names, ".json" `isSuffixOf` n]
+    concatMapM f xs = fmap concat (mapM f xs)
+
 checkSubagentLogUsedSearchWeb :: FilePath -> IO Bool
 checkSubagentLogUsedSearchWeb rawLogPath = do
   let cleanPath = stripFileUriPrefix rawLogPath
@@ -4279,7 +4753,13 @@ checkSubagentLogUsedSearchWeb rawLogPath = do
           then pure cleanPath
           else pure ""
   if null targetPath
-    then pure False
+    then case extractSubagentIdFromPath rawLogPath of
+      Nothing -> pure False
+      Just subId -> do
+        mMsg <- findSubagentMessageFromParent subId
+        case mMsg of
+          Nothing -> pure False
+          Just msg -> pure ("search_web" `T.isInfixOf` T.toLower msg)
     else do
       raw <- readTextFileSafe targetPath
       let isTurnStart l =
@@ -4306,7 +4786,15 @@ checkSubagentLogUsedVerificationTools rawLogPath = do
           then pure cleanPath
           else pure ""
   if null targetPath
-    then pure False
+    then case extractSubagentIdFromPath rawLogPath of
+      Nothing -> pure False
+      Just subId -> do
+        mMsg <- findSubagentMessageFromParent subId
+        case mMsg of
+          Nothing -> pure False
+          Just msg ->
+            let low = T.toLower msg
+             in pure ("read_file" `T.isInfixOf` low || "search_web" `T.isInfixOf` low)
     else do
       raw <- readTextFileSafe targetPath
       let isTurnStart l =
@@ -4335,51 +4823,60 @@ extractSubagentLogResponse rawLogPath = do
         hasClean <- doesFileExist cleanPath
         if hasClean
           then pure cleanPath
-          else die ("Error: Subagent transcript log not found: " ++ rawLogPath)
-  raw <- readTextFileSafe targetPath
-  let isTurnStart l =
-        let t = extractJsonStringField "type" l
-         in t == Just "SYSTEM_MESSAGE" || t == Just "USER_INPUT"
-      isPlannerResponseLine l =
-        extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
-      allRevLines = reverse (T.lines raw)
-      currentTurnPlannerLines = filter isPlannerResponseLine (takeWhile (not . isTurnStart) allRevLines)
-      revLines =
-        if null currentTurnPlannerLines
-          then filter isPlannerResponseLine allRevLines
-          else currentTurnPlannerLines
-      lineTexts l =
-        [ T.strip m
-        | Just m <- [extractJsonStringField "Message" l, extractJsonStringField "content" l]
-        , not (T.null (T.strip m))
-        ]
-      allCandidates = concatMap lineTexts revLines
-      hasDelimiters t =
-        "=== COMMENTARY ===" `T.isInfixOf` t
-          || "=== UPDATED MEMORY ===" `T.isInfixOf` t
-          || "=== PREDICTION UPDATES ===" `T.isInfixOf` t
-          || "=== PREDICTION JUDGMENTS ===" `T.isInfixOf` t
-          || "=== VERIFIED CLAIMS LOG ===" `T.isInfixOf` t
-          || "=== CRITIC FEEDBACK ===" `T.isInfixOf` t
-          || "=== DISPUTED FACTS & MEMORY CHECKS ===" `T.isInfixOf` t
-          || "=== PERSONA & STYLE CRITIQUE ===" `T.isInfixOf` t
-          || "=== PERSONA & STYLE COACHING ===" `T.isInfixOf` t
-          || "=== CHUNK SUMMARY ===" `T.isInfixOf` t
-      sendMsgCandidates =
-        [ T.strip m
-        | l <- revLines
-        , Just m <- [extractJsonStringField "Message" l]
-        , not (T.null (T.strip m))
-        ]
-      preferred =
-        filter hasDelimiters allCandidates
-          ++ sendMsgCandidates
-          ++ filter (\t -> T.length t > 200) allCandidates
-          ++ allCandidates
-  case preferred of
-    (latest : _) -> pure latest
-    [] ->
-      die ("Error: No non-empty PLANNER_RESPONSE content or send_message found in subagent log: " ++ targetPath)
+          else pure ""
+  if null targetPath
+    then case extractSubagentIdFromPath rawLogPath of
+      Just subId -> do
+        mMsg <- findSubagentMessageFromParent subId
+        case mMsg of
+          Just msg -> pure msg
+          Nothing -> die ("Error: Subagent transcript log not found on disk, and no messages from subagent " ++ T.unpack subId ++ " found in session messages.")
+      Nothing -> die ("Error: Subagent transcript log not found: " ++ rawLogPath)
+    else do
+      raw <- readTextFileSafe targetPath
+      let isTurnStart l =
+            let t = extractJsonStringField "type" l
+             in t == Just "SYSTEM_MESSAGE" || t == Just "USER_INPUT"
+          isPlannerResponseLine l =
+            extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
+          allRevLines = reverse (T.lines raw)
+          currentTurnPlannerLines = filter isPlannerResponseLine (takeWhile (not . isTurnStart) allRevLines)
+          revLines =
+            if null currentTurnPlannerLines
+              then filter isPlannerResponseLine allRevLines
+              else currentTurnPlannerLines
+          lineTexts l =
+            [ T.strip m
+            | Just m <- [extractJsonStringField "Message" l, extractJsonStringField "content" l]
+            , not (T.null (T.strip m))
+            ]
+          allCandidates = concatMap lineTexts revLines
+          hasDelimiters t =
+            "=== COMMENTARY ===" `T.isInfixOf` t
+              || "=== UPDATED MEMORY ===" `T.isInfixOf` t
+              || "=== PREDICTION UPDATES ===" `T.isInfixOf` t
+              || "=== PREDICTION JUDGMENTS ===" `T.isInfixOf` t
+              || "=== VERIFIED CLAIMS LOG ===" `T.isInfixOf` t
+              || "=== CRITIC FEEDBACK ===" `T.isInfixOf` t
+              || "=== DISPUTED FACTS & MEMORY CHECKS ===" `T.isInfixOf` t
+              || "=== PERSONA & STYLE CRITIQUE ===" `T.isInfixOf` t
+              || "=== PERSONA & STYLE COACHING ===" `T.isInfixOf` t
+              || "=== CHUNK SUMMARY ===" `T.isInfixOf` t
+          sendMsgCandidates =
+            [ T.strip m
+            | l <- revLines
+            , Just m <- [extractJsonStringField "Message" l]
+            , not (T.null (T.strip m))
+            ]
+          preferred =
+            filter hasDelimiters allCandidates
+              ++ sendMsgCandidates
+              ++ filter (\t -> T.length t > 200) allCandidates
+              ++ allCandidates
+      case preferred of
+        (latest : _) -> pure latest
+        [] ->
+          die ("Error: No non-empty PLANNER_RESPONSE content or send_message found in subagent log: " ++ targetPath)
 
 cmdRecord :: RecordOptions -> IO ()
 cmdRecord opts = do
@@ -4389,7 +4886,7 @@ cmdRecord opts = do
   when (curIdx < 1) $
     die "Error: No chunk is currently unlocked. Run 'next' first."
 
-  (_, commText, mParsedSummary, mParsedPredUpdates, mParsedMem) <-
+  (_, commText, parsedSummaries, mParsedPredUpdates, mParsedMem) <-
     case recSubagentLog opts of
       Just logPath -> do
         raw <- extractSubagentLogResponse logPath
@@ -4407,7 +4904,7 @@ cmdRecord opts = do
                 exists <- doesFileExist commPath
                 unless exists $ die ("Error: Commentary file not found: " ++ commPath)
                 raw <- readTextFileSafe commPath
-                pure (Nothing, T.strip raw, Nothing, Nothing, Nothing)
+                pure (Nothing, T.strip raw, emptyParsedChunkSummaries, Nothing, Nothing)
               Nothing ->
                 die "Error: Provide --response-file, --subagent-log, or --commentary-file."
 
@@ -4435,7 +4932,34 @@ cmdRecord opts = do
   if isWrapupTurn
     then do
       let curated' = mergeCuratedNarrativeMemory (stCuratedMemory st) finalMem
-          st' = st {stCuratedMemory = curated'}
+          (wrapupTopics, wrapupSumTxt) =
+            fromMaybe (["Wrapup", "Retrospective"], extractFallbackSummary commText) (pcsEntry parsedSummaries)
+          wrapupIdx = curIdx + 1
+          existingWrapupDiscussions =
+            case [elrDiscussions e | e <- stEntryRecords st, elrIsWrapup e] of
+              (ds : _) -> ds
+              [] -> []
+          wrapupEntryRecord =
+            EntryLogRecord
+              { elrEntryIndex = wrapupIdx
+              , elrIsWrapup = True
+              , elrChapterNumber = stTotalChapters st
+              , elrChapterTitle = "Final Wrapup & Retrospective"
+              , elrPartInChapter = 1
+              , elrPartsInChapter = 1
+              , elrTopics = wrapupTopics
+              , elrSummary = wrapupSumTxt
+              , elrDiscussions = existingWrapupDiscussions
+              }
+          entryRecords' =
+            sortOn
+              elrEntryIndex
+              (wrapupEntryRecord : filter (not . elrIsWrapup) (stEntryRecords st))
+          st' =
+            st
+              { stCuratedMemory = curated'
+              , stEntryRecords = entryRecords'
+              }
           wrapupHeader = "## Final Wrapup & Retrospective — " <> stTitle st <> "\n\n"
           wrapupContent = wrapupHeader <> cleanedCommText <> "\n\n---\n\n"
           wrapupFile = entriesDir </> "wrapup.md"
@@ -4481,6 +5005,8 @@ cmdRecord opts = do
               (stTotalChunks st)
               chapNum
               chapTitle
+              partNum
+              partsTotal
               True
               cleanedCommText
               (stCuratedMemory st)
@@ -4495,8 +5021,11 @@ cmdRecord opts = do
               , prOriginChunk pr == curIdx
               , all (\oldPr -> prOriginChunk oldPr /= curIdx) (stPredictions st)
               ]
-          linterWarnings = lintReaderCommentary cleanedCommText mNewlyLoggedPred
-          summaryTxt = fromMaybe (extractFallbackSummary commText) mParsedSummary
+          linterWarnings = lintReaderCommentary cleanedCommText parsedSummaries mNewlyLoggedPred
+          (storyTopics, storySumTxt) =
+            fromMaybe ([], "Story events recorded.") (pcsStory parsedSummaries)
+          (entryTopics, entrySumTxt) =
+            fromMaybe ([], extractFallbackSummary commText) (pcsEntry parsedSummaries)
           chapDisplay
             | chapNum == 0 = chapTitle
             | "chapter " `T.isPrefixOf` T.toLower (T.strip chapTitle) = chapTitle
@@ -4525,25 +5054,47 @@ cmdRecord opts = do
             if curIdx `elem` stCompletedChunks st
               then stCompletedChunks st
               else sort (curIdx : stCompletedChunks st)
-          newIndexEntry =
-            ChunkIndexEntry
-              { cieChunkIndex = curIdx
-              , cieChapterNumber = chapNum
-              , cieChapterTitle = chapTitle
-              , ciePartInChapter = partNum
-              , ciePartsInChapter = partsTotal
-              , cieSummary = summaryTxt
+          newStoryRecord =
+            StoryChunkRecord
+              { scrChunkIndex = curIdx
+              , scrChapterNumber = chapNum
+              , scrChapterTitle = chapTitle
+              , scrPartInChapter = partNum
+              , scrPartsInChapter = partsTotal
+              , scrTopics = storyTopics
+              , scrSummary = storySumTxt
               }
-          chunkIndex' =
+          storyRecords' =
             sortOn
-              cieChunkIndex
-              (newIndexEntry : filter (\e -> cieChunkIndex e /= curIdx) (stChunkIndex st))
+              scrChunkIndex
+              (newStoryRecord : filter (\e -> scrChunkIndex e /= curIdx) (stStoryRecords st))
+          existingDiscussions =
+            case [elrDiscussions e | e <- stEntryRecords st, elrEntryIndex e == curIdx, not (elrIsWrapup e)] of
+              (ds : _) -> ds
+              [] -> []
+          newEntryRecord =
+            EntryLogRecord
+              { elrEntryIndex = curIdx
+              , elrIsWrapup = False
+              , elrChapterNumber = chapNum
+              , elrChapterTitle = chapTitle
+              , elrPartInChapter = partNum
+              , elrPartsInChapter = partsTotal
+              , elrTopics = entryTopics
+              , elrSummary = entrySumTxt
+              , elrDiscussions = existingDiscussions
+              }
+          entryRecords' =
+            sortOn
+              elrEntryIndex
+              (newEntryRecord : filter (\e -> elrEntryIndex e /= curIdx || elrIsWrapup e) (stEntryRecords st))
           st' =
             st
               { stCurrentRecorded = True
               , stCurrentJudged = False
               , stCompletedChunks = completed'
-              , stChunkIndex = chunkIndex'
+              , stStoryRecords = storyRecords'
+              , stEntryRecords = entryRecords'
               , stCuratedMemory = curated'
               , stPredictions = preds'
               , stPendingRetirements = pendingRetires
@@ -4552,8 +5103,8 @@ cmdRecord opts = do
               }
 
       judgePromptFile <- writeCurrentJudgePromptFile sessionDir st'
-      factCheckPromptFile <- writeCurrentFactCheckPromptFile sessionDir st' summaryTxt
-      criticPromptFile <- writeCurrentCriticPromptFile sessionDir st' summaryTxt
+      factCheckPromptFile <- writeCurrentFactCheckPromptFile sessionDir st' storySumTxt entrySumTxt
+      criticPromptFile <- writeCurrentCriticPromptFile sessionDir st' entrySumTxt
       (needsCompaction, curLines, curBytes) <- syncMemoryAndArchives sessionDir st'
       logPath <- rebuildMasterLog sessionDir st'
       saveState sessionDir st'
@@ -4777,7 +5328,7 @@ cmdDiscuss opts = do
   unless (stCurrentRecorded st) $
     die "Error: Current chunk commentary has not been recorded yet. Run 'record' before 'discuss'."
 
-  (mParsedUser, replyText, mParsedSummary, mParsedPredUpdates, mParsedMem) <-
+  (mParsedUser, replyText, parsedSummaries, mParsedPredUpdates, mParsedMem) <-
     case discSubagentLog opts of
       Just logPath -> do
         raw <- extractSubagentLogResponse logPath
@@ -4795,7 +5346,7 @@ cmdDiscuss opts = do
                 exists <- doesFileExist commPath
                 unless exists $ die ("Error: Commentary file not found: " ++ commPath)
                 raw <- readTextFileSafe commPath
-                pure (Nothing, T.strip raw, Nothing, Nothing, Nothing)
+                pure (Nothing, T.strip raw, emptyParsedChunkSummaries, Nothing, Nothing)
               Nothing ->
                 die "Error: Provide --response-file, --subagent-log, or --commentary-file."
 
@@ -4853,10 +5404,10 @@ cmdDiscuss opts = do
           Nothing -> mParsedMem
       entriesDir = sessionDir </> "entries"
       wrapupPath = entriesDir </> "wrapup.md"
-      (chapNum, chapTitle) =
+      (chapNum, chapTitle, partNum, partsTotal) =
         case stCurrentMeta st of
-          Just m -> (metaChapterNumber m, metaChapterTitle m)
-          Nothing -> (1, "Chapter ?")
+          Just m -> (metaChapterNumber m, metaChapterTitle m, metaPartInChapter m, metaPartsInChapter m)
+          Nothing -> (1, "Chapter ?", 1, 1)
 
   hasWrapup <- doesFileExist wrapupPath
   let entryFile =
@@ -4874,6 +5425,8 @@ cmdDiscuss opts = do
           (stTotalChunks st)
           chapNum
           chapTitle
+          partNum
+          partsTotal
           False
           replyText
           (stCuratedMemory st)
@@ -4907,23 +5460,63 @@ cmdDiscuss opts = do
 
   usedVerifyTools <- maybe (pure False) checkSubagentLogUsedVerificationTools (discSubagentLog opts)
 
-  let chunkIndex' =
-        case mParsedSummary of
-          Nothing -> stChunkIndex st
-          Just newSum ->
+  let isWrapupTarget = hasWrapup && curIdx >= stTotalChunks st
+      storyRecords' =
+        case pcsStory parsedSummaries of
+          Nothing -> stStoryRecords st
+          Just (newStoryTopics, newStorySum) ->
             map
-              (\e -> if cieChunkIndex e == curIdx then e {cieSummary = newSum} else e)
-              (stChunkIndex st)
+              ( \e ->
+                  if scrChunkIndex e == curIdx
+                    then
+                      e
+                        { scrTopics = if null newStoryTopics then scrTopics e else newStoryTopics
+                        , scrSummary = newStorySum
+                        }
+                    else e
+              )
+              (stStoryRecords st)
+      (discTopics, discSumTxt) =
+        fromMaybe ([], extractFallbackSummary replyText) (pcsDiscussion parsedSummaries)
+      discRecord =
+        EntryDiscussionRecord
+          { edrIsFactCheck = isFactCheckDiscussion
+          , edrTopics = discTopics
+          , edrSummary = discSumTxt
+          }
+      matchesTargetEntry e
+        | isWrapupTarget = elrIsWrapup e
+        | otherwise = elrEntryIndex e == curIdx && not (elrIsWrapup e)
+      entryRecords' =
+        map
+          ( \e ->
+              if matchesTargetEntry e
+                then
+                  let (updTopics, updSum) =
+                        case pcsEntry parsedSummaries of
+                          Nothing -> (elrTopics e, elrSummary e)
+                          Just (et, es) -> (if null et then elrTopics e else et, es)
+                   in e
+                        { elrTopics = updTopics
+                        , elrSummary = updSum
+                        , elrDiscussions = elrDiscussions e ++ [discRecord]
+                        }
+                else e
+          )
+          (stEntryRecords st)
       memUpdated =
         isJust finalMem
           || isJust mParsedPredUpdates
-          || isJust mParsedSummary
+          || (parsedSummaries /= emptyParsedChunkSummaries)
           || (curated' /= stCuratedMemory st)
           || (preds' /= stPredictions st)
+          || (storyRecords' /= stStoryRecords st)
+          || (entryRecords' /= stEntryRecords st)
           || (auditBlocks /= stPredictionAuditWarnings st)
       st' =
         st
-          { stChunkIndex = chunkIndex'
+          { stStoryRecords = storyRecords'
+          , stEntryRecords = entryRecords'
           , stCuratedMemory = curated'
           , stPredictions = preds'
           , stPredictionAuditWarnings = auditBlocks

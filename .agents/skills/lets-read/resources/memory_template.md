@@ -11,27 +11,40 @@
   canon/adaptation divergences (if applicable), and factual user corrections;
   update in place, never delete during compaction>
 
-- **Chapter 1**: <1 concise bullet per completed `L1_XXXX` arc in `### Completed
-  Arc Archives` (matching exact gatekeeper `Arc K` numbering), plus at most 1–2
+- **Chapter 1**: <1 concise bullet per completed `L1_XXXX` arc in `chunks/by_chronology.md`
+  (matching exact gatekeeper `Arc K` numbering), plus at most 1–2
   bullets for completed chapters in the current unarchived arc. Never
   re-summarize the in-progress chapter (`Part k/N` where `k < N`) already listed
-  chunk-by-chunk in `### Current & Recent Arc Chunks`.>
+  chunk-by-chunk in `### Recent Story Chunks (Last 3)`.>
 
-## Memory Archive & Index Tree (Auto-Maintained by Gatekeeper)
+## Session Index & Archive Pointers (Auto-Maintained by Gatekeeper)
 
 *(Do not manually re-emit this section in `=== UPDATED MEMORY ===`; `LetsRead.hs`
-updates it automatically from your `=== CHUNK SUMMARY ===`.)*
+updates it automatically from your `[Story | Topics: ...]`, `[Entry | Topics: ...]`,
+and `[Discussion | Topics: ...]` bullets in `=== CHUNK SUMMARY ===`.)*
 
-### Completed Arc Archives (Chunk Indices & Historical Memory Snapshots)
+- **Story Chunks (In-Story Events)**:
+  [Chronological Index](chunks/by_chronology.md) |
+  [Semantic Topic Index](chunks/by_topic.md) |
+  [Chunk Files (`chunk_XXXX.md`)](chunks/)
+- **Session Commentary & Discussions**:
+  [Chronological Index](entries/by_chronology.md) |
+  [Semantic Topic Index](entries/by_topic.md) |
+  [Entry Files (`chunk_XXXX.md`)](entries/)
+- **Reader Predictions**:
+  [Chronological Index](predictions/by_chronology.md) |
+  [Semantic Topic Index](predictions/by_topic.md) |
+  [Prediction Files (`pred_XXXX.md`)](predictions/)
+- **Curated Memory Snapshots**:
+  [End-of-Arc & Per-Chunk Snapshots](archive/memory/)
+- **Canonical Session Topics (Reuse Exact Spelling When Applicable)**:
+  *(Topics will appear here as chunks, entries, and predictions are recorded.)*
 
-- *(Completed arc archive files `archive/L1_XXXX.md` appear here as the story
-  progresses.)*
+### Recent Story Chunks (Last 3 — Full History in `chunks/by_chronology.md` & `chunks/by_topic.md`)
 
-### Current & Recent Arc Chunks
-
-- **chunk_0001** (Ch. 1: <Chapter Title>, Part 1/1): <1-line summary from
-  `=== CHUNK SUMMARY ===`> ([story](chunks/chunk_0001.md) |
-  [entry](entries/chunk_0001.md) | [memory](archive/memory/chunk_0001.md))
+- **chunk_0001** (Ch. 1: <Chapter Title>, Part 1/1) `[Topics: Tag1, Tag2]`: <1-line
+  factual story summary from `- **[Story | Topics: ...]**` in `=== CHUNK SUMMARY ===`>
+  ([story](chunks/chunk_0001.md))
 
 ## Characters & Relationships
 

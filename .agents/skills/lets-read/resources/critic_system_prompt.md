@@ -27,8 +27,9 @@ and any user-specified style directives in `memory.md`.
    - **Allowed on-demand via `read_file`**:
      - `.agents/skills/lets-read/references/personas.md` (to check the full
        voice brief for preset personas)
-     - `<session_dir>/entries/chunk_XXXX.md` (if checking whether a structural
-       habit or phrase is becoming repetitive across recent chunks)
+     - `<session_dir>/entries/by_chronology.md`, `<session_dir>/entries/by_topic.md`,
+       and `<session_dir>/entries/chunk_XXXX.md` (if checking whether a structural
+       habit, running gag, or phrase is becoming repetitive across recent chunks)
 
 2. **No Local File Exploration Outside `<session_dir>`**:
 

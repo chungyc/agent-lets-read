@@ -20,13 +20,18 @@ story, one chunk at a time.
      callback or recent discussion exchange.
 
    - **Allowed on-demand**: You may call `read_file` ONLY within
-     `<session_dir>/predictions/`, `<session_dir>/archive/`,
-     `<session_dir>/chunks/`, `<session_dir>/entries/`, and
+     `<session_dir>/chunks/` (`by_chronology.md`, `by_topic.md`,
+     `archive/chronology/`, `archive/topics/`, `chunk_XXXX.md`),
+     `<session_dir>/entries/` (`by_chronology.md`, `by_topic.md`,
+     `archive/chronology/`, `archive/topics/`, `chunk_XXXX.md`),
+     `<session_dir>/predictions/` (`by_chronology.md`, `by_topic.md`,
+     `archive/chronology/`, `archive/topics/`, `pred_XXXX.md`,
+     `hall_of_fame.md`), `<session_dir>/archive/memory/` (`curated_XXXX.md`,
+     `chunk_XXXX.md`), and
      `.agents/skills/lets-read/resources/commentary_template.md` to look up or
      verify previously unlocked story passages, your earlier Let's Read
-     commentary, your indexed predictions (`by_chronology.md`, `by_topic.md`,
-     `pred_XXXX.md`), your historical memory snapshots, and the commentary
-     guide.
+     commentary and discussions, your indexed predictions, your historical
+     memory snapshots, and the commentary guide.
 
 2. **No Local File Exploration Outside the Session Archive**:
 
@@ -48,8 +53,9 @@ story, one chunk at a time.
    - Before finalizing `=== COMMENTARY ===` and `=== PREDICTION UPDATES ===`,
      whenever you quote, callback to, count, or build a prediction premise
      (`**Clue/Anomaly**`) on a specific detail from an earlier chunk that is not
-     verbatim in `current_chunk.md`, check `## Memory Archive & Index Tree` in
-     `memory.md` and **proactively call `read_file` on the target
+     verbatim in `current_chunk.md`, check `chunks/by_topic.md` or
+     `chunks/by_chronology.md` (linked under `## Session Index & Archive Pointers`
+     in `memory.md`) and **proactively call `read_file` on the target
      `<session_dir>/chunks/chunk_XXXX.md`** during your reading turn.
 
 4. **Genuine First-Time Experience, Proactive Lore Verification & External-Canon Quarantine**:
@@ -102,15 +108,16 @@ story, one chunk at a time.
         `- **Core Premise, Timeline & Baseline Facts (Persistent)**: <core setting/premise, verified in-text dates/ages, canon/adaptation divergences (if applicable), and verified factual corrections>`
         (update in place; never delete during compaction).
 
-     2. **Completed `L1_XXXX` Arc Bullets**: Keep 1 concise bullet per
-        completed `L1_XXXX` arc listed in `### Completed Arc Archives`, matching
+     2. **Completed Arc Bullets**: Keep 1 concise bullet per
+        completed arc (`L1_XXXX` in `chunks/by_chronology.md`), matching
         `LetsRead.hs`'s exact `Arc K (Ch. A–B | Chunks XXXX–YYYY)` numbering.
 
      3. **Completed Chapters in the Current Unarchived Arc (1–2 Bullets Max)**:
         Keep at most 1–2 concise bullets summarizing completed chapters in the
         current unarchived arc (folding a chapter into this bullet once its
-        final part `Part N/N` finishes; `### Current & Recent Arc Chunks`
-        already tracks the in-progress chapter chunk-by-chunk).
+        final part `Part N/N` finishes; `### Recent Story Chunks (Last 3)` in
+        `memory.md` and `chunks/by_chronology.md` already track the in-progress
+        chapter chunk-by-chunk).
 
    - **2-Tier Character Ledger & Craft Persistence**:
 
@@ -216,7 +223,8 @@ Always structure your final response text using **exact** section delimiters:
 (Your complete Let's Read commentary for this chunk in your Active Persona, weaving 3–5 tight `>` blockquotes and live reactions, and concluding with your 1 new `- **[Predicted Chunk XXXX | Topics: ...]**` bullet.)
 
 === CHUNK SUMMARY ===
-<Single 1-line factual summary of this chunk's key story events PLUS the new multi-chapter theory made in this chunk.>
+- **[Story | Topics: Tag1, Tag2, Tag3]** <1-line factual summary of this chunk's key in-story events ONLY (populates `chunks/by_chronology.md` and `chunks/by_topic.md`).>
+- **[Entry | Topics: Tag1, Tag2, Tag3]** <1-line summary of your liveblog reaction, standout quotes, or running gags in this entry (populates `entries/by_chronology.md` and `entries/by_topic.md`).>
 
 === PREDICTION UPDATES ===
 - **[Predicted Chunk XXXX | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <concise 1-clause detail, <= 120 chars, no quotes> -> **Theory**: <direct primary bet, <= 160 chars> (vs. **Plausible Rival**: <concise rival explanation, <= 120 chars>)
@@ -271,13 +279,19 @@ discrepancy on Chunk $N$:
 
 3. **Verify, Then Concede, Rebut, or Nuance in Character**:
 
+   - Always include `=== CHUNK SUMMARY ===` with a `[Discussion]` bullet:
+     `- **[Discussion | Topics: Tag1, Tag2, Tag3]** <1-line summary of the discussion question and takeaway>`
+     so the discussion exchange is indexed in `entries/by_chronology.md` and
+     `entries/by_topic.md` without overwriting your initial entry summary.
+
    - **If your own `read_file` / `search_web` check confirms a material misread
      or timeline error**: Own it with good humor in your conversational reply
      (`=== COMMENTARY ===`), output a complete `=== UPDATED MEMORY ===` section
      (the 4 narrative sections) to clean up `memory.md`, and if the error
-     affected Chunk $N$'s 1-line summary or newly logged prediction
-     (`[Predicted Chunk NNNN]`), also output a revised `=== CHUNK SUMMARY ===`
-     and/or `=== PREDICTION UPDATES ===`
+     affected Chunk $N$'s 1-line factual story summary or newly logged prediction
+     (`[Predicted Chunk NNNN]`), also include an updated
+     `- **[Story | Topics: Tag1, Tag2, Tag3]** <corrected 1-line factual story summary>`
+     in `=== CHUNK SUMMARY ===` and/or `=== PREDICTION UPDATES ===`
      (`- **[Predicted Chunk NNNN | Topics: ...]** ...`) so `LetsRead.hs discuss`
      replaces them before Chunk $N+1$ begins.
 

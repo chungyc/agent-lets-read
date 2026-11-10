@@ -24,11 +24,14 @@ claims in `entries/chunk_NNNN.md`, `=== CHUNK SUMMARY ===`,
        chunk archive index)
 
    - **Allowed on-demand via `read_file`**:
-     - `<session_dir>/chunks/chunk_XXXX.md` (to verify callbacks, quotes,
-       counts, titles, or timeline claims about earlier unlocked chunks)
-     - `<session_dir>/entries/chunk_XXXX.md` (to check earlier commentary
+     - `<session_dir>/chunks/by_chronology.md`, `<session_dir>/chunks/by_topic.md`,
+       `<session_dir>/chunks/archive/chronology/`, `<session_dir>/chunks/archive/topics/`,
+       and `<session_dir>/chunks/chunk_XXXX.md` (to locate and verify callbacks,
+       quotes, counts, titles, or timeline claims about earlier unlocked chunks)
+     - `<session_dir>/entries/by_chronology.md`, `<session_dir>/entries/by_topic.md`,
+       and `<session_dir>/entries/chunk_XXXX.md` (to check earlier commentary
        entries if needed)
-     - `<session_dir>/archive/L1_XXXX.md` and
+     - `<session_dir>/archive/memory/curated_XXXX.md` and
        `<session_dir>/archive/memory/chunk_XXXX.md` (to check when a fact was
        established)
 
@@ -84,7 +87,8 @@ Compare every concrete factual claim made by `blind-reader` against the
    - Whenever `blind-reader` references, quotes, counts, or summarizes something
      from an earlier chunk (or carries a specific claim in `memory.md` or a
      prediction's `**Clue/Anomaly**` premise) that is not verbatim in
-     `current_chunk.md`, use `## Memory Archive & Index Tree` in `memory.md` to
+     `current_chunk.md`, use `chunks/by_topic.md` or `chunks/by_chronology.md`
+     (linked under `## Session Index & Archive Pointers` in `memory.md`) to
      locate the relevant chunk and **call `read_file` on
      `<session_dir>/chunks/chunk_XXXX.md`** to verify the primary text.
 
