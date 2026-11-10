@@ -1561,7 +1561,7 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
             (ppRawLine r)
             ( "Remove `CONFIRMED` / `DEBUNKED` / `SUBVERTED` lines from `=== PREDICTION UPDATES ===`. Only output your 1 new prediction (`- **[Predicted Chunk "
                 <> nextStr
-                <> " | Topics: Tag1, Tag2]** ...`) and, when at the 10-prediction cap, your conditional retirement suggestion (`- **[Predicted Chunk XXXX -> RETIRED Chunk "
+                <> " | Topics: Topic 1, Topic 2]** ...`) and, when at the 10-prediction cap, your conditional retirement suggestion (`- **[Predicted Chunk XXXX -> RETIRED Chunk "
                 <> nextStr
                 <> "]** <reason>`)."
             )
@@ -1594,7 +1594,7 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
                           canonL
                           ( "Use the current chunk number in the bracket tag: `- **[Predicted Chunk "
                               <> nextStr
-                              <> " | Topics: Tag1, Tag2]** "
+                              <> " | Topics: Topic 1, Topic 2]** "
                               <> trimmedBody
                               <> "` (when submitting Chunk "
                               <> nextStr
@@ -1610,7 +1610,7 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
                       canonL
                       ( "Format every new prediction as `- **[Predicted Chunk "
                           <> nextStr
-                          <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <detail> -> **Theory**: <primary bet> (vs. **Plausible Rival**: <rival explanation>)`."
+                          <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail> -> **Theory**: <primary bet> (vs. **Plausible Rival**: <rival explanation>)`."
                       )
                   )
               )
@@ -1628,7 +1628,7 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
               rawInv
               ( "Fix or remove this line in `=== PREDICTION UPDATES ===`! To log your new prediction, use `- **[Predicted Chunk "
                   <> nextStr
-                  <> " | Topics: Tag1, Tag2]** "
+                  <> " | Topics: Topic 1, Topic 2]** "
                   <> trimmedBody
                   <> "` (on Chunk "
                   <> nextStr
@@ -1773,12 +1773,12 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
         | isRecordTurn && curIdx >= 1 && curIdx < totalChunks && not hasNewForCur =
             [ renderTagFormatAuditBlock
                 ("No new prediction was logged for Chunk " <> curStr <> " (every chunk before the final chunk must log 1 new non-softball, multi-chapter prediction, capped at 10 unresolved predictions).")
-                ("*(Missing `- **[Predicted Chunk " <> curStr <> " | Topics: Tag1, Tag2]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` in `=== PREDICTION UPDATES ===`)*")
+                ("*(Missing `- **[Predicted Chunk " <> curStr <> " | Topics: Topic 1, Topic 2]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` in `=== PREDICTION UPDATES ===`)*")
                 ( "On Chunk "
                     <> nextStr
                     <> ", make sure to log 1 new non-softball, multi-chapter prediction using `- **[Predicted Chunk "
                     <> nextStr
-                    <> " | Topics: Tag1, Tag2]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` in both `=== COMMENTARY ===` and `=== PREDICTION UPDATES ===`."
+                    <> " | Topics: Topic 1, Topic 2]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` in both `=== COMMENTARY ===` and `=== PREDICTION UPDATES ===`."
                 )
             ]
         | otherwise = []
@@ -3180,7 +3180,7 @@ renderPredictionSlateSection st =
       activeLines =
         if null activePreds
           then
-            [ "- *(No active predictions yet. On every chunk before the final chunk, output 1 new non-softball, multi-chapter prediction (`<= 450 chars` total) in `=== PREDICTION UPDATES ===` using `- **[Predicted Chunk XXXX | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <detail, <= 120 chars, no quotes> -> **Theory**: <direct bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`.)*"
+            [ "- *(No active predictions yet. On every chunk before the final chunk, output 1 new non-softball, multi-chapter prediction (`<= 450 chars` total) in `=== PREDICTION UPDATES ===` using `- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 120 chars, no quotes> -> **Theory**: <direct bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`.)*"
             ]
           else
             [ let origPad = padChunkNumber (prOriginChunk pr)
@@ -3357,7 +3357,7 @@ renderPredictionSlateNote curIdx totalChunks activeCount
             <> jsonInt activeCount
             <> "/10 active unresolved predictions in `memory.md`. React naturally in `=== COMMENTARY ===` to any `CONFIRMED`/`DEBUNKED`/`SUBVERTED` rulings from the previous chunk, and log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total) on this chunk using `- **[Predicted Chunk "
             <> curPad
-            <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <detail, <= 120 chars, no quotes> -> **Theory**: <direct bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)` at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`."
+            <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 120 chars, no quotes> -> **Theory**: <direct bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)` at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`."
   | otherwise =
       let curPad = T.pack (padChunkNumber curIdx)
           needRetire = activeCount + 1 - 10
@@ -3365,7 +3365,7 @@ renderPredictionSlateNote curIdx totalChunks activeCount
             <> jsonInt activeCount
             <> "/10 active unresolved predictions in `memory.md` (AT 10-PREDICTION CAP). React naturally in `=== COMMENTARY ===` to any `CONFIRMED`/`DEBUNKED`/`SUBVERTED` rulings from the previous chunk, log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total) using `- **[Predicted Chunk "
             <> curPad
-            <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <detail, <= 120 chars, no quotes> -> **Theory**: <direct bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)` at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`, AND nominate "
+            <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 120 chars, no quotes> -> **Theory**: <direct bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)` at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`, AND nominate "
             <> jsonInt needRetire
             <> " conditional retirement candidate(s) (choosing from all unresolved predictions, including your new one, the prediction(s) most likely to never be resolved or most likely to be debunked) in `=== PREDICTION UPDATES ===` using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
             <> curPad
@@ -3740,9 +3740,9 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
                , "2. If `critic_feedback.md` is present, read `commentary-critic`'s `Persona & Style Critique` and apply useful voice/craft adjustments silently as you write this chunk's commentary—never apologize for or mention style feedback in `=== COMMENTARY ===`."
                , "3. Check `### Latest Prediction Judge Rulings` in `memory.md` and weave your reaction to any `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` verdicts from the previous chunk naturally into `=== COMMENTARY ===` where relevant (owning `DEBUNKED`/`SUBVERTED` misses with good humor, and avoiding victory laps on 1–2 chunk short-horizon calls)."
                , "4. Proactive Fact-Checking Before Submission: Whenever you reference a specific detail, count, character title/role, or timeline sequence from an earlier chunk that is not verbatim in `current_chunk.md`, use `chunks/by_topic.md` or `chunks/by_chronology.md` to locate the relevant chunk and call `read_file` on `<session_dir>/chunks/chunk_XXXX.md` first (never guess from condensed `memory.md` bullets). Whenever you characterize an external canon event, relationship, or power mechanic, call `search_web` with a neutral query first and strictly quarantine external canon from in-story facts."
-               , "5. Prediction Quota, Cross-Thread Synthesis ($A + B -> C$), Conciseness Cap & Conditional Retirement: On every chunk before the final chunk, log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total after bracket tag: `- **[Predicted Chunk " <> curPad <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <verified detail A in current_chunk.md + earlier thread/mystery/canon B, <= 120 chars, no inline quotes> -> **Theory**: <direct non-linear outcome C, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`) at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`. Ensure the factual and chronological premise in `**Clue/Anomaly**` (*who knew what, and when*) is strictly accurate. Never log single-beat linear extrapolations (\"X happened here so more of X will happen later\"). If `memory.md` already has 10/10 active predictions, also nominate 1 conditional retirement candidate (`- **[Predicted Chunk XXXX -> RETIRED Chunk " <> curPad <> "]** <reason>`) in `=== PREDICTION UPDATES ===`."
+               , "5. Prediction Quota, Cross-Thread Synthesis ($A + B -> C$), Conciseness Cap & Conditional Retirement: On every chunk before the final chunk, log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total after bracket tag; use normal spaces in multi-word topic tags, not CamelCase: `- **[Predicted Chunk " <> curPad <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <verified detail A in current_chunk.md + earlier thread/mystery/canon B, <= 120 chars, no inline quotes> -> **Theory**: <direct non-linear outcome C, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`) at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`. Ensure the factual and chronological premise in `**Clue/Anomaly**` (*who knew what, and when*) is strictly accurate. Never log single-beat linear extrapolations (\"X happened here so more of X will happen later\"). If `memory.md` already has 10/10 active predictions, also nominate 1 conditional retirement candidate (`- **[Predicted Chunk XXXX -> RETIRED Chunk " <> curPad <> "]** <reason>`) in `=== PREDICTION UPDATES ===`."
                , "6. Stay true to your Active Persona (and any user style directives in `- **Reader Craft Directives & Running Gags (Persistent)**:` in `memory.md`): curate 3–5 standout moments using tight 2–6 line verbatim `>` blockquotes (`[...]` to pair setup with punchline), do not paraphrase what a quote says right before or after quoting it, and avoid generic book-review puffery (\"masterclass\"/\"tour de force\") and fortune-cookie truisms."
-               , "7. Output all four required sections: `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===` (two tagged bullets: `- **[Story | Topics: Tag1, Tag2, Tag3]** <1-line factual summary of in-story events only>` and `- **[Entry | Topics: Tag1, Tag2, Tag3]** <1-line summary of your liveblog reaction, standout quotes, or running gags>`), `=== PREDICTION UPDATES ===` (new prediction + optional conditional `RETIRED` nomination), and `=== UPDATED MEMORY ===` (only the 4 narrative sections)."
+               , "7. Output all four required sections: `=== COMMENTARY ===`, `=== CHUNK SUMMARY ===` (two tagged bullets, using normal spaces in multi-word topic tags: `- **[Story | Topics: Topic 1, Topic 2, Topic 3]** <1-line factual summary of in-story events only>` and `- **[Entry | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of your liveblog reaction, standout quotes, or running gags>`), `=== PREDICTION UPDATES ===` (new prediction + optional conditional `RETIRED` nomination), and `=== UPDATED MEMORY ===` (only the 4 narrative sections)."
                ]
   TIO.writeFile promptPath promptText
   pure promptPath
@@ -3932,7 +3932,7 @@ lintReaderCommentary commText parsedSummaries mNewPred =
             ]
       summaryIssues =
         ( case pcsStory parsedSummaries of
-            Nothing -> ["missing `- **[Story | Topics: Tag1, Tag2, Tag3]** <1-line factual story summary>`"]
+            Nothing -> ["missing `- **[Story | Topics: Topic 1, Topic 2, Topic 3]** <1-line factual story summary>`"]
             Just (ts, sBody) ->
               ["`[Story]` bullet had 0 `Topics:` tags" | null ts]
                 ++ [ "`[Story]` summary included reader-prediction/meta boilerplate (`\"leading me to predict\"`/`\"I predict\"`); keep `[Story]` strictly to in-story events and put reaction/gag highlights in `[Entry]`"
@@ -3941,7 +3941,7 @@ lintReaderCommentary commText parsedSummaries mNewPred =
                    ]
         )
           ++ ( case pcsEntry parsedSummaries of
-                 Nothing -> ["missing `- **[Entry | Topics: Tag1, Tag2, Tag3]** <1-line liveblog reaction/gags summary>`"]
+                 Nothing -> ["missing `- **[Entry | Topics: Topic 1, Topic 2, Topic 3]** <1-line liveblog reaction/gags summary>`"]
                  Just (ts, _) -> ["`[Entry]` bullet had 0 `Topics:` tags" | null ts]
              )
       summaryWarn =
@@ -3950,7 +3950,7 @@ lintReaderCommentary commText parsedSummaries mNewPred =
           else
             [ "- **[Deterministic Style Linter (`LetsRead.hs`)]** Your `=== CHUNK SUMMARY ===` section had formatting issues ("
                 <> T.intercalate "; " summaryIssues
-                <> "). Always include both `- **[Story | Topics: Tag1, Tag2, Tag3]** <1-line factual summary of in-story events>` and `- **[Entry | Topics: Tag1, Tag2, Tag3]** <1-line summary of your liveblog reaction, standout quotes, or running gags>`."
+                <> "). Always include both `- **[Story | Topics: Topic 1, Topic 2, Topic 3]** <1-line factual summary of in-story events>` and `- **[Entry | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of your liveblog reaction, standout quotes, or running gags>`."
             ]
       predLenWarn =
         case mNewPred of
@@ -4298,8 +4298,8 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
                , "   - Call `read_file` on the cited `<session_dir>/chunks/chunk_XXXX.md` (or `current_chunk.md`) to inspect the full surrounding scene context beyond the quoted excerpt; **and/or**"
                , "   - Call `search_web` using your own **neutral, independent query** (never copy a leading query from `fact-checker`, and never search for the specific story being read)."
                , "3. **Verify, Then Concede, Rebut, or Nuance in Character (`=== COMMENTARY ===` & `=== CHUNK SUMMARY ===`)**:"
-               , "   - Always output `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Tag1, Tag2, Tag3]** <1-line summary of the discussion question and takeaway>` so the discussion round is indexed in `entries/by_chronology.md` and `entries/by_topic.md`."
-               , "   - **If your own `read_file` / `search_web` check confirms a material misread or timeline error**: Own it naturally in character in your `=== COMMENTARY ===` discussion reply, output `=== UPDATED MEMORY ===` (the 4 narrative sections) to clean up `memory.md`, and if the error affected Chunk " <> curPad <> "'s 1-line story summary or newly logged prediction (`[Predicted Chunk " <> curPad <> "]`), also include `- **[Story | Topics: Tag1, Tag2, Tag3]** <corrected 1-line factual summary>` in `=== CHUNK SUMMARY ===` and/or `=== PREDICTION UPDATES ===` (`- **[Predicted Chunk " <> curPad <> " | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)`)."
+               , "   - Always output `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of the discussion question and takeaway>` so the discussion round is indexed in `entries/by_chronology.md` and `entries/by_topic.md`."
+               , "   - **If your own `read_file` / `search_web` check confirms a material misread or timeline error**: Own it naturally in character in your `=== COMMENTARY ===` discussion reply, output `=== UPDATED MEMORY ===` (the 4 narrative sections) to clean up `memory.md`, and if the error affected Chunk " <> curPad <> "'s 1-line story summary or newly logged prediction (`[Predicted Chunk " <> curPad <> "]`), also include `- **[Story | Topics: Topic 1, Topic 2, Topic 3]** <corrected 1-line factual summary>` in `=== CHUNK SUMMARY ===` and/or `=== PREDICTION UPDATES ===` (`- **[Predicted Chunk " <> curPad <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)`)."
                , "   - **If your own `read_file` / `search_web` check shows your original reading, figurative joke, or AU baseline was right (or that `fact-checker` cherry-picked a quote out of context)**: **Hold your ground and push back in character**, quoting the primary text from `chunks/chunk_XXXX.md` or your `search_web` findings to rebut the query!"
                , "   - **If the text is genuinely ambiguous**: Note both readings as live possibilities without treating the query as settled fact."
                ]

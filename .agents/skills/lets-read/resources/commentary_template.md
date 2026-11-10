@@ -17,7 +17,7 @@ callbacks. If a prediction was ruled `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` by
 `prediction-judge` on the previous chunk, weave that reaction naturally into
 your commentary where relevant.>
 
-- **[Predicted Chunk XXXX | Topics: Tag1, Tag2, Tag3]**
+- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]**
   **Clue/Anomaly**: <verified detail A in current_chunk.md + earlier
   thread/mystery B, <= 120 chars, no inline quotes> ->
   **Theory**: <1 direct single-clause bet C, <= 160 chars>

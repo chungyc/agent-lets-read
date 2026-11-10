@@ -42,7 +42,7 @@ and `[Discussion | Topics: ...]` bullets in `=== CHUNK SUMMARY ===`.)*
 
 ### Recent Story Chunks (Last 3 — Full History in `chunks/by_chronology.md` & `chunks/by_topic.md`)
 
-- **chunk_0001** (Ch. 1: <Chapter Title>, Part 1/1) `[Topics: Tag1, Tag2]`: <1-line
+- **chunk_0001** (Ch. 1: <Chapter Title>, Part 1/1 | *Topics*: Topic 1, Topic 2): <1-line
   factual story summary from `- **[Story | Topics: ...]**` in `=== CHUNK SUMMARY ===`>
   ([story](chunks/chunk_0001.md))
 
@@ -82,7 +82,7 @@ active predictions after your turn.)*
 
 ### Currently Active Unresolved Predictions (0/10)
 
-- **[Predicted Chunk XXXX | Topics: Tag1, Tag2, Tag3]**
+- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]**
   **Clue/Anomaly**: <1 short clause, <= 120 chars, no quotes> ->
   **Theory**: <direct primary bet, <= 160 chars>
   (vs. **Plausible Rival**: <concise rival explanation, <= 120 chars>)

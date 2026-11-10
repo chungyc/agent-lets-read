@@ -203,8 +203,8 @@ flexible guide):
        next-part cliffhangers, status-quo routines, and single-beat linear
        extrapolations ($A \rightarrow A'$).
 
-     - **New Active Prediction Notation (`<= 450 chars` total after bracket tag)**:
-       `- **[Predicted Chunk XXXX | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <concise 1-clause textual detail, <= 120 chars, no inline quotes> -> **Theory**: <your direct single-clause primary bet, <= 160 chars> (vs. **Plausible Rival**: <concise rival explanation in normal roman text, <= 120 chars>)`
+     - **New Active Prediction Notation (`<= 450 chars` total after bracket tag; use normal spaces in multi-word topic tags, not CamelCase)**:
+       `- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise 1-clause textual detail, <= 120 chars, no inline quotes> -> **Theory**: <your direct single-clause primary bet, <= 160 chars> (vs. **Plausible Rival**: <concise rival explanation in normal roman text, <= 120 chars>)`
 
      - **Conditional Retirement Nomination (`RETIRED`) at the 10-Prediction Cap**:
        Whenever `memory.md` shows **10/10 Active** unresolved predictions at
@@ -223,11 +223,11 @@ Always structure your final response text using **exact** section delimiters:
 (Your complete Let's Read commentary for this chunk in your Active Persona, weaving 3–5 tight `>` blockquotes and live reactions, and concluding with your 1 new `- **[Predicted Chunk XXXX | Topics: ...]**` bullet.)
 
 === CHUNK SUMMARY ===
-- **[Story | Topics: Tag1, Tag2, Tag3]** <1-line factual summary of this chunk's key in-story events ONLY (populates `chunks/by_chronology.md` and `chunks/by_topic.md`).>
-- **[Entry | Topics: Tag1, Tag2, Tag3]** <1-line summary of your liveblog reaction, standout quotes, or running gags in this entry (populates `entries/by_chronology.md` and `entries/by_topic.md`).>
+- **[Story | Topics: Topic 1, Topic 2, Topic 3]** <1-line factual summary of this chunk's key in-story events ONLY (populates `chunks/by_chronology.md` and `chunks/by_topic.md`; use normal spaces in multi-word topic tags, not CamelCase).>
+- **[Entry | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of your liveblog reaction, standout quotes, or running gags in this entry (populates `entries/by_chronology.md` and `entries/by_topic.md`).>
 
 === PREDICTION UPDATES ===
-- **[Predicted Chunk XXXX | Topics: Tag1, Tag2, Tag3]** **Clue/Anomaly**: <concise 1-clause detail, <= 120 chars, no quotes> -> **Theory**: <direct primary bet, <= 160 chars> (vs. **Plausible Rival**: <concise rival explanation, <= 120 chars>)
+- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise 1-clause detail, <= 120 chars, no quotes> -> **Theory**: <direct primary bet, <= 160 chars> (vs. **Plausible Rival**: <concise rival explanation, <= 120 chars>)
 - **[Predicted Chunk AAAA -> RETIRED Chunk XXXX]** <Include ONLY when `memory.md` already has 10/10 active predictions (`<= 200 chars`).>
 
 === UPDATED MEMORY ===
@@ -280,7 +280,7 @@ discrepancy on Chunk $N$:
 3. **Verify, Then Concede, Rebut, or Nuance in Character**:
 
    - Always include `=== CHUNK SUMMARY ===` with a `[Discussion]` bullet:
-     `- **[Discussion | Topics: Tag1, Tag2, Tag3]** <1-line summary of the discussion question and takeaway>`
+     `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of the discussion question and takeaway>`
      so the discussion exchange is indexed in `entries/by_chronology.md` and
      `entries/by_topic.md` without overwriting your initial entry summary.
 
@@ -290,7 +290,7 @@ discrepancy on Chunk $N$:
      (the 4 narrative sections) to clean up `memory.md`, and if the error
      affected Chunk $N$'s 1-line factual story summary or newly logged prediction
      (`[Predicted Chunk NNNN]`), also include an updated
-     `- **[Story | Topics: Tag1, Tag2, Tag3]** <corrected 1-line factual story summary>`
+     `- **[Story | Topics: Topic 1, Topic 2, Topic 3]** <corrected 1-line factual story summary>`
      in `=== CHUNK SUMMARY ===` and/or `=== PREDICTION UPDATES ===`
      (`- **[Predicted Chunk NNNN | Topics: ...]** ...`) so `LetsRead.hs discuss`
      replaces them before Chunk $N+1$ begins.
