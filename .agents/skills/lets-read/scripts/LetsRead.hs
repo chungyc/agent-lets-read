@@ -57,6 +57,7 @@ import System.FilePath
   )
 import qualified System.FilePath.Posix as Posix
 import System.IO (hPutStrLn, stderr)
+import System.Posix.Files (setFileCreationMask)
 import System.Process (readProcessWithExitCode)
 
 -- ---------------------------------------------------------------------------
@@ -5668,6 +5669,7 @@ parseStatusArgs = go ""
 
 main :: IO ()
 main = do
+  _ <- setFileCreationMask 0o022
   args <- getArgs
   case args of
     ("--help" : _) -> putStr usage >> exitSuccess
