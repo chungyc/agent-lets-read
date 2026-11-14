@@ -9,9 +9,10 @@ description: >-
   skill whenever the user asks for a Let's Read, liveblog reaction, unspoiled
   first-time read, or incremental commentary on a story or book.
 compatibility: >-
-  Requires bash and GHC (Glasgow Haskell Compiler) with standard boot packages
-  (base, binary, bytestring, containers, directory, filepath, process, text) and
-  zlib to compile the gatekeeper binary.
+  Requires bash and GHC (Glasgow Haskell Compiler, presumed version 9.10.3; the
+  Haskell code does not build on certain other GHC versions) with standard boot
+  packages (base, binary, bytestring, containers, directory, filepath, process,
+  text) and zlib to compile the gatekeeper binary.
 ---
 
 # Let's Read Skill (Spoiler-Free Architecture)
