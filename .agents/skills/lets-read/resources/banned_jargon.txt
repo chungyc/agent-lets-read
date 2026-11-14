@@ -1,0 +1,11 @@
+# Banned book-review and essay cliches flagged by the deterministic style linter
+masterclass
+tour de force
+breathtaking choreography
+elevates the narrative
+philosophical engine
+emotional axis
+encapsulates the thesis
+encapsulates the philosophy
+pitch-perfect
+deftly subverts

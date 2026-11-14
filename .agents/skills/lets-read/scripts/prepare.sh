@@ -1,8 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 022
+export PATH="$HOME/.ghcup/bin:$HOME/.cabal/bin:$PATH"
 
-if [ ! -x .agents/skills/lets-read/.bin/lets-read ] || [ .agents/skills/lets-read/scripts/LetsRead.hs -nt .agents/skills/lets-read/.bin/lets-read ]; then
-  mkdir -p .agents/skills/lets-read/.bin
-  ghc -O2 -outputdir .agents/skills/lets-read/.bin -o .agents/skills/lets-read/.bin/lets-read .agents/skills/lets-read/scripts/LetsRead.hs
+SCRIPTS_DIR=".agents/skills/lets-read/scripts"
+BIN_DIR=".agents/skills/lets-read/.bin"
+BIN_PATH="$BIN_DIR/lets-read"
+
+need_build=0
+if [ ! -x "$BIN_PATH" ]; then
+  need_build=1
+else
+  for src in "$SCRIPTS_DIR"/LetsRead.hs "$SCRIPTS_DIR"/LetsRead/*.hs "$SCRIPTS_DIR"/LetsRead/Chunker/*.hs; do
+    if [ -f "$src" ] && [ "$src" -nt "$BIN_PATH" ]; then
+      need_build=1
+      break
+    fi
+  done
+fi
+
+if [ "$need_build" -eq 1 ]; then
+  mkdir -p "$BIN_DIR"
+  ghc -O2 -Wall -i"$SCRIPTS_DIR" -outputdir "$BIN_DIR" -o "$BIN_PATH" "$SCRIPTS_DIR/LetsRead.hs"
 fi
