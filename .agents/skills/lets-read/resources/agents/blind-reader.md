@@ -242,8 +242,8 @@ or any `prediction-judge` rulings from the previous chunk.>
 - **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <verified detail A in current_chunk.md + earlier thread/mystery B, <= 120 chars, no quotes> -> **Theory**: <direct primary bet C, <= 160 chars> (vs. **Plausible Rival**: <concise rival explanation, <= 120 chars>)
 
 === CHUNK SUMMARY ===
-- **[Story | Topics: Topic 1, Topic 2, Topic 3]** <1-line factual summary of this chunk's key in-story events ONLY (populates `chunks/by_chronology.md` and `chunks/by_topic.md`; use normal spaces in multi-word topic tags, not CamelCase).>
-- **[Entry | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of your liveblog reaction, standout quotes, or running gags in this entry (populates `entries/by_chronology.md` and `entries/by_topic.md`).>
+- **[Story | Topics: Topic 1, Topic 2, Topic 3]** <1-line factual summary of this chunk's key in-story events ONLY (populates `chunks/by_chronology.md` and `chunks/by_topic.md`; reuse tags from `Established Topic Tags` in `memory.md` whenever applicable, and use recurring character, faction, location, or mystery names rather than one-off scene descriptions).>
+- **[Entry | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of your liveblog reaction, standout quotes, or running gags in this entry (populates `entries/by_chronology.md` and `entries/by_topic.md`; reuse established topic tags when applicable).>
 
 === PREDICTION UPDATES ===
 - **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise 1-clause detail, <= 120 chars, no quotes> -> **Theory**: <direct primary bet, <= 160 chars> (vs. **Plausible Rival**: <concise rival explanation, <= 120 chars>)

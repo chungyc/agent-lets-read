@@ -193,6 +193,8 @@ data SessionState = SessionState
   , stPendingLinterWarnings :: ![Text]
   , stLastJudgeSummary :: ![Text]
   , stPredictionAuditWarnings :: ![Text]
+  , stCuratedTopics :: ![Text]
+  , stTopicAliases :: ![(Text, Text)]
   }
   deriving (Show, Eq, Generic)
 
@@ -283,6 +285,8 @@ data JudgeOptions = JudgeOptions
   , jdgFactCheckLog :: Maybe FilePath
   , jdgCriticResponseFile :: Maybe FilePath
   , jdgCriticLog :: Maybe FilePath
+  , jdgTopicResponseFile :: Maybe FilePath
+  , jdgTopicLog :: Maybe FilePath
   }
 
 data DiscussPromptOptions = DiscussPromptOptions
@@ -327,7 +331,8 @@ saveState sessionDir st = do
   BS.writeFile (sessionDir </> ".state.bin") (BSL.toStrict (encode st))
   hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
   hasFactCheckPending <- doesFileExist (sessionDir </> "current_fact_check_questions.md")
-  TIO.writeFile (sessionDir </> "state.json") (renderStateJson sessionDir hasWrapup hasFactCheckPending st)
+  hasTopicPrompt <- doesFileExist (sessionDir </> "current_topic_prompt.md")
+  TIO.writeFile (sessionDir </> "state.json") (renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt st)
 
 loadState :: FilePath -> IO SessionState
 loadState sessionDir = do
@@ -391,8 +396,8 @@ orchestratorRuleText :: Text
 orchestratorRuleText =
   "Pass generated prompt files (<session_dir>/current_*_prompt.md) verbatim to subagents; never run python/ad-hoc scripts, impersonate subagents, or edit memory.md directly."
 
-renderStateJson :: FilePath -> Bool -> Bool -> SessionState -> Text
-renderStateJson sessionDir hasWrapup hasFactCheckPending st =
+renderStateJson :: FilePath -> Bool -> Bool -> Bool -> SessionState -> Text
+renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt st =
   let storyChunksDone = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st && not hasFactCheckPending
       isFin = storyChunksDone && hasWrapup
       activeCnt = length [pr | pr <- stPredictions st, prStatus pr == PredStatusActive]
@@ -421,6 +426,7 @@ renderStateJson sessionDir hasWrapup hasFactCheckPending st =
         , ("judge_prompt_file", jsonStr (T.pack (sessionDir </> "current_judge_prompt.md")))
         , ("fact_check_prompt_file", jsonStr (T.pack (sessionDir </> "current_fact_check_prompt.md")))
         , ("critic_prompt_file", jsonStr (T.pack (sessionDir </> "current_critic_prompt.md")))
+        , ("topic_prompt_file", if hasTopicPrompt then jsonStr (T.pack (sessionDir </> "current_topic_prompt.md")) else "null")
         , ("discussion_prompt_file", if hasFactCheckPending then jsonStr (T.pack (sessionDir </> "current_discussion_prompt.md")) else "null")
         , ("fact_check_questions_file", if hasFactCheckPending then jsonStr (T.pack (sessionDir </> "current_fact_check_questions.md")) else "null")
         , ("critic_feedback_file", jsonStr (T.pack (sessionDir </> "critic_feedback.md")))

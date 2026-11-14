@@ -3,10 +3,13 @@
 
 module LetsRead.Index
   ( IndexSpec (..)
-  , extractCanonicalCharacterNames
   , topicNormKey
-  , canonicalizeTopicTag
+  , collectSessionTopicCounts
   , collectCanonicalSessionTopics
+  , partitionVettedTopics
+  , shouldCurateTopics
+  , applyTopicAliases
+  , applyTopicCuratorResponse
   , allEntryTopics
   , renderStoryBullet
   , renderEntryBullet
@@ -18,10 +21,10 @@ module LetsRead.Index
 
 import Control.Exception (IOException, catch)
 import Control.Monad (forM, forM_, when)
-import Data.List (groupBy, isPrefixOf, isSuffixOf, nub, sortOn)
+import Data.List (groupBy, isPrefixOf, isSuffixOf, nub, nubBy, partition, sortOn)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
 import Data.Ord (Down (..))
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -93,16 +96,21 @@ cleanArchiveDirectory dir = do
   when exists $ do
     names <- listDirectory dir
     forM_ names $ \f ->
-      when ("L" `isPrefixOf` f && ".md" `isSuffixOf` f) $
+      when (("L" `isPrefixOf` f || "topic_" `isPrefixOf` f) && ".md" `isSuffixOf` f) $
         removeFile (dir </> f) `catch` (\(_ :: IOException) -> pure ())
 
 rollupIndexLevels :: FilePath -> FilePath -> Text -> Int -> [(FilePath, Text, Text)] -> IO [(FilePath, Text, Text)]
-rollupIndexLevels sessionDir relArcDir dirHeading level nodes
+rollupIndexLevels sessionDir relArcDir =
+  rollupIndexLevelsWithPrefix sessionDir relArcDir "L"
+
+rollupIndexLevelsWithPrefix ::
+  FilePath -> FilePath -> String -> Text -> Int -> [(FilePath, Text, Text)] -> IO [(FilePath, Text, Text)]
+rollupIndexLevelsWithPrefix sessionDir relArcDir filePrefix dirHeading level nodes
   | length nodes <= 25 = pure nodes
   | otherwise = do
       let groups = groupsOfList 25 nodes
       parents <- forM (zip [1 :: Int ..] groups) $ \(grpIdx, children) -> do
-        let fileName = "L" ++ show level ++ "_" ++ padChunkNumber grpIdx ++ ".md"
+        let fileName = filePrefix ++ show level ++ "_" ++ padChunkNumber grpIdx ++ ".md"
             relPath = relArcDir </> fileName
             fullPath = sessionDir </> relPath
             firstLbl = case children of ((_, l, _) : _) -> l; [] -> ""
@@ -148,55 +156,11 @@ rollupIndexLevels sessionDir relArcDir dirHeading level nodes
                 )
         TIO.writeFile fullPath doc
         pure (relPath, parentLabel, parentSummary)
-      rollupIndexLevels sessionDir relArcDir dirHeading (level + 1) parents
-
-extractCanonicalCharacterNames :: [(Text, Text)] -> [Text]
-extractCanonicalCharacterNames curated =
-  let charSec = fromMaybe "" (lookup "Characters & Relationships" curated)
-      stripPersistent s =
-        let s1 = T.strip s
-            low = T.toLower s1
-         in if "(persistent)" `T.isSuffixOf` low
-              then T.strip (T.dropEnd 12 s1)
-              else s1
-      parseBullet l =
-        let s = T.strip l
-         in if not ("- **" `T.isPrefixOf` s || "* **" `T.isPrefixOf` s)
-              then []
-              else
-                let afterStars = T.drop 4 s
-                    (boldPart, rest) = T.breakOn "**" afterStars
-                    cleanHead = stripPersistent boldPart
-                 in if "supporting cast" `T.isInfixOf` T.toLower cleanHead
-                      then
-                        let afterColon = T.drop 1 (snd (T.breakOn ":" rest))
-                            parts = T.splitOn ";" afterColon
-                            extractName p =
-                              cleanTopicTag (fst (T.breakOn "(" (T.strip p)))
-                         in filter (\n -> T.length n >= 3) (map extractName parts)
-                      else
-                        filter (\n -> T.length n >= 3) (map (cleanTopicTag . stripPersistent) (T.splitOn "/" cleanHead))
-   in nub (concatMap parseBullet (T.lines charSec))
+      rollupIndexLevelsWithPrefix sessionDir relArcDir filePrefix dirHeading (level + 1) parents
 
 topicNormKey :: Text -> Text
 topicNormKey raw =
   T.unwords (T.words (T.toLower (cleanTopicTag raw)))
-
-canonicalizeTopicTag :: [Text] -> [Text] -> Text -> Text
-canonicalizeTopicTag charNames allMultiWordTags rawTag =
-  let cleaned = cleanTopicTag rawTag
-      tWords = map T.toLower (T.words cleaned)
-      candidates = nub (charNames ++ [t | t <- allMultiWordTags, length (T.words t) >= 2])
-      matchingFull =
-        [ full
-        | full <- candidates
-        , let fWords = map T.toLower (T.words full)
-        , not (null tWords)
-        , all (\w -> T.length w >= 3 && w `elem` fWords) tWords
-        ]
-   in case nub matchingFull of
-        [singleMatch] -> singleMatch
-        _ -> cleaned
 
 writeChronArcFile :: FilePath -> IndexSpec a -> Int -> [a] -> IO (FilePath, Text, Text)
 writeChronArcFile sessionDir spec grpIdx arcItems = do
@@ -340,15 +304,12 @@ syncTopicTree sessionDir st spec items = do
   createDirectoryIfMissing True fullTopicArcDir
   cleanArchiveDirectory fullTopicArcDir
 
-  let charNames = extractCanonicalCharacterNames (stCuratedMemory st)
-      allRawTags = concatMap (isItemTopics spec) items
-      canonTag = canonicalizeTopicTag charNames allRawTags
-      topicPairs =
+  let topicPairs =
         [ (topicNormKey cTag, (cTag, item))
         | item <- sortOn (isItemIndex spec) items
         , let rawTags = if null (isItemTopics spec item) then [isDefaultTopic spec] else isItemTopics spec item
         , tag <- rawTags
-        , let cTag = canonTag tag
+        , let cTag = cleanTopicTag tag
         , not (T.null cTag)
         ]
       topicMap =
@@ -367,18 +328,79 @@ syncTopicTree sessionDir st spec items = do
           Map.empty
           topicPairs
       sortedTopics = sortOn (T.toLower . fst) (Map.elems topicMap)
-      renderTopicSec (dispTag, grpItems) =
+      renderTopicSecIO (topicIdx, (dispTag, grpItems)) = do
         let ordered = sortOn (isItemIndex spec) grpItems
-            secTxt =
-              "### "
-                <> dispTag
-                <> " ("
-                <> jsonInt (length ordered)
-                <> ")\n"
-                <> T.unlines (map (isRenderTopicBullet spec sessionDir) ordered)
-         in (dispTag, ordered, secTxt, length (T.lines secTxt) + 1)
-      renderedTopics = map renderTopicSec sortedTopics
-      totalTopicLines = sum [lCnt | (_, _, _, lCnt) <- renderedTopics]
+        if length ordered <= 25
+          then do
+            let secTxt =
+                  "### "
+                    <> dispTag
+                    <> " ("
+                    <> jsonInt (length ordered)
+                    <> ")\n"
+                    <> T.unlines (map (isRenderTopicBullet spec sessionDir) ordered)
+            pure (dispTag, ordered, secTxt, length (T.lines secTxt) + 1)
+          else do
+            let rawArcs = groupItemsIntoArcs (isItemChapter spec) (isItemPart spec) ordered
+                arcs = if length rawArcs <= 1 then groupsOfList 20 ordered else rawArcs
+                completedArcs = if length arcs <= 1 then [] else init arcs
+                inlineItems = case reverse arcs of (lastA : _) -> lastA; [] -> []
+                tPrefix = "topic_" ++ padChunkNumber topicIdx ++ "_L"
+            l1TopicNodes <- forM (zip [1 :: Int ..] completedArcs) $ \(arcIdx, arcItems) -> do
+              let startIdx = case arcItems of (x : _) -> isItemIndex spec x; [] -> 1
+                  endIdx = case reverse arcItems of (x : _) -> isItemIndex spec x; [] -> 1
+                  itemRange =
+                    if startIdx == endIdx
+                      then "Chunk " <> T.pack (padChunkNumber startIdx)
+                      else "Chunks " <> T.pack (padChunkNumber startIdx) <> "–" <> T.pack (padChunkNumber endIdx)
+                  lbl = dispTag <> " Archive L1." <> jsonInt arcIdx <> " (" <> itemRange <> ")"
+                  summ = isSummarizeArc spec arcItems
+                  fName = tPrefix ++ "1_" ++ padChunkNumber arcIdx ++ ".md"
+                  rPath = relTopicArcDir </> fName
+                  fPath = sessionDir </> rPath
+                  doc =
+                    T.unlines
+                      [ "# " <> lbl <> " — " <> isDomainTitle spec
+                      , ""
+                      , "- **Session Directory**: `" <> T.pack sessionDir <> "`"
+                      , "- **Summary**: " <> summ
+                      , ""
+                      , "## Archived Entries for " <> dispTag
+                      , ""
+                      , T.unlines (map (isRenderTopicBullet spec sessionDir) arcItems)
+                      ]
+              TIO.writeFile fPath doc
+              pure (rPath, lbl, summ)
+            topTopicNodes <-
+              rollupIndexLevelsWithPrefix
+                sessionDir
+                relTopicArcDir
+                tPrefix
+                (dispTag <> " Topic Archive")
+                2
+                l1TopicNodes
+            let arcLinkLines =
+                  [ "- **Archived ("
+                      <> lbl
+                      <> ")**: ["
+                      <> T.pack (takeFileName fp)
+                      <> "]("
+                      <> T.pack fp
+                      <> ") — "
+                      <> summ
+                  | (fp, lbl, summ) <- topTopicNodes
+                  ]
+                secTxt =
+                  "### "
+                    <> dispTag
+                    <> " ("
+                    <> jsonInt (length ordered)
+                    <> ")\n"
+                    <> T.unlines (arcLinkLines ++ map (isRenderTopicBullet spec sessionDir) inlineItems)
+            pure (dispTag, ordered, secTxt, length (T.lines secTxt) + 1)
+
+  renderedTopics <- mapM renderTopicSecIO (zip [1 :: Int ..] sortedTopics)
+  let totalTopicLines = sum [lCnt | (_, _, _, lCnt) <- renderedTopics]
 
   if totalTopicLines <= 100
     then do
@@ -418,15 +440,18 @@ syncTopicTree sessionDir st spec items = do
             lastT = case reverse shardTopics of ((t, _, _, _) : _) -> t; [] -> ""
             totalItemsInShard = sum [length g | (_, g, _, _) <- shardTopics]
             label = "Topic Shard L1." <> jsonInt grpIdx <> " (" <> firstT <> " – " <> lastT <> ")"
+            topicListStr =
+              T.intercalate
+                ", "
+                [ dispTag <> " (" <> jsonInt (length grpItems) <> ")"
+                | (dispTag, grpItems, _, _) <- shardTopics
+                ]
             summaryLine =
               jsonInt (length shardTopics)
                 <> " topics, "
                 <> jsonInt totalItemsInShard
-                <> " entries ("
-                <> firstT
-                <> " through "
-                <> lastT
-                <> ")"
+                <> " entries — *Topics*: "
+                <> topicListStr
             fileName = "L1_" ++ padChunkNumber grpIdx ++ ".md"
             relPath = relTopicArcDir </> fileName
             fullPath = sessionDir </> relPath
@@ -442,18 +467,42 @@ syncTopicTree sessionDir st spec items = do
                 , T.intercalate "\n" [secTxt | (_, _, secTxt, _) <- shardTopics]
                 ]
         TIO.writeFile fullPath shardDoc
-        let tagLinks = [(dispTag, length grpItems, relPath) | (dispTag, grpItems, _, _) <- shardTopics]
+        let tagLinks = [(dispTag, relPath) | (dispTag, _, _, _) <- shardTopics]
         pure ((relPath, label, summaryLine), tagLinks)
 
       let l1ShardNodes = map fst shardDetails
-          allTagShardLinks = concatMap snd shardDetails
+          tagShardMap = Map.fromList (concatMap snd shardDetails)
       topShardNodes <- rollupIndexLevels sessionDir relTopicArcDir (isDomainTitle spec <> " Topic Archive") 2 l1ShardNodes
       let curIdx = stCurrentIndex st
+          renderRecentTopicSec (dispTag, ordered) =
+            let recentItems = [x | x <- ordered, isItemIndex spec x >= max 1 (curIdx - 2)]
+                olderCount = length ordered - length recentItems
+                olderNote =
+                  case Map.lookup dispTag tagShardMap of
+                    Just fp
+                      | olderCount > 0 ->
+                          [ "- *(+"
+                              <> jsonInt olderCount
+                              <> " earlier entries in ["
+                              <> T.pack (takeFileName fp)
+                              <> "]("
+                              <> T.pack fp
+                              <> "))*"
+                          ]
+                    _ -> []
+             in "### "
+                  <> dispTag
+                  <> " ("
+                  <> jsonInt (length ordered)
+                  <> ")\n"
+                  <> T.unlines (olderNote ++ map (isRenderTopicBullet spec sessionDir) recentItems)
           recentTopics =
-            [ secTxt
-            | (_, grpItems, secTxt, _) <- renderedTopics
-            , any (\x -> isItemIndex spec x >= max 1 (curIdx - 2)) grpItems
-            ]
+            take
+              15
+              [ renderRecentTopicSec (dispTag, grpItems)
+              | (dispTag, grpItems, _, _) <- renderedTopics
+              , any (\x -> isItemIndex spec x >= max 1 (curIdx - 2)) grpItems
+              ]
           shardLinksLines =
             [ "- **"
                 <> lbl
@@ -465,18 +514,6 @@ syncTopicTree sessionDir st spec items = do
                 <> summ
             | (fp, lbl, summ) <- topShardNodes
             ]
-          tocLines =
-            [ "- **"
-                <> dispTag
-                <> "** ("
-                <> jsonInt cnt
-                <> ") — ["
-                <> T.pack (takeFileName fp)
-                <> "]("
-                <> T.pack fp
-                <> ")"
-            | (dispTag, cnt, fp) <- allTagShardLinks
-            ]
           byTopicDoc =
             T.unlines $
               [ "# " <> isDomainTitle spec <> " Index by Semantic Topic & Entity: " <> stTitle st
@@ -485,15 +522,10 @@ syncTopicTree sessionDir st spec items = do
               , ""
               , isTopicIntro spec
               , ""
-              , "## Topic Archive Shards"
+              , "## Topic Archive Shards (" <> jsonInt (length renderedTopics) <> " Topics)"
               , ""
               ]
                 ++ shardLinksLines
-                ++ [ ""
-                   , "## Complete Topic Directory (" <> jsonInt (length allTagShardLinks) <> " Topics)"
-                   , ""
-                   ]
-                ++ tocLines
                 ++ [ ""
                    , "## Recently Updated Topics (Last 3 Turns Inline)"
                    , ""
@@ -579,7 +611,7 @@ allEntryTopics r =
           [ edrTopics d ++ [if edrIsFactCheck d then "Fact-Check Verification" else "Reader Discussion"]
           | d <- elrDiscussions r
           ]
-   in nub (elrTopics r ++ discTags)
+   in nubBy (\a b -> topicNormKey a == topicNormKey b) (elrTopics r ++ discTags)
 
 renderEntryBullet :: FilePath -> EntryLogRecord -> Text
 renderEntryBullet _ r =
@@ -691,18 +723,16 @@ predictionIndexSpec =
     , isArcExtraFooter = \_ _ -> pure []
     }
 
-collectCanonicalSessionTopics :: SessionState -> [Text]
-collectCanonicalSessionTopics st =
-  let charNames = extractCanonicalCharacterNames (stCuratedMemory st)
-      rawTags =
+collectSessionTopicCounts :: SessionState -> [(Text, Int)]
+collectSessionTopicCounts st =
+  let rawTags =
         concatMap scrTopics (stStoryRecords st)
           ++ concatMap allEntryTopics (stEntryRecords st)
           ++ concatMap prTopics (stPredictions st)
-      canon = canonicalizeTopicTag charNames rawTags
       counts =
         foldl'
           ( \acc rawT ->
-              let c = canon rawT
+              let c = cleanTopicTag rawT
                   k = topicNormKey c
                in if T.null c || c == "Reader Discussion" || c == "Fact-Check Verification"
                     then acc
@@ -715,5 +745,136 @@ collectCanonicalSessionTopics st =
           )
           Map.empty
           rawTags
-      ranked = sortOn (\(disp, n) -> (Down n, T.toLower disp)) (Map.elems counts)
-   in take 30 (map fst ranked)
+   in sortOn (\(disp, n) -> (Down n, T.toLower disp)) (Map.elems counts)
+
+collectCanonicalSessionTopics :: SessionState -> [Text]
+collectCanonicalSessionTopics = take 30 . map fst . collectSessionTopicCounts
+
+partitionVettedTopics :: SessionState -> ([(Text, Int)], [(Text, Int)])
+partitionVettedTopics st =
+  let vettedSet = Set.fromList (stCuratedTopics st)
+      allCounts = collectSessionTopicCounts st
+   in partition (\(disp, _) -> topicNormKey disp `Set.member` vettedSet) allCounts
+
+shouldCurateTopics :: SessionState -> Bool
+shouldCurateTopics st =
+  let (vetted, unvetted) = partitionVettedTopics st
+      totalDistinct = length vetted + length unvetted
+      unvettedCnt = length unvetted
+      isFinalChunk = stCurrentIndex st >= stTotalChunks st && stTotalChunks st > 0
+   in (unvettedCnt >= 8 && totalDistinct >= 10)
+        || (isFinalChunk && unvettedCnt >= 3)
+
+applyTopicAliases :: SessionState -> SessionState
+applyTopicAliases st
+  | null (stTopicAliases st) = st
+  | otherwise =
+      let aliasMap = Map.fromList (stTopicAliases st)
+          rewriteTag raw =
+            let cleaned = cleanTopicTag raw
+                k = topicNormKey cleaned
+             in case Map.lookup k aliasMap of
+                  Just canonDisp -> canonDisp
+                  Nothing -> cleaned
+          rewriteList ts =
+            nubBy (\a b -> topicNormKey a == topicNormKey b)
+              $ filter (not . T.null) (map rewriteTag ts)
+          storyRecords' =
+            [ r {scrTopics = rewriteList (scrTopics r)}
+            | r <- stStoryRecords st
+            ]
+          entryRecords' =
+            [ r
+                { elrTopics = rewriteList (elrTopics r)
+                , elrDiscussions =
+                    [ d {edrTopics = rewriteList (edrTopics d)}
+                    | d <- elrDiscussions r
+                    ]
+                }
+            | r <- stEntryRecords st
+            ]
+          preds' =
+            [ p {prTopics = rewriteList (prTopics p)}
+            | p <- stPredictions st
+            ]
+       in st
+            { stStoryRecords = storyRecords'
+            , stEntryRecords = entryRecords'
+            , stPredictions = preds'
+            }
+
+parseTopicMergesSection :: Text -> [(Text, [Text])]
+parseTopicMergesSection raw =
+  let ls = T.lines raw
+      afterHeader =
+        case break (\l -> "=== TOPIC MERGES ===" `T.isInfixOf` T.toUpper l) ls of
+          (_, _ : rest) -> takeWhile (\l -> not ("===" `T.isPrefixOf` T.stripStart l)) rest
+          (allLines, []) -> allLines
+      parseLine l =
+        let s = T.strip l
+            body
+              | "- " `T.isPrefixOf` s || "* " `T.isPrefixOf` s = T.strip (T.drop 2 s)
+              | otherwise = ""
+            upperB = T.toUpper body
+         in if T.null body || upperB == "NONE" || upperB == "PASS" || "NONE " `T.isPrefixOf` upperB
+              then []
+              else
+                let (lhs, rhs)
+                      | "<=" `T.isInfixOf` body =
+                          let (a, b) = T.breakOn "<=" body in (a, T.drop 2 b)
+                      | "<-" `T.isInfixOf` body =
+                          let (a, b) = T.breakOn "<-" body in (a, T.drop 2 b)
+                      | otherwise = ("", "")
+                    canon = cleanTopicTag lhs
+                    aliases = filter (not . T.null) (map cleanTopicTag (T.splitOn "," rhs))
+                 in [(canon, aliases) | not (T.null canon) && not (null aliases)]
+   in concatMap parseLine afterHeader
+
+applyTopicCuratorResponse :: Text -> SessionState -> (SessionState, Int)
+applyTopicCuratorResponse rawResp st =
+  let preCounts = collectSessionTopicCounts st
+      countMap = Map.fromList [(topicNormKey disp, (disp, cnt)) | (disp, cnt) <- preCounts]
+      stopKeys =
+        Set.fromList
+          [ ""
+          , "general plot"
+          , "story progression"
+          , "liveblog commentary"
+          , "reader discussion"
+          , "fact-check verification"
+          ]
+      proposedRules = parseTopicMergesSection rawResp
+      validPairs =
+        [ (aKey, canonDisp)
+        | (rawCanon, rawAliases) <- proposedRules
+        , let cKey = topicNormKey rawCanon
+        , cKey `Set.notMember` stopKeys
+        , let canonDisp =
+                case Map.lookup cKey countMap of
+                  Just (existingDisp, _) -> existingDisp
+                  Nothing -> rawCanon
+        , rawAlias <- rawAliases
+        , let aKey = topicNormKey rawAlias
+        , aKey /= cKey
+        , Map.member aKey countMap
+        ]
+      existingAliasMap = Map.fromList (stTopicAliases st)
+      mergedAliasMap =
+        foldl'
+          ( \acc (aKey, cDisp) ->
+              let cKey = topicNormKey cDisp
+                  finalDisp = Map.findWithDefault cDisp cKey acc
+                  updatedExisting =
+                    Map.map
+                      (\v -> if topicNormKey v == aKey then finalDisp else v)
+                      acc
+               in Map.insert aKey finalDisp updatedExisting
+          )
+          existingAliasMap
+          validPairs
+      stWithAliases =
+        applyTopicAliases
+          (st {stTopicAliases = Map.toList mergedAliasMap})
+      postTopics = [topicNormKey disp | (disp, _) <- collectSessionTopicCounts stWithAliases]
+      stFinal = stWithAliases {stCuratedTopics = postTopics}
+   in (stFinal, length validPairs)

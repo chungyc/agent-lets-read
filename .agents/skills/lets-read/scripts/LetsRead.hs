@@ -22,6 +22,11 @@ import LetsRead.Chunker
   ( buildChunksFromSource
   , computeShouldRotate
   )
+import LetsRead.Index
+  ( applyTopicAliases
+  , applyTopicCuratorResponse
+  , shouldCurateTopics
+  )
 import LetsRead.Memory
   ( defaultCuratedMemory
   , extractFallbackSummary
@@ -51,6 +56,7 @@ import LetsRead.Prompts
   , writeCurrentFactCheckPromptFile
   , writeCurrentJudgePromptFile
   , writeCurrentPromptFile
+  , writeCurrentTopicPromptFile
   , writeUserDiscussionPromptFile
   , writeWrapupPromptFile
   )
@@ -157,6 +163,8 @@ cmdInit opts = do
           , stPendingLinterWarnings = []
           , stLastJudgeSummary = []
           , stPredictionAuditWarnings = []
+          , stCuratedTopics = []
+          , stTopicAliases = []
           }
   saveState sessionDir st
 
@@ -206,6 +214,7 @@ cmdNext rawSessionDir forceFlag = do
       totalChunks = stTotalChunks st
       questionsPath = sessionDir </> "current_fact_check_questions.md"
       discPromptPath = sessionDir </> "current_discussion_prompt.md"
+      topicPromptPath = sessionDir </> "current_topic_prompt.md"
 
   when (curIdx > 0 && not (stCurrentRecorded st) && not forceFlag) $
     die $
@@ -230,10 +239,13 @@ cmdNext rawSessionDir forceFlag = do
         ++ discPromptPath
         ++ ". Send current_discussion_prompt.md to blind-reader via send_message and record the response with 'lets-read discuss --session <dir> --subagent-log <reader_log>' before running 'next' (or pass --force to override)."
 
-  when (hasFactCheckPending && forceFlag) $ do
-    removeFile questionsPath `catch` (\(_ :: IOException) -> pure ())
-    dExists <- doesFileExist discPromptPath
-    when dExists (removeFile discPromptPath `catch` (\(_ :: IOException) -> pure ()))
+  when forceFlag $ do
+    when hasFactCheckPending $ do
+      removeFile questionsPath `catch` (\(_ :: IOException) -> pure ())
+      dExists <- doesFileExist discPromptPath
+      when dExists (removeFile discPromptPath `catch` (\(_ :: IOException) -> pure ()))
+    tExists <- doesFileExist topicPromptPath
+    when tExists (removeFile topicPromptPath `catch` (\(_ :: IOException) -> pure ()))
 
   if curIdx >= totalChunks
     then do
@@ -397,10 +409,11 @@ cmdRecord opts = do
               elrEntryIndex
               (wrapupEntryRecord : filter (not . elrIsWrapup) (stEntryRecords st))
           st' =
-            st
-              { stCuratedMemory = curated'
-              , stEntryRecords = entryRecords'
-              }
+            applyTopicAliases
+              st
+                { stCuratedMemory = curated'
+                , stEntryRecords = entryRecords'
+                }
           wrapupHeader = "## Final Wrapup & Retrospective — " <> stTitle st <> "\n\n"
           wrapupContent = wrapupHeader <> cleanedCommText <> "\n\n---\n\n"
           wrapupFile = entriesDir </> "wrapup.md"
@@ -531,22 +544,32 @@ cmdRecord opts = do
               elrEntryIndex
               (newEntryRecord : filter (\e -> elrEntryIndex e /= curIdx || elrIsWrapup e) (stEntryRecords st))
           st' =
-            st
-              { stCurrentRecorded = True
-              , stCurrentJudged = False
-              , stCompletedChunks = completed'
-              , stStoryRecords = storyRecords'
-              , stEntryRecords = entryRecords'
-              , stCuratedMemory = curated'
-              , stPredictions = preds'
-              , stPendingRetirements = pendingRetires
-              , stPendingLinterWarnings = linterWarnings
-              , stPredictionAuditWarnings = auditBlocks
-              }
+            applyTopicAliases
+              st
+                { stCurrentRecorded = True
+                , stCurrentJudged = False
+                , stCompletedChunks = completed'
+                , stStoryRecords = storyRecords'
+                , stEntryRecords = entryRecords'
+                , stCuratedMemory = curated'
+                , stPredictions = preds'
+                , stPendingRetirements = pendingRetires
+                , stPendingLinterWarnings = linterWarnings
+                , stPredictionAuditWarnings = auditBlocks
+                }
+          curateTopics = shouldCurateTopics st'
+          topicPromptPath = sessionDir </> "current_topic_prompt.md"
 
       judgePromptFile <- writeCurrentJudgePromptFile sessionDir st'
       factCheckPromptFile <- writeCurrentFactCheckPromptFile sessionDir st' storySumTxt entrySumTxt
-      criticPromptFile <- writeCurrentCriticPromptFile sessionDir st' entrySumTxt
+      criticPromptFile <- writeCurrentCriticPromptFile sessionDir st'
+      if curateTopics
+        then do
+          _ <- writeCurrentTopicPromptFile sessionDir st'
+          pure ()
+        else do
+          tExists <- doesFileExist topicPromptPath
+          when tExists (removeFile topicPromptPath `catch` (\(_ :: IOException) -> pure ()))
       (needsCompaction, curLines, curBytes) <- syncMemoryAndArchives sessionDir st'
       logPath <- rebuildMasterLog sessionDir st'
       saveState sessionDir st'
@@ -554,6 +577,10 @@ cmdRecord opts = do
       let rotateCritic = curIdx > 1 && (curIdx - 1) `mod` 7 == 0
           rotateFactChecker = curIdx > 1 && (curIdx - 1) `mod` 9 == 0
           rotateJudge = curIdx > 1 && (curIdx - 1) `mod` 11 == 0
+          nextHint =
+            if curateTopics
+              then "Send judge_prompt_file to prediction-judge, fact_check_prompt_file to fact-checker, critic_prompt_file to commentary-critic, and topic_prompt_file to topic-curator in parallel, then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log> --topic-log <topic_log>'."
+              else "Send judge_prompt_file to prediction-judge, fact_check_prompt_file to fact-checker, and critic_prompt_file to commentary-critic in parallel, then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log>'."
       TIO.putStrLn $
         jsonObject
           [ ("status", jsonStr "awaiting_judge")
@@ -567,21 +594,23 @@ cmdRecord opts = do
           , ("judge_prompt_file", jsonStr (T.pack judgePromptFile))
           , ("fact_check_prompt_file", jsonStr (T.pack factCheckPromptFile))
           , ("critic_prompt_file", jsonStr (T.pack criticPromptFile))
+          , ("topic_curation_needed", jsonBool curateTopics)
+          , ("topic_prompt_file", if curateTopics then jsonStr (T.pack topicPromptPath) else "null")
           , ("rotate_judge_recommended", jsonBool rotateJudge)
           , ("rotate_fact_checker_recommended", jsonBool rotateFactChecker)
           , ("rotate_critic_recommended", jsonBool rotateCritic)
           , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
           , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
-          , ("active_predictions_count", jsonInt (countActivePredictions preds'))
+          , ("active_predictions_count", jsonInt (countActivePredictions (stPredictions st')))
           , ("pending_retirements_count", jsonInt (length pendingRetires))
           , ("linter_warnings_count", jsonInt (length linterWarnings))
-          , ("total_predictions_count", jsonInt (length preds'))
+          , ("total_predictions_count", jsonInt (length (stPredictions st')))
           , ("prediction_audit_warnings_count", jsonInt (length auditBlocks))
           , ("memory_compaction_needed", jsonBool needsCompaction)
           , ("curated_memory_lines", jsonInt curLines)
           , ("curated_memory_bytes", jsonInt curBytes)
           , ("orchestrator_rule", jsonStr orchestratorRuleText)
-          , ("next_step_hint", jsonStr "Send judge_prompt_file to prediction-judge, fact_check_prompt_file to fact-checker, and critic_prompt_file to commentary-critic in parallel, then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log>'.")
+          , ("next_step_hint", jsonStr nextHint)
           ]
 
 cmdJudge :: JudgeOptions -> IO ()
@@ -635,6 +664,25 @@ cmdJudge opts = do
             pure (Just rawC)
           Nothing -> pure Nothing
 
+  let topicPromptPath = sessionDir </> "current_topic_prompt.md"
+  hasTopicPrompt <- doesFileExist topicPromptPath
+  mRawTopic <-
+    case jdgTopicLog opts of
+      Just tLogPath -> do
+        rawT <- extractSubagentLogResponse tLogPath
+        pure (Just rawT)
+      Nothing ->
+        case jdgTopicResponseFile opts of
+          Just tRespPath -> do
+            exists <- doesFileExist tRespPath
+            unless exists $ die ("Error: Topic curator response file not found: " ++ tRespPath)
+            rawT <- readTextFileSafe tRespPath
+            pure (Just rawT)
+          Nothing ->
+            if hasTopicPrompt
+              then die "Error: Chunk triggered topic_curation_needed (current_topic_prompt.md exists). Provide --topic-log or --topic-response-file for 'judge'."
+              else pure Nothing
+
   (criticFeedbackWritten, criticNotesCount, factCheckPending, factQueriesCount, rejectedCriticQuotesCount) <-
     processCriticFeedback sessionDir st curIdx hasFactCheckSearchWeb (stPendingLinterWarnings st) mRawFactCheck mRawCritic
 
@@ -660,7 +708,7 @@ cmdJudge opts = do
   TIO.writeFile entryFile updatedEntry
 
   let combinedAuditBlocks = stPredictionAuditWarnings st ++ judgeAuditBlocks
-      st' =
+      stPreTopics =
         st
           { stCurrentJudged = True
           , stPredictions = preds'
@@ -669,6 +717,13 @@ cmdJudge opts = do
           , stLastJudgeSummary = judgeSummaryLines
           , stPredictionAuditWarnings = combinedAuditBlocks
           }
+      (st', topicMergesApplied) =
+        case mRawTopic of
+          Just rawT -> applyTopicCuratorResponse rawT stPreTopics
+          Nothing -> (applyTopicAliases stPreTopics, 0)
+
+  when hasTopicPrompt $
+    removeFile topicPromptPath `catch` (\(_ :: IOException) -> pure ())
 
   (needsCompaction, curLines, curBytes) <- syncMemoryAndArchives sessionDir st'
   logPath <- rebuildMasterLog sessionDir st'
@@ -708,6 +763,7 @@ cmdJudge opts = do
       , ("critic_feedback_written", jsonBool criticFeedbackWritten)
       , ("critic_notes_count", jsonInt criticNotesCount)
       , ("rejected_unverified_critic_quotes_count", jsonInt rejectedCriticQuotesCount)
+      , ("topic_merges_applied_count", jsonInt topicMergesApplied)
       , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
       , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
       , ("hall_of_fame_file", if storyChunksDone then jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")) else "null")
@@ -968,13 +1024,14 @@ cmdDiscuss opts = do
           || (entryRecords' /= stEntryRecords st)
           || (auditBlocks /= stPredictionAuditWarnings st)
       st' =
-        st
-          { stStoryRecords = storyRecords'
-          , stEntryRecords = entryRecords'
-          , stCuratedMemory = curated'
-          , stPredictions = preds'
-          , stPredictionAuditWarnings = auditBlocks
-          }
+        applyTopicAliases
+          st
+            { stStoryRecords = storyRecords'
+            , stEntryRecords = entryRecords'
+            , stCuratedMemory = curated'
+            , stPredictions = preds'
+            , stPredictionAuditWarnings = auditBlocks
+            }
 
   (needsCompaction, curLines, curBytes) <- syncMemoryAndArchives sessionDir st'
   logPath <- rebuildMasterLog sessionDir st'
@@ -1018,7 +1075,8 @@ cmdStatus rawSessionDir = do
   st <- loadState sessionDir
   hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
   hasFactCheckPending <- doesFileExist (sessionDir </> "current_fact_check_questions.md")
-  TIO.putStr (renderStateJson sessionDir hasWrapup hasFactCheckPending st)
+  hasTopicPrompt <- doesFileExist (sessionDir </> "current_topic_prompt.md")
+  TIO.putStr (renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt st)
 
 -- ---------------------------------------------------------------------------
 -- Argument Parsing & Entrypoint
@@ -1033,7 +1091,7 @@ usage =
     , "  init <source> --session <dir> [--max-words <n>] [--title <str>] [--persona <str>] [--overwrite]"
     , "  next --session <dir> [--force]"
     , "  record --session <dir> [--response-file <path>] [--subagent-log <path>] [--commentary-file <path>] [--memory-file <path>]"
-    , "  judge --session <dir> [--response-file <path>] [--subagent-log <path>] [--fact-check-response-file <path>] [--fact-check-log <path>] [--critic-response-file <path>] [--critic-log <path>]"
+    , "  judge --session <dir> [--response-file <path>] [--subagent-log <path>] [--fact-check-response-file <path>] [--fact-check-log <path>] [--critic-response-file <path>] [--critic-log <path>] [--topic-response-file <path>] [--topic-log <path>]"
     , "  discuss-prompt --session <dir> [--user-message <str>] [--user-file <path>]"
     , "  discuss --session <dir> [--response-file <path>] [--subagent-log <path>] [--commentary-file <path>] [--user-message <str>] [--user-file <path>] [--memory-file <path>]"
     , "  status --session <dir>"
@@ -1083,7 +1141,7 @@ parseRecordArgs = go (RecordOptions "" Nothing Nothing Nothing Nothing)
     go _ (arg : _) = die ("Error: Unknown option: " ++ arg ++ "\n\n" ++ usage)
 
 parseJudgeArgs :: [String] -> IO JudgeOptions
-parseJudgeArgs = go (JudgeOptions "" Nothing Nothing Nothing Nothing Nothing Nothing)
+parseJudgeArgs = go (JudgeOptions "" Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing)
   where
     go opts []
       | null (jdgSession opts) = die ("Error: Missing --session <dir>.\n\n" ++ usage)
@@ -1095,6 +1153,8 @@ parseJudgeArgs = go (JudgeOptions "" Nothing Nothing Nothing Nothing Nothing Not
     go opts ("--fact-check-log" : v : rest) = go opts {jdgFactCheckLog = Just v} rest
     go opts ("--critic-response-file" : v : rest) = go opts {jdgCriticResponseFile = Just v} rest
     go opts ("--critic-log" : v : rest) = go opts {jdgCriticLog = Just v} rest
+    go opts ("--topic-response-file" : v : rest) = go opts {jdgTopicResponseFile = Just v} rest
+    go opts ("--topic-log" : v : rest) = go opts {jdgTopicLog = Just v} rest
     go _ (arg : _) = die ("Error: Unknown option: " ++ arg ++ "\n\n" ++ usage)
 
 parseDiscussPromptArgs :: [String] -> IO DiscussPromptOptions

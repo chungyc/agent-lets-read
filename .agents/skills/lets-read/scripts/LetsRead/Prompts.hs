@@ -11,6 +11,7 @@ module LetsRead.Prompts
   , writeCurrentJudgePromptFile
   , writeCurrentFactCheckPromptFile
   , writeCurrentCriticPromptFile
+  , writeCurrentTopicPromptFile
   , writeFactCheckDiscussionPromptFile
   , writeUserDiscussionPromptFile
   ) where
@@ -21,6 +22,7 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import LetsRead.Index (partitionVettedTopics)
 import LetsRead.Predictions
   ( renderRecordActiveLine
   , renderRecordResolvedLine
@@ -434,8 +436,8 @@ writeCurrentFactCheckPromptFile sessionDir st storySumTxt entrySumTxt = do
   TIO.writeFile factPromptPath factPromptText
   pure factPromptPath
 
-writeCurrentCriticPromptFile :: FilePath -> SessionState -> Text -> IO FilePath
-writeCurrentCriticPromptFile sessionDir st _ = do
+writeCurrentCriticPromptFile :: FilePath -> SessionState -> IO FilePath
+writeCurrentCriticPromptFile sessionDir st = do
   absSession <- canonicalizePath sessionDir
   let curIdx = stCurrentIndex st
       curPad = padChunkNumber curIdx
@@ -469,6 +471,48 @@ writeCurrentCriticPromptFile sessionDir st _ = do
                ]
   TIO.writeFile criticPromptPath criticPromptText
   pure criticPromptPath
+
+writeCurrentTopicPromptFile :: FilePath -> SessionState -> IO FilePath
+writeCurrentTopicPromptFile sessionDir st = do
+  absSession <- canonicalizePath sessionDir
+  let curIdx = stCurrentIndex st
+      totalChunks = stTotalChunks st
+      topicPromptPath = sessionDir </> "current_topic_prompt.md"
+      (vetted, unvetted) = partitionVettedTopics st
+      fmtList [] = "- *(None)*"
+      fmtList xs =
+        T.intercalate
+          ", "
+          [ "**" <> disp <> "** (" <> jsonInt cnt <> ")"
+          | (disp, cnt) <- xs
+          ]
+      topicPromptText =
+        T.unlines
+          [ "Please review the newly added topic tags (at Chunk "
+              <> jsonInt curIdx
+              <> " of "
+              <> jsonInt totalChunks
+              <> ") and suggest any synonym or alias merges."
+          , "- Session Directory: `" <> T.pack absSession <> "`"
+          , "- Reader Memory File (mandatory read): " <> T.pack (absSession </> "memory.md")
+          , "- Domain Topic Indexes (optional on-demand `read_file` if a tag's usage is ambiguous): "
+              <> T.pack (absSession </> "chunks" </> "by_topic.md")
+              <> ", "
+              <> T.pack (absSession </> "entries" </> "by_topic.md")
+              <> ", "
+              <> T.pack (absSession </> "predictions" </> "by_topic.md")
+          , ""
+          , "## Established / Previously Vetted Topics (" <> jsonInt (length vetted) <> ")"
+          , fmtList vetted
+          , ""
+          , "## New Unvetted Topics Added Since Last Curation (" <> jsonInt (length unvetted) <> ")"
+          , fmtList unvetted
+          , ""
+          , "## Turn Output Contract"
+          , "Read `memory.md` (and any `by_topic.md` index if needed) and output `=== TOPIC MERGES ===` with `- <Canonical Topic> <= <Alias 1>, <Alias 2>` for any synonymous or overly narrow one-off tags (or `- NONE` if all new topics should remain distinct)."
+          ]
+  TIO.writeFile topicPromptPath topicPromptText
+  pure topicPromptPath
 
 writeFactCheckDiscussionPromptFile :: FilePath -> SessionState -> [Text] -> IO (FilePath, FilePath)
 writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do

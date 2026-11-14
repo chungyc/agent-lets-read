@@ -4,17 +4,17 @@ description: >-
   Conducts a spoiler-free, chapter-by-chapter or chunk-by-chunk "Let's Read"
   liveblog of a story (.txt, .md, .html, .epub) using a Haskell gatekeeper
   script, an isolated blind-reader subagent, an impartial prediction-judge
-  subagent, a dedicated fact-checker subagent, and a persona-driven
-  commentary-critic subagent. Use this skill whenever the user asks for a Let's
-  Read, liveblog reaction, unspoiled first-time read, or incremental commentary
-  on a story or book.
+  subagent, a dedicated fact-checker subagent, a persona-driven
+  commentary-critic subagent, and an on-demand topic-curator subagent. Use this
+  skill whenever the user asks for a Let's Read, liveblog reaction, unspoiled
+  first-time read, or incremental commentary on a story or book.
 ---
 
 # Let's Read Skill (Spoiler-Free Architecture)
 
 This skill conducts a genuine, unspoiled **Let's Read** of a story or book in
 `.txt`, `.md`, `.markdown`, `.html`, or `.epub` format by combining a
-**Haskell Gatekeeper** ([LetsRead.hs](./scripts/LetsRead.hs)) with four
+**Haskell Gatekeeper** ([LetsRead.hs](./scripts/LetsRead.hs)) with five
 sandboxed, read-only subagents:
 
 1. **`blind-reader`**: Reads each newly unlocked chunk (`current_chunk.md`),
@@ -36,6 +36,10 @@ sandboxed, read-only subagents:
    `fact-checker`)*: Evaluates how well `blind-reader`'s entry inhabited the
    session's Active Persona and user style directives, delivered via
    `<session_dir>/critic_feedback.md` for silent application on the next chunk.
+5. **`topic-curator`** *(dispatched in parallel when `record` returns
+   `"topic_curation_needed": true`)*: Reviews newly added unvetted topic tags
+   against established session topics and outputs synonym/alias merges
+   (`=== TOPIC MERGES ===`) applied by `lets-read judge`.
 
 ---
 
@@ -51,8 +55,8 @@ sandboxed, read-only subagents:
    - Always let `lets-read init` use its built-in default unless the user
      explicitly asks for a custom chunk size.
 4. **Strict Subagent Isolation (`<session_dir>` Hermetic Sandbox)**:
-   - Define `blind-reader`, `prediction-judge`, `fact-checker`, and
-     `commentary-critic` with `EnableWriteTools: false`,
+   - Define `blind-reader`, `prediction-judge`, `fact-checker`,
+     `commentary-critic`, and `topic-curator` with `EnableWriteTools: false`,
      `EnableSubagentTools: false`, and `EnableMCPTools: false` using the agent
      definition files in [resources/agents/](./resources/agents/).
    - Subagents only read files inside `<session_dir>` and may use `search_web`
@@ -60,14 +64,16 @@ sandboxed, read-only subagents:
      story being read).
 5. **NEVER Impersonate Subagents, Edit `memory.md` Directly, or Improvise Prompts**:
    - You (the parent orchestrator) are strictly the **session host and
-     gatekeeper relay**, never the reader, judge, fact-checker, or critic.
+     gatekeeper relay**, never the reader, judge, fact-checker, critic, or
+     topic curator.
    - Never answer a user's question about the story in your own voice, and never
      call `edit_file` or `write_file` directly on `<session_dir>/memory.md`.
    - **Never paste `current_chunk.md` or `memory.md` inline into prompts** or
      improvise custom subagent instructions. Always read the gatekeeper-generated
      prompt files (`current_prompt.md`, `current_judge_prompt.md`,
      `current_fact_check_prompt.md`, `current_critic_prompt.md`,
-     `current_discussion_prompt.md`) and pass their contents verbatim.
+     `current_topic_prompt.md`, `current_discussion_prompt.md`) and pass their
+     contents verbatim.
    - Whenever presenting `blind-reader`'s commentary or discussion reply in
      chat, prefix your message with a clear third-person host banner (e.g.,
      `> **Let's Read Host** — Relaying from \`blind-reader\` (Chunk XXXX/YYYY):`).
@@ -90,6 +96,7 @@ sandboxed, read-only subagents:
   - **Prediction Judge**: [prediction-judge.md](./resources/agents/prediction-judge.md)
   - **Fact-Checker**: [fact-checker.md](./resources/agents/fact-checker.md)
   - **Commentary Critic**: [commentary-critic.md](./resources/agents/commentary-critic.md)
+  - **Topic Curator**: [topic-curator.md](./resources/agents/topic-curator.md)
 - **Final Wrapup Prompt Template**: [wrapup_prompt_template.md](./resources/wrapup_prompt_template.md)
 - **Banned Jargon Linter List**: [banned_jargon.txt](./resources/banned_jargon.txt)
 - **Persona Presets**: [personas.md](./references/personas.md)
@@ -135,7 +142,7 @@ Read [personas.md](./references/personas.md) if a custom tone or preset was requ
      --persona "<chosen_persona>"
    ```
 
-### Step 3: Define the Four Subagents
+### Step 3: Define the Five Subagents
 
 Read each agent file under [resources/agents/](./resources/agents/) and call
 `define_subagent` using the metadata in its YAML frontmatter (`name`,
@@ -146,6 +153,7 @@ Read each agent file under [resources/agents/](./resources/agents/) and call
 2. [prediction-judge.md](./resources/agents/prediction-judge.md) (`Name: "prediction-judge"`, `Role: "Impartial Prediction Judge"`)
 3. [fact-checker.md](./resources/agents/fact-checker.md) (`Name: "fact-checker"`, `Role: "Commentary Fact-Checker"`)
 4. [commentary-critic.md](./resources/agents/commentary-critic.md) (`Name: "commentary-critic"`, `Role: "Commentary Critic"`)
+5. [topic-curator.md](./resources/agents/topic-curator.md) (`Name: "topic-curator"`, `Role: "Topic Index Curator"`)
 
 ### Step 4: Per-Chunk Execution Loop (`next` → `record` → `judge` → optional `discuss`)
 
@@ -178,28 +186,36 @@ For each chunk to be read:
 
    This records the entry, updates predictions and indices, writes
    `current_judge_prompt.md`, `current_fact_check_prompt.md`, and
-   `current_critic_prompt.md`, and returns `"rotate_judge_recommended"`,
-   `"rotate_fact_checker_recommended"`, and `"rotate_critic_recommended"`.
+   `current_critic_prompt.md` (plus `current_topic_prompt.md` when
+   `"topic_curation_needed": true`), and returns `"rotate_judge_recommended"`,
+   `"rotate_fact_checker_recommended"`, `"rotate_critic_recommended"`, and
+   `"topic_curation_needed"`.
 
-4. **Dispatch `prediction-judge`, `fact-checker`, and `commentary-critic` in Parallel**:
+4. **Dispatch `prediction-judge`, `fact-checker`, `commentary-critic` (and `topic-curator` When Triggered) in Parallel**:
    - Read `current_judge_prompt.md`, `current_fact_check_prompt.md`, and
-     `current_critic_prompt.md`.
-   - **In the same turn**, dispatch all three subagents in parallel:
-     - For each role (`prediction-judge`, `fact-checker`, `commentary-critic`),
-       call `invoke_subagent` on Chunk 1 or when its corresponding
+     `current_critic_prompt.md` (plus `current_topic_prompt.md` if
+     `"topic_curation_needed": true`).
+   - **In the same turn**, dispatch the post-record subagents in parallel:
+     - For `prediction-judge`, `fact-checker`, and `commentary-critic`, call
+       `invoke_subagent` on Chunk 1 or when its corresponding
        `"rotate_<role>_recommended": true` flag is set; otherwise call
        `send_message` to its active `conversationId`.
-   - Wait for all three subagents to finish before running `judge`.
+     - If `"topic_curation_needed": true`, also call `invoke_subagent` for
+       `topic-curator` (`Role: "Topic Index Curator"`) with the contents of
+       `current_topic_prompt.md`.
+   - Wait for all dispatched subagents to finish before running `judge`.
 
-5. **Apply Verdicts, Fact-Check Verification & Persona Critique (`judge`)**:
+5. **Apply Verdicts, Fact-Check Verification, Persona Critique & Topic Merges (`judge`)**:
 
    ```bash
    .agents/skills/lets-read/.bin/lets-read judge \
      --session "<session_dir>" \
      --subagent-log "<prediction_judge_logAbsoluteUri>" \
      --fact-check-log "<fact_checker_logAbsoluteUri>" \
-     --critic-log "<commentary_critic_logAbsoluteUri>"
+     --critic-log "<commentary_critic_logAbsoluteUri>" \
+     [--topic-log "<topic_curator_logAbsoluteUri>"]
    ```
+   *(Pass `--topic-log` whenever `"topic_curation_needed": true` was triggered on this chunk).*
 
 6. **If `"fact_check_discussion_pending": true` — Resolve the Fact-Check Peer Query (`discuss`)**:
    - Whenever `lets-read judge` returns `"fact_check_discussion_pending": true`
@@ -262,8 +278,8 @@ For each chunk to be read:
 
 - **In Batch Mode**:
   - Repeat Step 4 (`next` → `blind-reader` → `record` → `prediction-judge` +
-    `fact-checker` + `commentary-critic` in parallel → `judge` → optional
-    `discuss`, followed by the Final Wrapup Round after Chunk `N/N`) until the
-    target number of chunks/chapters or `"is_finished": true` is reached,
-    rotating each subagent whenever its `"rotate_<role>_recommended": true` flag
-    is set.
+    `fact-checker` + `commentary-critic` (+ `topic-curator` when triggered) in
+    parallel → `judge` → optional `discuss`, followed by the Final Wrapup Round
+    after Chunk `N/N`) until the target number of chunks/chapters or
+    `"is_finished": true` is reached, rotating each subagent whenever its
+    `"rotate_<role>_recommended": true` flag is set.
