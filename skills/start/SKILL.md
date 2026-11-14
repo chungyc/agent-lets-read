@@ -1,5 +1,5 @@
 ---
-name: lets-read
+name: start
 description: >-
   Conducts a spoiler-free, chapter-by-chapter or chunk-by-chunk "Let's Read"
   liveblog of a story (.txt, .md, .html, .epub) using a Haskell gatekeeper
@@ -105,7 +105,7 @@ book-length works.
 ## Directory & Resource Layout
 
 Let `<skill_dir>` denote the directory containing this `SKILL.md` file (e.g.,
-`skills/lets-read` in the plugin repository or `<plugin_dir>/skills/lets-read`
+`skills/start` in the plugin repository or `<plugin_dir>/skills/start`
 when installed):
 
 - **Gatekeeper Entrypoint & CLI**: [LetsRead.hs](./scripts/LetsRead.hs) (with submodules under [scripts/LetsRead/](./scripts/LetsRead/))
