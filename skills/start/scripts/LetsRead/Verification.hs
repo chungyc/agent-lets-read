@@ -16,7 +16,7 @@ module LetsRead.Verification
 import Control.Exception (IOException, catch)
 import Control.Monad (filterM, forM, when)
 import Data.Char (chr, isHexDigit)
-import Data.List (isPrefixOf, isSuffixOf, maximumBy)
+import Data.List (isPrefixOf, isSuffixOf, maximumBy, nub)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Ord (comparing)
 import Data.Text (Text)
@@ -503,36 +503,96 @@ extractSubagentIdFromPath rawPath =
         "" -> []
         s' -> let (w, s'') = break p s' in w : wordsBy p s''
 
-findSubagentMessageFromParent :: Text -> IO (Maybe Text)
-findSubagentMessageFromParent subId = do
+deriveBrainDirFromLogPath :: FilePath -> Maybe FilePath
+deriveBrainDirFromLogPath rawPath =
+  let clean = stripFileUriPrefix rawPath
+      isUuid t = T.length t == 36 && T.count "-" t == 4
+      walkUp d
+        | d == "/" || d == "." || null d = Nothing
+        | isUuid (T.pack (takeFileName d)) =
+            let parent = takeDirectory d
+             in if parent == d || parent == "." || null parent
+                  then Nothing
+                  else Just parent
+        | otherwise =
+            let parent = takeDirectory d
+             in if parent == d then Nothing else walkUp parent
+   in walkUp clean
+
+findSubagentMessageFromParent :: FilePath -> Text -> IO (Maybe Text)
+findSubagentMessageFromParent rawLogPath subId = do
   homeDir <- getHomeDirectory
-  let brainDir = homeDir </> ".gemini" </> "antigravity-cli" </> "brain"
-  brainExists <- doesDirectoryExist brainDir
-  if not brainExists
+  let candidateBrainDirs =
+        nub $
+          [d | Just d <- [deriveBrainDirFromLogPath rawLogPath]]
+            ++ [ homeDir </> ".gemini" </> "antigravity" </> "brain"
+               , homeDir </> ".gemini" </> "antigravity-cli" </> "brain"
+               ]
+  existingBrainDirs <- filterM doesDirectoryExist candidateBrainDirs
+  if null existingBrainDirs
     then pure Nothing
     else do
-      convs <- listDirectory brainDir
-      let msgDirs = [brainDir </> c </> ".system_generated" </> "messages" | c <- convs]
-      existingMsgDirs <- filterM doesDirectoryExist msgDirs
+      msgDirs <- fmap concat $ forM existingBrainDirs $ \brainDir -> do
+        convs <- listDirectory brainDir `catch` (\(_ :: IOException) -> pure [])
+        pure $
+          concat
+            [ [ brainDir </> c </> ".system_generated" </> "messages"
+              , brainDir </> c </> ".system_generated" </> "messages" </> "undelivered"
+              ]
+            | c <- convs
+            ]
+      existingMsgDirs <- filterM doesDirectoryExist (nub msgDirs)
       allMsgFiles <- concatMapM listJsonFiles existingMsgDirs
       matches <- forM allMsgFiles $ \f -> do
         txt <- readTextFileSafe f
         let senderField = extractJsonStringField "sender" txt
             contentField = extractJsonStringField "content" txt
+            tsField = fromMaybe "" (extractJsonStringField "timestamp" txt)
         if senderField == Just subId && isJust contentField
           then do
             mtime <- getModificationTime f
-            pure (Just (mtime, fromMaybe "" contentField))
+            pure (Just ((tsField, mtime), fromMaybe "" contentField))
           else pure Nothing
-      let valid = [ (m, c) | Just (m, c) <- matches, not (T.null c) ]
+      let valid = [ (k, c) | Just (k, c) <- matches, not (T.null c) ]
       if null valid
         then pure Nothing
         else pure (Just (snd (maximumBy (comparing fst) valid)))
   where
     listJsonFiles d = do
-      names <- listDirectory d
+      names <- listDirectory d `catch` (\(_ :: IOException) -> pure [])
       pure [d </> n | n <- names, ".json" `isSuffixOf` n]
     concatMapM f xs = fmap concat (mapM f xs)
+
+isolateLatestTurnLines :: [Text] -> [Text]
+isolateLatestTurnLines allRevLines =
+  let isTurnStart l =
+        let t = extractJsonStringField "type" l
+         in t == Just "SYSTEM_MESSAGE" || t == Just "USER_INPUT"
+      isPlannerResponseLine l =
+        extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
+      afterTrailingNotices = dropWhile (not . isPlannerResponseLine) allRevLines
+      turnSlice = takeWhile (not . isTurnStart) afterTrailingNotices
+   in if null turnSlice then allRevLines else turnSlice
+
+isDelimiterHeaderLine :: Text -> Bool
+isDelimiterHeaderLine rawLine =
+  let s = T.toUpper (T.strip (T.dropAround (\c -> c == '`' || c == '*') (T.strip rawLine)))
+   in s
+        `elem` [ "=== COMMENTARY ==="
+               , "=== UPDATED MEMORY ==="
+               , "=== PREDICTION UPDATES ==="
+               , "=== PREDICTION JUDGMENTS ==="
+               , "=== VERIFIED CLAIMS LOG ==="
+               , "=== CRITIC FEEDBACK ==="
+               , "=== DISPUTED FACTS & MEMORY CHECKS ==="
+               , "=== FACT & MEMORY CORRECTIONS ==="
+               , "=== PERSONA & STYLE CRITIQUE ==="
+               , "=== PERSONA & STYLE COACHING ==="
+               , "=== STYLE COACHING ==="
+               , "=== CHUNK SUMMARY ==="
+               , "=== TOPIC MERGES ==="
+               , "=== FINAL WRAPUP ==="
+               ]
 
 checkSubagentLogUsedSearchWeb :: FilePath -> IO Bool
 checkSubagentLogUsedSearchWeb rawLogPath = do
@@ -551,17 +611,14 @@ checkSubagentLogUsedSearchWeb rawLogPath = do
     then case extractSubagentIdFromPath rawLogPath of
       Nothing -> pure False
       Just subId -> do
-        mMsg <- findSubagentMessageFromParent subId
+        mMsg <- findSubagentMessageFromParent rawLogPath subId
         case mMsg of
           Nothing -> pure False
           Just msg -> pure ("search_web" `T.isInfixOf` T.toLower msg)
     else do
       raw <- readTextFileSafe targetPath
-      let isTurnStart l =
-            let t = extractJsonStringField "type" l
-             in t == Just "SYSTEM_MESSAGE" || t == Just "USER_INPUT"
-          revLines = reverse (T.lines raw)
-          currentTurnLines = takeWhile (not . isTurnStart) revLines
+      let revLines = reverse (T.lines raw)
+          currentTurnLines = isolateLatestTurnLines revLines
           hasSearchCall l =
             extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
               && ("\"name\":\"search_web\"" `T.isInfixOf` l || "\"name\": \"search_web\"" `T.isInfixOf` l)
@@ -584,7 +641,7 @@ checkSubagentLogUsedVerificationTools rawLogPath = do
     then case extractSubagentIdFromPath rawLogPath of
       Nothing -> pure False
       Just subId -> do
-        mMsg <- findSubagentMessageFromParent subId
+        mMsg <- findSubagentMessageFromParent rawLogPath subId
         case mMsg of
           Nothing -> pure False
           Just msg ->
@@ -592,11 +649,8 @@ checkSubagentLogUsedVerificationTools rawLogPath = do
              in pure ("read_file" `T.isInfixOf` low || "search_web" `T.isInfixOf` low)
     else do
       raw <- readTextFileSafe targetPath
-      let isTurnStart l =
-            let t = extractJsonStringField "type" l
-             in t == Just "SYSTEM_MESSAGE" || t == Just "USER_INPUT"
-          revLines = reverse (T.lines raw)
-          currentTurnLines = takeWhile (not . isTurnStart) revLines
+      let revLines = reverse (T.lines raw)
+          currentTurnLines = isolateLatestTurnLines revLines
           hasVerifyCall l =
             extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
               && ( "\"name\":\"read_file\"" `T.isInfixOf` l
@@ -622,20 +676,17 @@ extractSubagentLogResponse rawLogPath = do
   if null targetPath
     then case extractSubagentIdFromPath rawLogPath of
       Just subId -> do
-        mMsg <- findSubagentMessageFromParent subId
+        mMsg <- findSubagentMessageFromParent rawLogPath subId
         case mMsg of
           Just msg -> pure msg
           Nothing -> die ("Error: Subagent transcript log not found on disk, and no messages from subagent " ++ T.unpack subId ++ " found in session messages.")
       Nothing -> die ("Error: Subagent transcript log not found: " ++ rawLogPath)
     else do
       raw <- readTextFileSafe targetPath
-      let isTurnStart l =
-            let t = extractJsonStringField "type" l
-             in t == Just "SYSTEM_MESSAGE" || t == Just "USER_INPUT"
-          isPlannerResponseLine l =
+      let isPlannerResponseLine l =
             extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
           allRevLines = reverse (T.lines raw)
-          currentTurnPlannerLines = filter isPlannerResponseLine (takeWhile (not . isTurnStart) allRevLines)
+          currentTurnPlannerLines = filter isPlannerResponseLine (isolateLatestTurnLines allRevLines)
           revLines =
             if null currentTurnPlannerLines
               then filter isPlannerResponseLine allRevLines
@@ -646,17 +697,7 @@ extractSubagentLogResponse rawLogPath = do
             , not (T.null (T.strip m))
             ]
           allCandidates = concatMap lineTexts revLines
-          hasDelimiters t =
-            "=== COMMENTARY ===" `T.isInfixOf` t
-              || "=== UPDATED MEMORY ===" `T.isInfixOf` t
-              || "=== PREDICTION UPDATES ===" `T.isInfixOf` t
-              || "=== PREDICTION JUDGMENTS ===" `T.isInfixOf` t
-              || "=== VERIFIED CLAIMS LOG ===" `T.isInfixOf` t
-              || "=== CRITIC FEEDBACK ===" `T.isInfixOf` t
-              || "=== DISPUTED FACTS & MEMORY CHECKS ===" `T.isInfixOf` t
-              || "=== PERSONA & STYLE CRITIQUE ===" `T.isInfixOf` t
-              || "=== PERSONA & STYLE COACHING ===" `T.isInfixOf` t
-              || "=== CHUNK SUMMARY ===" `T.isInfixOf` t
+          hasDelimiters t = any isDelimiterHeaderLine (T.lines t)
           sendMsgCandidates =
             [ T.strip m
             | l <- revLines
@@ -664,7 +705,8 @@ extractSubagentLogResponse rawLogPath = do
             , not (T.null (T.strip m))
             ]
           preferred =
-            filter hasDelimiters allCandidates
+            filter hasDelimiters sendMsgCandidates
+              ++ filter hasDelimiters allCandidates
               ++ sendMsgCandidates
               ++ filter (\t -> T.length t > 200) allCandidates
               ++ allCandidates
