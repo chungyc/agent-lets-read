@@ -95,9 +95,10 @@ questions, or say "continue" to unlock the next chunk.
 ### Batch Mode
 
 Autonomously reads a specified number of chunks or chapters (or the entire
-work), recording every entry, verdict, and index update into the session
-directory, followed by a final retrospective wrapup round when the story
-concludes.
+work), delegating the read-through in batches of ~10 chunks to fresh
+[batch-driver.md](./agents/batch-driver.md) subagents so context stays bounded
+across book-length works, and concluding with a final retrospective wrapup round
+when the story finishes.
 
 ### Reader Personas
 
