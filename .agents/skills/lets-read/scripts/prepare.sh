@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 022
-export PATH="$HOME/.ghcup/bin:$HOME/.cabal/bin:$PATH"
 
 SCRIPTS_DIR=".agents/skills/lets-read/scripts"
 BIN_DIR=".agents/skills/lets-read/.bin"
