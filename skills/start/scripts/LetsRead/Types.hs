@@ -394,7 +394,7 @@ renderMetaJson (Just m) =
 
 orchestratorRuleText :: Text
 orchestratorRuleText =
-  "Pass generated prompt files (<session_dir>/current_*_prompt.md) verbatim to subagents; never run python/ad-hoc scripts, impersonate subagents, or edit memory.md directly."
+  "Use messages ONLY as 1-line notifications pointing subagents to read <session_dir>/current_*_prompt.md and write <session_dir>/current_*_response.md; wait for lets-read CLI commands to exit 0 before messaging subagents, never send duplicate notifications or poll, wait for all dispatched reviewers before running 'judge', and never read/paste prompt/chunk files into messages, run python/ad-hoc scripts, impersonate subagents, or edit memory.md directly."
 
 renderStateJson :: FilePath -> Bool -> Bool -> Bool -> SessionState -> Text
 renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt st =
@@ -423,11 +423,17 @@ renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt st =
         , ("current_chunk_meta", renderMetaJson (stCurrentMeta st))
         , ("current_chunk_file", jsonStr (T.pack (sessionDir </> "current_chunk.md")))
         , ("subagent_prompt_file", jsonStr (T.pack (sessionDir </> "current_prompt.md")))
+        , ("reader_response_file", jsonStr (T.pack (sessionDir </> "current_reader_response.md")))
         , ("judge_prompt_file", jsonStr (T.pack (sessionDir </> "current_judge_prompt.md")))
+        , ("judge_response_file", jsonStr (T.pack (sessionDir </> "current_judge_response.md")))
         , ("fact_check_prompt_file", jsonStr (T.pack (sessionDir </> "current_fact_check_prompt.md")))
+        , ("fact_check_response_file", jsonStr (T.pack (sessionDir </> "current_fact_check_response.md")))
         , ("critic_prompt_file", jsonStr (T.pack (sessionDir </> "current_critic_prompt.md")))
+        , ("critic_response_file", jsonStr (T.pack (sessionDir </> "current_critic_response.md")))
         , ("topic_prompt_file", if hasTopicPrompt then jsonStr (T.pack (sessionDir </> "current_topic_prompt.md")) else "null")
+        , ("topic_response_file", if hasTopicPrompt then jsonStr (T.pack (sessionDir </> "current_topic_response.md")) else "null")
         , ("discussion_prompt_file", if hasFactCheckPending then jsonStr (T.pack (sessionDir </> "current_discussion_prompt.md")) else "null")
+        , ("discussion_response_file", if hasFactCheckPending then jsonStr (T.pack (sessionDir </> "current_discussion_response.md")) else "null")
         , ("fact_check_questions_file", if hasFactCheckPending then jsonStr (T.pack (sessionDir </> "current_fact_check_questions.md")) else "null")
         , ("critic_feedback_file", jsonStr (T.pack (sessionDir </> "critic_feedback.md")))
         , ("chunks_dir", jsonStr (T.pack (sessionDir </> "chunks")))

@@ -45,7 +45,6 @@ import System.Directory
   , listDirectory
   , removeFile
   )
-import System.Exit (die)
 import System.FilePath (takeDirectory, takeFileName, (</>))
 
 defaultBannedJargon :: [Text]
@@ -568,11 +567,8 @@ isolateLatestTurnLines allRevLines =
   let isTurnStart l =
         let t = extractJsonStringField "type" l
          in t == Just "SYSTEM_MESSAGE" || t == Just "USER_INPUT"
-      isPlannerResponseLine l =
-        extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
-      afterTrailingNotices = dropWhile (not . isPlannerResponseLine) allRevLines
-      turnSlice = takeWhile (not . isTurnStart) afterTrailingNotices
-   in if null turnSlice then allRevLines else turnSlice
+      nonEmptyRevLines = filter (not . T.null . T.strip) allRevLines
+   in takeWhile (not . isTurnStart) nonEmptyRevLines
 
 isDelimiterHeaderLine :: Text -> Bool
 isDelimiterHeaderLine rawLine =
@@ -594,7 +590,19 @@ isDelimiterHeaderLine rawLine =
                , "=== FINAL WRAPUP ==="
                ]
 
-checkSubagentLogUsedSearchWeb :: FilePath -> IO Bool
+isCompletionNoticeOnly :: Text -> Bool
+isCompletionNoticeOnly raw =
+  let ls = filter (not . T.null) (map T.strip (T.lines raw))
+      low = T.toLower (T.strip raw)
+      hasDelimiter = any isDelimiterHeaderLine ls
+   in not hasDelimiter
+        && length ls <= 2
+        && ( "done:" `T.isPrefixOf` low
+               || "completed:" `T.isPrefixOf` low
+               || ("wrote " `T.isInfixOf` low && "_response.md" `T.isInfixOf` low)
+           )
+
+checkSubagentLogUsedSearchWeb :: FilePath -> IO (Maybe Bool)
 checkSubagentLogUsedSearchWeb rawLogPath = do
   let cleanPath = stripFileUriPrefix rawLogPath
       fullCandidate = takeDirectory cleanPath </> "transcript_full.jsonl"
@@ -609,12 +617,15 @@ checkSubagentLogUsedSearchWeb rawLogPath = do
           else pure ""
   if null targetPath
     then case extractSubagentIdFromPath rawLogPath of
-      Nothing -> pure False
+      Nothing -> pure Nothing
       Just subId -> do
         mMsg <- findSubagentMessageFromParent rawLogPath subId
         case mMsg of
-          Nothing -> pure False
-          Just msg -> pure ("search_web" `T.isInfixOf` T.toLower msg)
+          Nothing -> pure Nothing
+          Just msg
+            | "search_web" `T.isInfixOf` T.toLower msg -> pure (Just True)
+            | isCompletionNoticeOnly msg -> pure Nothing
+            | otherwise -> pure (Just False)
     else do
       raw <- readTextFileSafe targetPath
       let revLines = reverse (T.lines raw)
@@ -622,9 +633,9 @@ checkSubagentLogUsedSearchWeb rawLogPath = do
           hasSearchCall l =
             extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
               && ("\"name\":\"search_web\"" `T.isInfixOf` l || "\"name\": \"search_web\"" `T.isInfixOf` l)
-      pure (any hasSearchCall currentTurnLines)
+      pure (Just (any hasSearchCall currentTurnLines))
 
-checkSubagentLogUsedVerificationTools :: FilePath -> IO Bool
+checkSubagentLogUsedVerificationTools :: FilePath -> IO (Maybe Bool)
 checkSubagentLogUsedVerificationTools rawLogPath = do
   let cleanPath = stripFileUriPrefix rawLogPath
       fullCandidate = takeDirectory cleanPath </> "transcript_full.jsonl"
@@ -639,14 +650,19 @@ checkSubagentLogUsedVerificationTools rawLogPath = do
           else pure ""
   if null targetPath
     then case extractSubagentIdFromPath rawLogPath of
-      Nothing -> pure False
+      Nothing -> pure Nothing
       Just subId -> do
         mMsg <- findSubagentMessageFromParent rawLogPath subId
         case mMsg of
-          Nothing -> pure False
+          Nothing -> pure Nothing
           Just msg ->
             let low = T.toLower msg
-             in pure ("read_file" `T.isInfixOf` low || "search_web" `T.isInfixOf` low)
+             in if "read_file" `T.isInfixOf` low || "search_web" `T.isInfixOf` low
+                  then pure (Just True)
+                  else
+                    if isCompletionNoticeOnly msg
+                      then pure Nothing
+                      else pure (Just False)
     else do
       raw <- readTextFileSafe targetPath
       let revLines = reverse (T.lines raw)
@@ -658,9 +674,9 @@ checkSubagentLogUsedVerificationTools rawLogPath = do
                      || "\"name\":\"search_web\"" `T.isInfixOf` l
                      || "\"name\": \"search_web\"" `T.isInfixOf` l
                  )
-      pure (any hasVerifyCall currentTurnLines)
+      pure (Just (any hasVerifyCall currentTurnLines))
 
-extractSubagentLogResponse :: FilePath -> IO Text
+extractSubagentLogResponse :: FilePath -> IO (Maybe Text)
 extractSubagentLogResponse rawLogPath = do
   let cleanPath = stripFileUriPrefix rawLogPath
       fullCandidate = takeDirectory cleanPath </> "transcript_full.jsonl"
@@ -678,39 +694,45 @@ extractSubagentLogResponse rawLogPath = do
       Just subId -> do
         mMsg <- findSubagentMessageFromParent rawLogPath subId
         case mMsg of
-          Just msg -> pure msg
-          Nothing -> die ("Error: Subagent transcript log not found on disk, and no messages from subagent " ++ T.unpack subId ++ " found in session messages.")
-      Nothing -> die ("Error: Subagent transcript log not found: " ++ rawLogPath)
+          Just msg | not (isCompletionNoticeOnly msg) -> pure (Just msg)
+          _ -> pure Nothing
+      Nothing -> pure Nothing
     else do
       raw <- readTextFileSafe targetPath
       let isPlannerResponseLine l =
             extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
           allRevLines = reverse (T.lines raw)
-          currentTurnPlannerLines = filter isPlannerResponseLine (isolateLatestTurnLines allRevLines)
-          revLines =
-            if null currentTurnPlannerLines
-              then filter isPlannerResponseLine allRevLines
-              else currentTurnPlannerLines
+          revLines = filter isPlannerResponseLine (isolateLatestTurnLines allRevLines)
           lineTexts l =
             [ T.strip m
-            | Just m <- [extractJsonStringField "Message" l, extractJsonStringField "content" l]
+            | Just m <-
+                [ extractJsonStringField "Content" l
+                , extractJsonStringField "Message" l
+                , extractJsonStringField "content" l
+                ]
             , not (T.null (T.strip m))
+            , not (isCompletionNoticeOnly m)
             ]
           allCandidates = concatMap lineTexts revLines
           hasDelimiters t = any isDelimiterHeaderLine (T.lines t)
+          writeFileCandidates =
+            [ T.strip m
+            | l <- revLines
+            , Just m <- [extractJsonStringField "Content" l]
+            , not (T.null (T.strip m))
+            , not (isCompletionNoticeOnly m)
+            ]
           sendMsgCandidates =
             [ T.strip m
             | l <- revLines
             , Just m <- [extractJsonStringField "Message" l]
             , not (T.null (T.strip m))
+            , not (isCompletionNoticeOnly m)
             ]
           preferred =
-            filter hasDelimiters sendMsgCandidates
+            filter hasDelimiters writeFileCandidates
+              ++ filter hasDelimiters sendMsgCandidates
               ++ filter hasDelimiters allCandidates
-              ++ sendMsgCandidates
-              ++ filter (\t -> T.length t > 200) allCandidates
-              ++ allCandidates
       case preferred of
-        (latest : _) -> pure latest
-        [] ->
-          die ("Error: No non-empty PLANNER_RESPONSE content or send_message found in subagent log: " ++ targetPath)
+        (latest : _) -> pure (Just latest)
+        [] -> pure Nothing

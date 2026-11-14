@@ -217,23 +217,40 @@ writeCurrentChunkFile path c totalChunks totalChapters activeCount = do
                ]
   TIO.writeFile path (header <> chunkText c <> "\n")
 
+extractInlineCriticSection :: Int -> Text -> [Text]
+extractInlineCriticSection fromChunkIdx rawFb =
+  let ls = T.lines (T.strip rawFb)
+      (_, afterHeader) = break (\l -> "## Persona & Style Critique" `T.isPrefixOf` T.stripStart l) ls
+      bulletLines =
+        case afterHeader of
+          (_ : rest) -> filter (not . T.null . T.strip) rest
+          [] -> [l | l <- ls, "- " `T.isPrefixOf` T.stripStart l]
+   in if null bulletLines
+        then []
+        else
+          [ ""
+          , "## Persona & Style Critique from Chunk "
+              <> jsonInt fromChunkIdx
+              <> " (Apply Silently — Never Mention in Commentary)"
+          ]
+            ++ bulletLines
+
 writeCurrentPromptFile :: FilePath -> SessionState -> Chunk -> Int -> IO FilePath
 writeCurrentPromptFile sessionDir st chunk activeCount = do
   absSession <- canonicalizePath sessionDir
   let criticFeedbackPath = absSession </> "critic_feedback.md"
   hasCriticFeedback <- doesFileExist criticFeedbackPath
+  rawCriticFb <-
+    if hasCriticFeedback
+      then readTextFileSafe criticFeedbackPath
+      else pure ""
   let curIdx = chunkIndex chunk
       curPad = T.pack (padChunkNumber curIdx)
       totalChunks = stTotalChunks st
       slatePromptLine = renderPredictionSlateNote curIdx totalChunks activeCount
-      criticContextLines =
+      inlineCriticLines =
         if hasCriticFeedback
-          then
-            [ "- Persona & Style Critique Notes from Chunk "
-                <> jsonInt (max 1 (curIdx - 1))
-                <> " (MANDATORY READ — apply silently; never mention in commentary): "
-                <> T.pack criticFeedbackPath
-            ]
+          then extractInlineCriticSection (max 1 (curIdx - 1)) rawCriticFb
           else []
       prevContextLines =
         if curIdx <= 1
@@ -243,6 +260,14 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
                  in [ "- Previous Story Chunk (read ONLY if newly rotated or picking up mid-chapter): "
                         <> T.pack (absSession </> "chunks" </> ("chunk_" ++ prevPad ++ ".md"))
                     ]
+      commentaryPredictionSuffix =
+        if curIdx >= totalChunks
+          then "; since this is the final chunk, do not propose a new prediction"
+          else ", and end with `- **[Predicted Chunk " <> curPad <> " | Topics: Topic 1, Topic 2, Topic 3]** ...`"
+      predictionUpdatesBody =
+        if curIdx >= totalChunks
+          then "Leave empty on this final chunk (`prediction-judge` still evaluates prior predictions against this chunk)"
+          else "`- **[Predicted Chunk " <> curPad <> " | Topics: ...]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` plus conditional `RETIRED` if at 10/10 active"
       promptPath = sessionDir </> "current_prompt.md"
       promptText =
         T.unlines $
@@ -253,21 +278,24 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
               <> ") and write your Let's Read entry."
           , "- Current Chunk File (mandatory read): " <> T.pack (absSession </> "current_chunk.md")
           , "- Reader Memory File (mandatory read): " <> T.pack (absSession </> "memory.md")
+          , "- Output Response File (mandatory write via `write_file` with `Overwrite: true`): " <> T.pack (absSession </> "current_reader_response.md")
           ]
-            ++ criticContextLines
             ++ prevContextLines
             ++ [ "- Story Chunks Indices (`chunks/by_chronology.md` & `chunks/by_topic.md`, on-demand `read_file` for callback verification): " <> T.pack (absSession </> "chunks")
                , "- Session Entries & Predictions (`entries/` & `predictions/`, on-demand `read_file`): " <> T.pack absSession
                , "- Active Persona: " <> expandPersonaPreset (stPersona st)
                , "- " <> slatePromptLine
-               , ""
+               ]
+            ++ inlineCriticLines
+            ++ [ ""
                , "## Turn Output Contract"
-               , "1. Read `current_chunk.md` and `memory.md` (plus `critic_feedback.md` if listed above), verify any earlier-chunk callbacks via `read_file` on `chunks/chunk_XXXX.md` and any external canon references via neutral `search_web` queries."
-               , "2. Output all four required sections using exact headers:"
-               , "   - `=== COMMENTARY ===` (react in your Active Persona with 3–5 tight `>` blockquotes, weave reactions to any `prediction-judge` verdicts in `memory.md`, and end with `- **[Predicted Chunk " <> curPad <> " | Topics: Topic 1, Topic 2, Topic 3]** ...`)"
+               , "1. Read `current_chunk.md` and `memory.md` (applying any `## Persona & Style Critique` notes above silently), verify any earlier-chunk callbacks via `read_file` on `chunks/chunk_XXXX.md` and any external canon references via neutral `search_web` queries."
+               , "2. Write all four required sections using exact headers to `" <> T.pack (absSession </> "current_reader_response.md") <> "` via `write_file` (`Overwrite: true`):"
+               , "   - `=== COMMENTARY ===` (react in your Active Persona with 3–5 tight `>` blockquotes, weave reactions to any `prediction-judge` verdicts in `memory.md`" <> commentaryPredictionSuffix <> ")"
                , "   - `=== CHUNK SUMMARY ===` (`- **[Story | Topics: ...]** <1-line factual in-story summary>` and `- **[Entry | Topics: ...]** <1-line reaction/gag summary>`)"
-               , "   - `=== PREDICTION UPDATES ===` (`- **[Predicted Chunk " <> curPad <> " | Topics: ...]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` plus conditional `RETIRED` if at 10/10 active)"
+               , "   - `=== PREDICTION UPDATES ===` (" <> predictionUpdatesBody <> ")"
                , "   - `=== UPDATED MEMORY ===` (the 4 narrative sections only)"
+               , "3. Once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice and no tool calls (do not call `send_message` or re-read files, and never paste the sections into your message)."
                ]
   TIO.writeFile promptPath promptText
   pure promptPath
@@ -277,16 +305,19 @@ writeWrapupPromptFile sessionDir st = do
   absSession <- canonicalizePath sessionDir
   let criticFeedbackPath = absSession </> "critic_feedback.md"
   hasCriticFeedback <- doesFileExist criticFeedbackPath
+  rawCriticFb <-
+    if hasCriticFeedback
+      then readTextFileSafe criticFeedbackPath
+      else pure ""
   let totalChunks = stTotalChunks st
-      criticContext =
+      inlineCriticLines =
         if hasCriticFeedback
-          then
-            "- Persona & Style Critique Notes from Chunk "
-              <> jsonInt totalChunks
-              <> " (MANDATORY READ — apply style coaching silently): "
-              <> T.pack criticFeedbackPath
-              <> "\n"
-          else ""
+          then extractInlineCriticSection totalChunks rawCriticFb
+          else []
+      criticContext =
+        if null inlineCriticLines
+          then ""
+          else T.unlines inlineCriticLines <> "\n"
       promptPath = sessionDir </> "current_prompt.md"
   tmplPath <- resolveSkillResourcePath ("resources" </> "wrapup_prompt_template.md")
   hasTmpl <- doesFileExist tmplPath
@@ -299,9 +330,10 @@ writeWrapupPromptFile sessionDir st = do
             [ "All {{TOTAL_CHUNKS}} story chunks of *{{TITLE}}* have been read! Please write your dedicated **Final Wrapup & Retrospective**."
             , "- Reader Memory File (mandatory read): {{MEMORY_FILE}}"
             , "- Prediction Hall of Fame & Shame (mandatory read): {{HALL_OF_FAME_FILE}}"
-            , "{{CRITIC_CONTEXT}}- Active Persona: {{ACTIVE_PERSONA}}"
-            , ""
-            , "Read `memory.md` and `predictions/hall_of_fame.md` and output `=== COMMENTARY ===` covering finale verdicts, whole-story retrospective, corkboard autopsy, and closing sign-off."
+            , "- Output Response File (mandatory write via `write_file` with `Overwrite: true`): {{READER_RESPONSE_FILE}}"
+            , "- Active Persona: {{ACTIVE_PERSONA}}"
+            , "{{CRITIC_CONTEXT}}"
+            , "Read `memory.md` and `predictions/hall_of_fame.md`, write `=== COMMENTARY ===` covering finale verdicts, whole-story retrospective, corkboard autopsy, and closing sign-off to `{{READER_RESPONSE_FILE}}` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice and no tool calls (do not call `send_message` or re-read files)."
             ]
   let substitutions =
         [ ("{{TOTAL_CHUNKS}}", jsonInt totalChunks)
@@ -309,6 +341,7 @@ writeWrapupPromptFile sessionDir st = do
         , ("{{SESSION_DIR}}", T.pack absSession)
         , ("{{MEMORY_FILE}}", T.pack (absSession </> "memory.md"))
         , ("{{HALL_OF_FAME_FILE}}", T.pack (absSession </> "predictions" </> "hall_of_fame.md"))
+        , ("{{READER_RESPONSE_FILE}}", T.pack (absSession </> "current_reader_response.md"))
         , ("{{CRITIC_CONTEXT}}", criticContext)
         , ("{{CHUNKS_DIR}}", T.pack (absSession </> "chunks"))
         , ("{{ENTRIES_DIR}}", T.pack (absSession </> "entries"))
@@ -373,6 +406,7 @@ writeCurrentJudgePromptFile sessionDir st = do
                  | pr <- recentResolved
                  ]
       judgePromptPath = sessionDir </> "current_judge_prompt.md"
+      judgeRespPath = absSession </> "current_judge_response.md"
       judgePromptText =
         T.unlines $
           [ "Please evaluate all currently active predictions against Chunk "
@@ -384,6 +418,7 @@ writeCurrentJudgePromptFile sessionDir st = do
           , "- Current Story Chunk (mandatory read): " <> T.pack (absSession </> "current_chunk.md")
           , "- Reader Memory File (optional context read): " <> T.pack (absSession </> "memory.md")
           , "- Predictions Directory (optional on-demand `read_file`): " <> T.pack (absSession </> "predictions")
+          , "- Output Response File (mandatory write via `write_file` with `Overwrite: true`): " <> T.pack judgeRespPath
           , ""
           , "## Active Predictions to Judge on Chunk " <> curPad <> " (" <> jsonInt (length activePreds) <> " Active — Evaluate ALL)"
           , ""
@@ -392,7 +427,7 @@ writeCurrentJudgePromptFile sessionDir st = do
             ++ recentLines
             ++ [ ""
                , "## Turn Output Contract"
-               , "Read `current_chunk.md` and output `=== PREDICTION JUDGMENTS ===` with one bullet per active prediction (`[Predicted Chunk XXXX -> ACTIVE]`, `CONFIRMED Chunk " <> curPad <> "`, `DEBUNKED Chunk " <> curPad <> "`, or `SUBVERTED Chunk " <> curPad <> "`; include a 1-sentence synthesis/falsifiability audit on `Predicted Chunk " <> curPad <> " -> ACTIVE`)."
+               , "Read `current_chunk.md`, write `=== PREDICTION JUDGMENTS ===` with one bullet per active prediction (`[Predicted Chunk XXXX -> ACTIVE]`, `CONFIRMED Chunk " <> curPad <> "`, `DEBUNKED Chunk " <> curPad <> "`, or `SUBVERTED Chunk " <> curPad <> "`; include a 1-sentence synthesis/falsifiability audit on `Predicted Chunk " <> curPad <> " -> ACTIVE`) to `" <> T.pack judgeRespPath <> "` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice and no tool calls (do not call `send_message` or re-read files)."
                ]
   TIO.writeFile judgePromptPath judgePromptText
   pure judgePromptPath
@@ -405,6 +440,7 @@ writeCurrentFactCheckPromptFile sessionDir st storySumTxt entrySumTxt = do
       curPadTxt = T.pack curPad
       totalChunks = stTotalChunks st
       entryPath = absSession </> "entries" </> ("chunk_" ++ curPad ++ ".md")
+      factRespPath = absSession </> "current_fact_check_response.md"
       mNewPred = listToMaybe [pr | pr <- stPredictions st, prOriginChunk pr == curIdx]
       predLine =
         case mNewPred of
@@ -423,15 +459,17 @@ writeCurrentFactCheckPromptFile sessionDir st storySumTxt entrySumTxt = do
           , "- Recorded Commentary Entry (mandatory read): " <> T.pack entryPath
           , "- Updated Reader Memory File (mandatory read): " <> T.pack (absSession </> "memory.md")
           , "- Unlocked Story Chunks & Indices (`chunks/by_chronology.md` & `chunks/by_topic.md` for `read_file` verification): " <> T.pack (absSession </> "chunks")
+          , "- Output Response File (mandatory write via `write_file` with `Overwrite: true`): " <> T.pack factRespPath
           , "- Submitted 1-Line Story Summary (`[Story]`): `" <> storySumTxt <> "`"
           , "- Submitted 1-Line Entry Summary (`[Entry]`): `" <> entrySumTxt <> "`"
           , predLine
           , ""
           , "## Turn Output Contract"
           , "1. Read `current_chunk.md`, `entries/chunk_" <> curPadTxt <> ".md`, and `memory.md`; verify any earlier-chunk callbacks/premises by calling `read_file` on `chunks/chunk_XXXX.md` and any external canon claims via neutral `search_web` queries."
-          , "2. Output both required sections:"
+          , "2. Write both required sections to `" <> T.pack factRespPath <> "` via `write_file` (`Overwrite: true`):"
           , "   - `=== VERIFIED CLAIMS LOG ===` (`- [OK | Source: ...]` or `- [DISPUTED | Source: ...]`)"
           , "   - `=== DISPUTED FACTS & MEMORY CHECKS ===` (`- PASS` or receipt-backed advisory peer questions: `- **[In-Story Fact | Source: chunks/chunk_XXXX.md | Quote: \"<verbatim substring>\"]** ...` / `- **[External Canon | Source: search_web(\"<query>\") | Work: ...]** ...`)"
+          , "3. Once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice and no tool calls (do not call `send_message` or re-read files)."
           ]
   TIO.writeFile factPromptPath factPromptText
   pure factPromptPath
@@ -444,6 +482,7 @@ writeCurrentCriticPromptFile sessionDir st = do
       curPadTxt = T.pack curPad
       totalChunks = stTotalChunks st
       entryPath = absSession </> "entries" </> ("chunk_" ++ curPad ++ ".md")
+      criticRespPath = absSession </> "current_critic_response.md"
       linterLines =
         if null (stPendingLinterWarnings st)
           then ["- *(None triggered.)*"]
@@ -460,6 +499,7 @@ writeCurrentCriticPromptFile sessionDir st = do
           , "- Current Story Chunk (`chunks/chunk_" <> curPadTxt <> ".md` — mandatory read): " <> T.pack (absSession </> "current_chunk.md")
           , "- Recorded Commentary Entry (mandatory read): " <> T.pack entryPath
           , "- Updated Reader Memory File (mandatory read): " <> T.pack (absSession </> "memory.md")
+          , "- Output Response File (mandatory write via `write_file` with `Overwrite: true`): " <> T.pack criticRespPath
           , "- Active Reader Persona: " <> expandPersonaPreset (stPersona st)
           , ""
           , "## Deterministic Style Linter Hits (`LetsRead`)"
@@ -467,7 +507,7 @@ writeCurrentCriticPromptFile sessionDir st = do
             ++ linterLines
             ++ [ ""
                , "## Turn Output Contract"
-               , "Read `current_chunk.md`, `entries/chunk_" <> curPadTxt <> ".md`, and `memory.md`, and output `=== PERSONA & STYLE CRITIQUE ===` (`~100-150 words`) with the three required bullets: `- **[Persona & Lens]**`, `- **[What Worked Well]**`, and `- **[Where the Voice Drifted or Felt Formulaic]**`."
+               , "Read `current_chunk.md`, `entries/chunk_" <> curPadTxt <> ".md`, and `memory.md`, write `=== PERSONA & STYLE CRITIQUE ===` (`~100-150 words`) with the three required bullets (`- **[Persona & Lens]**`, `- **[What Worked Well]**`, and `- **[Where the Voice Drifted or Felt Formulaic]**`) to `" <> T.pack criticRespPath <> "` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice and no tool calls (do not call `send_message` or re-read files)."
                ]
   TIO.writeFile criticPromptPath criticPromptText
   pure criticPromptPath
@@ -478,6 +518,7 @@ writeCurrentTopicPromptFile sessionDir st = do
   let curIdx = stCurrentIndex st
       totalChunks = stTotalChunks st
       topicPromptPath = sessionDir </> "current_topic_prompt.md"
+      topicRespPath = absSession </> "current_topic_response.md"
       (vetted, unvetted) = partitionVettedTopics st
       fmtList [] = "- *(None)*"
       fmtList xs =
@@ -501,6 +542,7 @@ writeCurrentTopicPromptFile sessionDir st = do
               <> T.pack (absSession </> "entries" </> "by_topic.md")
               <> ", "
               <> T.pack (absSession </> "predictions" </> "by_topic.md")
+          , "- Output Response File (mandatory write via `write_file` with `Overwrite: true`): " <> T.pack topicRespPath
           , ""
           , "## Established / Previously Vetted Topics (" <> jsonInt (length vetted) <> ")"
           , fmtList vetted
@@ -509,7 +551,7 @@ writeCurrentTopicPromptFile sessionDir st = do
           , fmtList unvetted
           , ""
           , "## Turn Output Contract"
-          , "Read `memory.md` (and any `by_topic.md` index if needed) and output `=== TOPIC MERGES ===` with `- <Canonical Topic> <= <Alias 1>, <Alias 2>` for any synonymous or overly narrow one-off tags (or `- NONE` if all new topics should remain distinct)."
+          , "Read `memory.md` (and any `by_topic.md` index if needed), write `=== TOPIC MERGES ===` with `- <Canonical Topic> <= <Alias 1>, <Alias 2>` for any synonymous or overly narrow one-off tags (or `- NONE` if all new topics should remain distinct) to `" <> T.pack topicRespPath <> "` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice and no tool calls (do not call `send_message` or re-read files)."
           ]
   TIO.writeFile topicPromptPath topicPromptText
   pure topicPromptPath
@@ -522,6 +564,7 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
       totalChunks = stTotalChunks st
       questionsPath = sessionDir </> "current_fact_check_questions.md"
       discPromptPath = sessionDir </> "current_discussion_prompt.md"
+      discRespPath = absSession </> "current_discussion_response.md"
       questionsContent = T.unlines peerQueries
       discPromptText =
         T.unlines $
@@ -534,6 +577,7 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
           , "- Current Story Chunk (`chunks/chunk_" <> curPad <> ".md`): " <> T.pack (absSession </> "current_chunk.md")
           , "- Reader Memory File: " <> T.pack (absSession </> "memory.md")
           , "- Unlocked Story Chunks & Indices (`chunks/by_chronology.md` & `chunks/by_topic.md` for `read_file` verification): " <> T.pack (absSession </> "chunks")
+          , "- Output Response File (mandatory write via `write_file` with `Overwrite: true`): " <> T.pack discRespPath
           , "- Active Persona: " <> expandPersonaPreset (stPersona st)
           , ""
           , "## Fact-Check Peer Query (Unspoiled AI Peer — Verify Against Primary Source!)"
@@ -543,7 +587,8 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
             ++ [ ""
                , "## Turn Output Contract"
                , "1. Perform your own independent verification first by calling `read_file` on the cited `<session_dir>/chunks/chunk_XXXX.md` (or `current_chunk.md`) and/or calling `search_web` with a neutral query."
-               , "2. Reply in character under `=== COMMENTARY ===` (conceding if your check confirms a misread, or holding your ground with primary-source quotes if your original reading/joke/AU baseline was right) and include `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary>` (plus `=== UPDATED MEMORY ===` and/or `=== PREDICTION UPDATES ===` for `[Predicted Chunk " <> curPad <> "]` if any records need correction)."
+               , "2. Write your in-character reply under `=== COMMENTARY ===` (conceding if your check confirms a misread, or holding your ground with primary-source quotes if your original reading/joke/AU baseline was right) and include `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary>` (plus `=== UPDATED MEMORY ===` and/or `=== PREDICTION UPDATES ===` for `[Predicted Chunk " <> curPad <> "]` if any records need correction) to `" <> T.pack discRespPath <> "` via `write_file` (`Overwrite: true`)."
+               , "3. Once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice and no tool calls (do not call `send_message` or re-read files)."
                ]
   TIO.writeFile questionsPath questionsContent
   TIO.writeFile discPromptPath discPromptText
@@ -557,6 +602,7 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
       totalChunks = stTotalChunks st
       userMsgPath = sessionDir </> "last_user_message.md"
       discPromptPath = sessionDir </> "current_discussion_prompt.md"
+      discRespPath = absSession </> "current_discussion_response.md"
       discPromptText =
         T.unlines
           [ "The user has replied with a comment/question on your Let's Read thread (at Chunk "
@@ -568,6 +614,7 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
           , "- Current Story Chunk (`chunks/chunk_" <> curPad <> ".md`): " <> T.pack (absSession </> "current_chunk.md")
           , "- Reader Memory File: " <> T.pack (absSession </> "memory.md")
           , "- Unlocked Story Chunks & Indices (`chunks/by_chronology.md` & `chunks/by_topic.md` for `read_file` verification): " <> T.pack (absSession </> "chunks")
+          , "- Output Response File (mandatory write via `write_file` with `Overwrite: true`): " <> T.pack discRespPath
           , "- Active Persona: " <> expandPersonaPreset (stPersona st)
           , ""
           , "## User Message"
@@ -576,7 +623,8 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
           , ""
           , "## Turn Output Contract"
           , "1. If the user's message references a specific detail from an earlier chunk or external canon, verify it via `read_file` on `chunks/chunk_XXXX.md` or neutral `search_web` first."
-          , "2. Output `=== COMMENTARY ===` (your full in-character reply) and `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of the discussion exchange>`. If the exchange updates a factual/timeline correction, craft/style directive, running gag, character status, or Chunk " <> curPad <> "'s prediction, also append `=== UPDATED MEMORY ===` (the 4 narrative sections) and/or `=== PREDICTION UPDATES ===`."
+          , "2. Write `=== COMMENTARY ===` (your full in-character reply) and `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of the discussion exchange>` (plus `=== UPDATED MEMORY ===` and/or `=== PREDICTION UPDATES ===` if the exchange updates a factual/timeline correction, craft/style directive, running gag, character status, or Chunk " <> curPad <> "'s prediction) to `" <> T.pack discRespPath <> "` via `write_file` (`Overwrite: true`)."
+          , "3. Once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice and no tool calls (do not call `send_message` or re-read files)."
           ]
   TIO.writeFile userMsgPath (T.strip userMsg <> "\n")
   TIO.writeFile discPromptPath discPromptText

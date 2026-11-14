@@ -97,6 +97,7 @@ import LetsRead.Verification
   , loadBannedJargonIO
   , processCriticFeedback
   )
+import Control.Concurrent (threadDelay)
 import System.Directory
   ( canonicalizePath
   , createDirectoryIfMissing
@@ -108,6 +109,70 @@ import System.Exit (die, exitSuccess)
 import System.FilePath (takeFileName, (</>))
 import System.IO (hPutStrLn, stderr)
 import System.Posix.Files (setFileCreationMask)
+
+-- ---------------------------------------------------------------------------
+-- Response File & Cleanup Helpers
+-- ---------------------------------------------------------------------------
+
+removeFileIfExists :: FilePath -> IO ()
+removeFileIfExists p = do
+  exists <- doesFileExist p
+  when exists (removeFile p `catch` (\(_ :: IOException) -> pure ()))
+
+readNonEmptyFileIfExists :: FilePath -> IO (Maybe T.Text)
+readNonEmptyFileIfExists p = do
+  exists <- doesFileExist p
+  if not exists
+    then pure Nothing
+    else do
+      raw <- readTextFileSafe p
+      if T.null (T.strip raw)
+        then pure Nothing
+        else pure (Just raw)
+
+firstNonEmptyFile :: [FilePath] -> IO (Maybe T.Text)
+firstNonEmptyFile [] = pure Nothing
+firstNonEmptyFile (p : ps) = do
+  mTxt <- readNonEmptyFileIfExists p
+  case mTxt of
+    Just t -> pure (Just t)
+    Nothing -> firstNonEmptyFile ps
+
+resolveOptionalResponse :: Maybe FilePath -> [FilePath] -> Maybe FilePath -> String -> IO (Maybe T.Text)
+resolveOptionalResponse mExplicit defaultFiles mLog label =
+  case mExplicit of
+    Just respPath -> do
+      exists <- doesFileExist respPath
+      unless exists $ die ("Error: " ++ label ++ " response file not found: " ++ respPath)
+      raw <- readTextFileSafe respPath
+      pure (Just raw)
+    Nothing -> poll 40
+  where
+    tryOnce = do
+      mDef <- firstNonEmptyFile defaultFiles
+      case mDef of
+        Just raw -> pure (Just raw)
+        Nothing ->
+          case mLog of
+            Just logPath -> extractSubagentLogResponse logPath
+            Nothing -> pure Nothing
+    poll :: Int -> IO (Maybe T.Text)
+    poll retriesLeft = do
+      mRes <- tryOnce
+      case mRes of
+        Just raw -> pure (Just raw)
+        Nothing
+          | retriesLeft <= 0 -> pure Nothing
+          | otherwise -> do
+              threadDelay 250000
+              poll (retriesLeft - 1)
+
+resolveRequiredResponse :: Maybe FilePath -> [FilePath] -> Maybe FilePath -> String -> String -> IO T.Text
+resolveRequiredResponse mExplicit defaultFiles mLog label errMsg = do
+  mRes <- resolveOptionalResponse mExplicit defaultFiles mLog label
+  case mRes of
+    Just raw -> pure raw
+    Nothing -> die errMsg
 
 -- ---------------------------------------------------------------------------
 -- CLI Command Handlers
@@ -237,7 +302,7 @@ cmdNext rawSessionDir forceFlag = do
         ++ show curIdx
         ++ " has a pending Fact-Check Peer Query in "
         ++ discPromptPath
-        ++ ". Send current_discussion_prompt.md to blind-reader via send_message and record the response with 'lets-read discuss --session <dir> --subagent-log <reader_log>' before running 'next' (or pass --force to override)."
+        ++ ". Notify blind-reader via send_message to read current_discussion_prompt.md and write current_discussion_response.md, then record the response with 'lets-read discuss --session <dir> --subagent-log <reader_log>' before running 'next' (or pass --force to override)."
 
   when forceFlag $ do
     when hasFactCheckPending $ do
@@ -246,6 +311,11 @@ cmdNext rawSessionDir forceFlag = do
       when dExists (removeFile discPromptPath `catch` (\(_ :: IOException) -> pure ()))
     tExists <- doesFileExist topicPromptPath
     when tExists (removeFile topicPromptPath `catch` (\(_ :: IOException) -> pure ()))
+
+  let readerRespPath = sessionDir </> "current_reader_response.md"
+      discRespPath = sessionDir </> "current_discussion_response.md"
+  removeFileIfExists readerRespPath
+  removeFileIfExists discRespPath
 
   if curIdx >= totalChunks
     then do
@@ -260,13 +330,14 @@ cmdNext rawSessionDir forceFlag = do
               , ("current_index", jsonInt curIdx)
               , ("total_chunks", jsonInt totalChunks)
               , ("subagent_prompt_file", jsonStr (T.pack promptFile))
+              , ("reader_response_file", jsonStr (T.pack readerRespPath))
               , ("hall_of_fame_file", jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")))
               , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
               , ("entries_dir", jsonStr (T.pack (sessionDir </> "entries")))
               , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
               , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
               , ("orchestrator_rule", jsonStr orchestratorRuleText)
-              , ("next_step_hint", jsonStr "Pass subagent_prompt_file to blind-reader for the Final Wrapup & Retrospective, then record with 'lets-read record --session <dir> --subagent-log <reader_log>'.")
+              , ("next_step_hint", jsonStr "Send a 1-line notification to blind-reader to read subagent_prompt_file and write reader_response_file for the Final Wrapup & Retrospective, then record with 'lets-read record --session <dir> --subagent-log <reader_log>'.")
               ]
         else
           TIO.putStrLn $
@@ -320,6 +391,7 @@ cmdNext rawSessionDir forceFlag = do
           , ("active_predictions_count", jsonInt activeCount)
           , ("current_chunk_file", jsonStr (T.pack chunkFile))
           , ("subagent_prompt_file", jsonStr (T.pack promptFile))
+          , ("reader_response_file", jsonStr (T.pack readerRespPath))
           , ("chunk_archive_file", jsonStr (T.pack archiveChunkFile))
           , ("chunks_dir", jsonStr (T.pack chunksDir))
           , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
@@ -340,26 +412,21 @@ cmdRecord opts = do
     die "Error: No chunk is currently unlocked. Run 'next' first."
 
   (_, commText, parsedSummaries, mParsedPredUpdates, mParsedMem) <-
-    case recSubagentLog opts of
-      Just logPath -> do
-        raw <- extractSubagentLogResponse logPath
+    case (recResponseFile opts, recCommentaryFile opts) of
+      (Nothing, Just commPath) -> do
+        exists <- doesFileExist commPath
+        unless exists $ die ("Error: Commentary file not found: " ++ commPath)
+        raw <- readTextFileSafe commPath
+        pure (Nothing, T.strip raw, emptyParsedChunkSummaries, Nothing, Nothing)
+      _ -> do
+        raw <-
+          resolveRequiredResponse
+            (recResponseFile opts)
+            [sessionDir </> "current_reader_response.md"]
+            (recSubagentLog opts)
+            "Reader"
+            "Error: Provide --response-file, --subagent-log, --commentary-file, or write current_reader_response.md."
         pure (parseCombinedResponse raw)
-      Nothing ->
-        case recResponseFile opts of
-          Just respPath -> do
-            exists <- doesFileExist respPath
-            unless exists $ die ("Error: Response file not found: " ++ respPath)
-            raw <- readTextFileSafe respPath
-            pure (parseCombinedResponse raw)
-          Nothing ->
-            case recCommentaryFile opts of
-              Just commPath -> do
-                exists <- doesFileExist commPath
-                unless exists $ die ("Error: Commentary file not found: " ++ commPath)
-                raw <- readTextFileSafe commPath
-                pure (Nothing, T.strip raw, emptyParsedChunkSummaries, Nothing, Nothing)
-              Nothing ->
-                die "Error: Provide --response-file, --subagent-log, or --commentary-file."
 
   when (T.null commText) $
     die "Error: Commentary content is empty."
@@ -559,6 +626,17 @@ cmdRecord opts = do
                 }
           curateTopics = shouldCurateTopics st'
           topicPromptPath = sessionDir </> "current_topic_prompt.md"
+          judgeRespPath = sessionDir </> "current_judge_response.md"
+          factRespPath = sessionDir </> "current_fact_check_response.md"
+          criticRespPath = sessionDir </> "current_critic_response.md"
+          topicRespPath = sessionDir </> "current_topic_response.md"
+          discRespPath = sessionDir </> "current_discussion_response.md"
+
+      removeFileIfExists judgeRespPath
+      removeFileIfExists factRespPath
+      removeFileIfExists criticRespPath
+      removeFileIfExists topicRespPath
+      removeFileIfExists discRespPath
 
       judgePromptFile <- writeCurrentJudgePromptFile sessionDir st'
       factCheckPromptFile <- writeCurrentFactCheckPromptFile sessionDir st' storySumTxt entrySumTxt
@@ -579,8 +657,8 @@ cmdRecord opts = do
           rotateJudge = curIdx > 1 && (curIdx - 1) `mod` 11 == 0
           nextHint =
             if curateTopics
-              then "Send judge_prompt_file to prediction-judge, fact_check_prompt_file to fact-checker, critic_prompt_file to commentary-critic, and topic_prompt_file to topic-curator in parallel, then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log> --topic-log <topic_log>'."
-              else "Send judge_prompt_file to prediction-judge, fact_check_prompt_file to fact-checker, and critic_prompt_file to commentary-critic in parallel, then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log>'."
+              then "Notify prediction-judge (judge_prompt_file), fact-checker (fact_check_prompt_file), commentary-critic (critic_prompt_file), and topic-curator (topic_prompt_file) in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log> --topic-log <topic_log>'."
+              else "Notify prediction-judge (judge_prompt_file), fact-checker (fact_check_prompt_file), and commentary-critic (critic_prompt_file) in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log>'."
       TIO.putStrLn $
         jsonObject
           [ ("status", jsonStr "awaiting_judge")
@@ -592,10 +670,14 @@ cmdRecord opts = do
           , ("log_file", jsonStr (T.pack logPath))
           , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
           , ("judge_prompt_file", jsonStr (T.pack judgePromptFile))
+          , ("judge_response_file", jsonStr (T.pack judgeRespPath))
           , ("fact_check_prompt_file", jsonStr (T.pack factCheckPromptFile))
+          , ("fact_check_response_file", jsonStr (T.pack factRespPath))
           , ("critic_prompt_file", jsonStr (T.pack criticPromptFile))
+          , ("critic_response_file", jsonStr (T.pack criticRespPath))
           , ("topic_curation_needed", jsonBool curateTopics)
           , ("topic_prompt_file", if curateTopics then jsonStr (T.pack topicPromptPath) else "null")
+          , ("topic_response_file", if curateTopics then jsonStr (T.pack topicRespPath) else "null")
           , ("rotate_judge_recommended", jsonBool rotateJudge)
           , ("rotate_fact_checker_recommended", jsonBool rotateFactChecker)
           , ("rotate_critic_recommended", jsonBool rotateCritic)
@@ -624,67 +706,55 @@ cmdJudge opts = do
     die "Error: Current chunk commentary has not been recorded yet. Run 'record' before 'judge'."
 
   rawJudge <-
-    case jdgSubagentLog opts of
-      Just logPath -> extractSubagentLogResponse logPath
-      Nothing ->
-        case jdgResponseFile opts of
-          Just respPath -> do
-            exists <- doesFileExist respPath
-            unless exists $ die ("Error: Judge response file not found: " ++ respPath)
-            readTextFileSafe respPath
-          Nothing ->
-            die "Error: Provide --subagent-log or --response-file for 'judge'."
+    resolveRequiredResponse
+      (jdgResponseFile opts)
+      [sessionDir </> "current_judge_response.md"]
+      (jdgSubagentLog opts)
+      "Judge"
+      "Error: Provide --response-file, --subagent-log, or write current_judge_response.md for 'judge'."
 
-  (mRawFactCheck, hasFactCheckSearchWeb) <-
+  rawFactCheck <-
+    resolveRequiredResponse
+      (jdgFactCheckResponseFile opts)
+      [sessionDir </> "current_fact_check_response.md"]
+      (jdgFactCheckLog opts)
+      "Fact-check"
+      "Error: Provide --fact-check-response-file, --fact-check-log, or write current_fact_check_response.md for 'judge'."
+  mFactCheckSearchWeb <-
     case jdgFactCheckLog opts of
-      Just fLogPath -> do
-        rawF <- extractSubagentLogResponse fLogPath
-        usedSearch <- checkSubagentLogUsedSearchWeb fLogPath
-        pure (Just rawF, usedSearch)
-      Nothing ->
-        case jdgFactCheckResponseFile opts of
-          Just fRespPath -> do
-            exists <- doesFileExist fRespPath
-            unless exists $ die ("Error: Fact-check response file not found: " ++ fRespPath)
-            rawF <- readTextFileSafe fRespPath
-            pure (Just rawF, True)
-          Nothing -> pure (Nothing, False)
+      Just fLogPath -> checkSubagentLogUsedSearchWeb fLogPath
+      Nothing -> pure Nothing
+  let hasFactCheckSearchWeb = fromMaybe True mFactCheckSearchWeb
 
-  mRawCritic <-
-    case jdgCriticLog opts of
-      Just cLogPath -> do
-        rawC <- extractSubagentLogResponse cLogPath
-        pure (Just rawC)
-      Nothing ->
-        case jdgCriticResponseFile opts of
-          Just cRespPath -> do
-            exists <- doesFileExist cRespPath
-            unless exists $ die ("Error: Critic response file not found: " ++ cRespPath)
-            rawC <- readTextFileSafe cRespPath
-            pure (Just rawC)
-          Nothing -> pure Nothing
+  rawCritic <-
+    resolveRequiredResponse
+      (jdgCriticResponseFile opts)
+      [sessionDir </> "current_critic_response.md"]
+      (jdgCriticLog opts)
+      "Critic"
+      "Error: Provide --critic-response-file, --critic-log, or write current_critic_response.md for 'judge'."
 
   let topicPromptPath = sessionDir </> "current_topic_prompt.md"
   hasTopicPrompt <- doesFileExist topicPromptPath
   mRawTopic <-
-    case jdgTopicLog opts of
-      Just tLogPath -> do
-        rawT <- extractSubagentLogResponse tLogPath
-        pure (Just rawT)
-      Nothing ->
-        case jdgTopicResponseFile opts of
-          Just tRespPath -> do
-            exists <- doesFileExist tRespPath
-            unless exists $ die ("Error: Topic curator response file not found: " ++ tRespPath)
-            rawT <- readTextFileSafe tRespPath
-            pure (Just rawT)
+    if hasTopicPrompt || isJust (jdgTopicResponseFile opts) || isJust (jdgTopicLog opts)
+      then do
+        mT <-
+          resolveOptionalResponse
+            (jdgTopicResponseFile opts)
+            [sessionDir </> "current_topic_response.md"]
+            (jdgTopicLog opts)
+            "Topic curator"
+        case mT of
+          Just rawT -> pure (Just rawT)
           Nothing ->
             if hasTopicPrompt
-              then die "Error: Chunk triggered topic_curation_needed (current_topic_prompt.md exists). Provide --topic-log or --topic-response-file for 'judge'."
+              then die "Error: Chunk triggered topic_curation_needed (current_topic_prompt.md exists). Provide --topic-log, --topic-response-file, or write current_topic_response.md for 'judge'."
               else pure Nothing
+      else pure Nothing
 
   (criticFeedbackWritten, criticNotesCount, factCheckPending, factQueriesCount, rejectedCriticQuotesCount) <-
-    processCriticFeedback sessionDir st curIdx hasFactCheckSearchWeb (stPendingLinterWarnings st) mRawFactCheck mRawCritic
+    processCriticFeedback sessionDir st curIdx hasFactCheckSearchWeb (stPendingLinterWarnings st) (Just rawFactCheck) (Just rawCritic)
 
   let judgeSec = extractJudgeSection rawJudge
       (preds', judgeAuditBlocks, judgeSummaryLines) =
@@ -725,6 +795,8 @@ cmdJudge opts = do
   when hasTopicPrompt $
     removeFile topicPromptPath `catch` (\(_ :: IOException) -> pure ())
 
+  removeFileIfExists (sessionDir </> "current_discussion_response.md")
+
   (needsCompaction, curLines, curBytes) <- syncMemoryAndArchives sessionDir st'
   logPath <- rebuildMasterLog sessionDir st'
   saveState sessionDir st'
@@ -739,7 +811,7 @@ cmdJudge opts = do
               <> jsonInt factQueriesCount
               <> " peer verification query(ies) on Chunk "
               <> jsonInt curIdx
-              <> "! Read <session_dir>/current_discussion_prompt.md and send it via send_message to the active blind-reader subagent so it can independently verify with read_file/search_web and reply, then record the response using 'lets-read discuss --session <dir> --subagent-log <reader_log>' BEFORE running 'next'."
+              <> "! Send a 1-line notification via send_message to the active blind-reader subagent to read <session_dir>/current_discussion_prompt.md and write <session_dir>/current_discussion_response.md, then record the response using 'lets-read discuss --session <dir> --subagent-log <reader_log>' BEFORE running 'next'."
         | storyChunksDone && not hasWrapup =
             "All story chunks have been judged! Run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round for blind-reader."
         | otherwise =
@@ -756,6 +828,7 @@ cmdJudge opts = do
       , ("fact_check_discussion_pending", jsonBool factCheckPending)
       , ("fact_check_questions_count", jsonInt factQueriesCount)
       , ("discussion_prompt_file", if factCheckPending then jsonStr (T.pack (sessionDir </> "current_discussion_prompt.md")) else "null")
+      , ("discussion_response_file", if factCheckPending then jsonStr (T.pack (sessionDir </> "current_discussion_response.md")) else "null")
       , ("fact_check_questions_file", if factCheckPending then jsonStr (T.pack (sessionDir </> "current_fact_check_questions.md")) else "null")
       , ("entry_file", jsonStr (T.pack entryFile))
       , ("log_file", jsonStr (T.pack logPath))
@@ -776,7 +849,7 @@ cmdJudge opts = do
       , ("curated_memory_bytes", jsonInt curBytes)
       , ("orchestrator_rule", jsonStr orchestratorRuleText)
       , ("next_step_hint", jsonStr nextHint)
-      , ("discussion_command_hint", jsonStr "If fact_check_discussion_pending is true, send discussion_prompt_file to blind-reader and run 'lets-read discuss --session <dir> --subagent-log <reader_log>'. If the user replies with comments or questions, run 'lets-read discuss-prompt --session <dir> --user-message \"...\"' (or --user-file), send the generated discussion_prompt_file to blind-reader, and record with 'lets-read discuss'.")
+      , ("discussion_command_hint", jsonStr "If fact_check_discussion_pending is true, notify blind-reader to read discussion_prompt_file and write discussion_response_file, then run 'lets-read discuss --session <dir> --subagent-log <reader_log>'. If the user replies with comments or questions, run 'lets-read discuss-prompt --session <dir> --user-message \"...\"' (or --user-file), notify blind-reader to read discussion_prompt_file, and record with 'lets-read discuss'.")
       ]
 
 cmdDiscussPrompt :: DiscussPromptOptions -> IO ()
@@ -804,15 +877,17 @@ cmdDiscussPrompt opts = do
           Nothing ->
             die "Error: Provide --user-message <str> or --user-file <path> for 'discuss-prompt'."
 
+  removeFileIfExists (sessionDir </> "current_discussion_response.md")
   (userFile, promptFile) <- writeUserDiscussionPromptFile sessionDir st userMsg
   TIO.putStrLn $
     jsonObject
       [ ("status", jsonStr "discussion_prompt_ready")
       , ("chunk_index", jsonInt curIdx)
       , ("discussion_prompt_file", jsonStr (T.pack promptFile))
+      , ("discussion_response_file", jsonStr (T.pack (sessionDir </> "current_discussion_response.md")))
       , ("user_file", jsonStr (T.pack userFile))
       , ("orchestrator_rule", jsonStr orchestratorRuleText)
-      , ("next_step_hint", jsonStr "Read discussion_prompt_file and pass its exact text to blind-reader via send_message, then record the reply with 'lets-read discuss --session <dir> --user-file <user_file> --subagent-log <reader_log>'.")
+      , ("next_step_hint", jsonStr "Send a 1-line notification to blind-reader via send_message to read discussion_prompt_file and write discussion_response_file, then record the reply with 'lets-read discuss --session <dir> --user-file <user_file> --subagent-log <reader_log>'.")
       ]
 
 cmdDiscuss :: DiscussOptions -> IO ()
@@ -829,26 +904,21 @@ cmdDiscuss opts = do
     die "Error: Current chunk commentary has not been recorded yet. Run 'record' before 'discuss'."
 
   (mParsedUser, replyText, parsedSummaries, mParsedPredUpdates, mParsedMem) <-
-    case discSubagentLog opts of
-      Just logPath -> do
-        raw <- extractSubagentLogResponse logPath
+    case (discResponseFile opts, discCommentaryFile opts) of
+      (Nothing, Just commPath) -> do
+        exists <- doesFileExist commPath
+        unless exists $ die ("Error: Commentary file not found: " ++ commPath)
+        raw <- readTextFileSafe commPath
+        pure (Nothing, T.strip raw, emptyParsedChunkSummaries, Nothing, Nothing)
+      _ -> do
+        raw <-
+          resolveRequiredResponse
+            (discResponseFile opts)
+            [sessionDir </> "current_discussion_response.md"]
+            (discSubagentLog opts)
+            "Discussion"
+            "Error: Provide --response-file, --subagent-log, --commentary-file, or write current_discussion_response.md."
         pure (parseCombinedResponse raw)
-      Nothing ->
-        case discResponseFile opts of
-          Just respPath -> do
-            exists <- doesFileExist respPath
-            unless exists $ die ("Error: Response file not found: " ++ respPath)
-            raw <- readTextFileSafe respPath
-            pure (parseCombinedResponse raw)
-          Nothing ->
-            case discCommentaryFile opts of
-              Just commPath -> do
-                exists <- doesFileExist commPath
-                unless exists $ die ("Error: Commentary file not found: " ++ commPath)
-                raw <- readTextFileSafe commPath
-                pure (Nothing, T.strip raw, emptyParsedChunkSummaries, Nothing, Nothing)
-              Nothing ->
-                die "Error: Provide --response-file, --subagent-log, or --commentary-file."
 
   when (T.null replyText) $
     die "Error: Discussion reply content is empty."
@@ -967,8 +1037,12 @@ cmdDiscuss opts = do
   uExists <- doesFileExist defaultUserFilePath
   when (uExists && not isFactCheckDiscussion) $
     removeFile defaultUserFilePath `catch` (\(_ :: IOException) -> pure ())
+  removeFileIfExists (sessionDir </> "current_discussion_response.md")
 
-  usedVerifyTools <- maybe (pure False) checkSubagentLogUsedVerificationTools (discSubagentLog opts)
+  mUsedVerifyTools <-
+    case discSubagentLog opts of
+      Just logPath -> checkSubagentLogUsedVerificationTools logPath
+      Nothing -> pure Nothing
 
   let isWrapupTarget = hasWrapup && curIdx >= stTotalChunks st
       storyRecords' =
@@ -1054,7 +1128,7 @@ cmdDiscuss opts = do
       , ("chunk_index", jsonInt curIdx)
       , ("fact_check_discussion_resolved", jsonBool isFactCheckDiscussion)
       , ("fact_check_discussion_pending", jsonBool stillPending)
-      , ("reader_verified_with_tools", jsonBool usedVerifyTools)
+      , ("reader_verified_with_tools", maybe "null" jsonBool mUsedVerifyTools)
       , ("entry_file", jsonStr (T.pack entryFile))
       , ("log_file", jsonStr (T.pack logPath))
       , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))

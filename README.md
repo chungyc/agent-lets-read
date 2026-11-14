@@ -8,8 +8,9 @@ When you ask an AI assistant to liveblog a book normally, it either reads ahead
 in the file or draws on spoilers from its training data. This plugin prevents
 both by sealing the story inside an obfuscated archive controlled by a compiled
 Haskell gatekeeper and delegating the reading, prediction judging,
-fact-checking, editorial critique, and topic indexing to five isolated,
-read-only subagents.
+fact-checking, editorial critique, and topic indexing to five isolated
+subagents that exchange data through session files and use messages strictly as
+notifications.
 
 ## How It Works
 
