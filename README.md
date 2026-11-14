@@ -21,10 +21,10 @@ state, prediction scoreboards, and bounded multi-layer indices.
 
 ### Blind Reader ([blind-reader.md](./agents/blind-reader.md))
 
-Reads each newly unlocked passage (`current_chunk.md`) without access to future
-chapters or the source file. It reacts in character in the session's active
-persona, stakes one new falsifiable multi-chapter prediction per chunk, and
-maintains an evolving notebook (`memory.md`).
+Reads each newly unlocked passage without access to future chapters or the
+source file. It reacts in character in the session's active persona, stakes one
+new falsifiable multi-chapter prediction per chunk, and maintains an evolving
+notebook (`memory.md`).
 
 ### Prediction Judge ([prediction-judge.md](./agents/prediction-judge.md))
 
@@ -42,8 +42,8 @@ and respond in a peer discussion turn before the next chunk unlocks.
 ### Commentary Critic ([commentary-critic.md](./agents/commentary-critic.md))
 
 Reviews how well each entry inhabited the chosen persona and user style
-directives, writing concise editorial notes (`critic_feedback.md`) for the
-reader to apply on the next chunk.
+directives, writing concise editorial notes for the reader to apply on the next
+chunk.
 
 ### Topic Curator ([topic-curator.md](./agents/topic-curator.md))
 
@@ -58,9 +58,7 @@ The gatekeeper binary is compiled automatically on first use via
 
 - `bash`
 
-- GHC (Glasgow Haskell Compiler) with its standard boot packages (`base`,
-  `binary`, `bytestring`, `containers`, `directory`, `filepath`, `process`,
-  `text`) and `zlib`
+- GHC (Glasgow Haskell Compiler) and the `zlib` Haskell package
 
 ## Installation
 
