@@ -2,8 +2,9 @@
 set -euo pipefail
 umask 022
 
-SCRIPTS_DIR=".agents/skills/lets-read/scripts"
-BIN_DIR=".agents/skills/lets-read/.bin"
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(dirname "$SCRIPTS_DIR")"
+BIN_DIR="$SKILL_DIR/.bin"
 BIN_PATH="$BIN_DIR/lets-read"
 
 need_build=0

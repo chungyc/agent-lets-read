@@ -472,7 +472,7 @@ stripFileUriPrefix p
   | "file://" `isPrefixOf` p = drop 7 p
   | otherwise = p
 
--- | Locate a file inside the skill directory (.agents/skills/lets-read/<relPath>)
+-- | Locate a file inside the skill directory (skills/lets-read/<relPath>)
 -- using the compiled executable's location (.bin/lets-read -> parent directory),
 -- falling back to the relative workspace path if run via runghc.
 resolveSkillResourcePath :: FilePath -> IO FilePath
@@ -490,4 +490,4 @@ resolveSkillResourcePath relPath = do
       else doesFileExist exeCandidate
   if hasExeCandidate
     then pure exeCandidate
-    else pure (".agents/skills/lets-read" </> relPath)
+    else pure ("skills/lets-read" </> relPath)

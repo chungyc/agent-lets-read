@@ -8,6 +8,10 @@ description: >-
   commentary-critic subagent, and an on-demand topic-curator subagent. Use this
   skill whenever the user asks for a Let's Read, liveblog reaction, unspoiled
   first-time read, or incremental commentary on a story or book.
+compatibility: >-
+  Requires bash and GHC (Glasgow Haskell Compiler) with standard boot packages
+  (base, binary, bytestring, containers, directory, filepath, process, text) and
+  zlib to compile the gatekeeper binary.
 ---
 
 # Let's Read Skill (Spoiler-Free Architecture)
@@ -55,10 +59,13 @@ sandboxed, read-only subagents:
    - Always let `lets-read init` use its built-in default unless the user
      explicitly asks for a custom chunk size.
 4. **Strict Subagent Isolation (`<session_dir>` Hermetic Sandbox)**:
-   - Define `blind-reader`, `prediction-judge`, `fact-checker`,
-     `commentary-critic`, and `topic-curator` with `EnableWriteTools: false`,
-     `EnableSubagentTools: false`, and `EnableMCPTools: false` using the agent
-     definition files in [resources/agents/](./resources/agents/).
+   - The five subagents (`blind-reader`, `prediction-judge`, `fact-checker`,
+     `commentary-critic`, and `topic-curator`) are defined in [agents/](../../agents/)
+     with `enable_write_tools: false`, `enable_subagent_tools: false`, and
+     `enable_mcp_tools: false`. When the `lets-read` plugin is installed and
+     enabled, they are registered automatically; if running from an uninstalled
+     checkout where they are not yet listed in `<subagents>`, define them via
+     `define_subagent` using the files in [agents/](../../agents/).
    - Subagents only read files inside `<session_dir>` and may use `search_web`
      solely for neutral background lore or canon context (never for the specific
      story being read).
@@ -78,25 +85,30 @@ sandboxed, read-only subagents:
      chat, prefix your message with a clear third-person host banner (e.g.,
      `> **Let's Read Host** — Relaying from \`blind-reader\` (Chunk XXXX/YYYY):`).
 6. **NEVER Run `python`, `python3`, or Ad-Hoc Shell Scripts**:
-   - `.bin/lets-read` handles all transcript parsing, delimiter splitting,
-     receipt verification, indexing, and state management natively in compiled
-     Haskell. Use strictly `.agents/skills/lets-read/scripts/prepare.sh`,
-     `.agents/skills/lets-read/.bin/lets-read` (`init`, `next`, `record`,
-     `judge`, `discuss-prompt`, `discuss`, `status`), `read_file`, `write_file`,
-     and `manage_subagents`.
+   - `<skill_dir>/.bin/lets-read` (where `<skill_dir>` is the directory
+     containing this `SKILL.md` file) handles all transcript parsing, delimiter
+     splitting, receipt verification, indexing, and state management natively in
+     compiled Haskell. Use strictly `<skill_dir>/scripts/prepare.sh`,
+     `<skill_dir>/.bin/lets-read` (`init`, `next`, `record`, `judge`,
+     `discuss-prompt`, `discuss`, `status`), `read_file`, `write_file`, and
+     `manage_subagents`.
 
 ---
 
 ## Directory & Resource Layout
 
+Let `<skill_dir>` denote the directory containing this `SKILL.md` file (e.g.,
+`skills/lets-read` in the plugin repository or `<plugin_dir>/skills/lets-read`
+when installed):
+
 - **Gatekeeper Entrypoint & CLI**: [LetsRead.hs](./scripts/LetsRead.hs) (with submodules under [scripts/LetsRead/](./scripts/LetsRead/))
 - **Gatekeeper Build Script**: [prepare.sh](./scripts/prepare.sh)
-- **Subagent Definitions** (YAML frontmatter + system prompt):
-  - **Blind Reader**: [blind-reader.md](./resources/agents/blind-reader.md)
-  - **Prediction Judge**: [prediction-judge.md](./resources/agents/prediction-judge.md)
-  - **Fact-Checker**: [fact-checker.md](./resources/agents/fact-checker.md)
-  - **Commentary Critic**: [commentary-critic.md](./resources/agents/commentary-critic.md)
-  - **Topic Curator**: [topic-curator.md](./resources/agents/topic-curator.md)
+- **Subagent Definitions** (bundled in plugin [agents/](../../agents/)):
+  - **Blind Reader**: [blind-reader.md](../../agents/blind-reader.md)
+  - **Prediction Judge**: [prediction-judge.md](../../agents/prediction-judge.md)
+  - **Fact-Checker**: [fact-checker.md](../../agents/fact-checker.md)
+  - **Commentary Critic**: [commentary-critic.md](../../agents/commentary-critic.md)
+  - **Topic Curator**: [topic-curator.md](../../agents/topic-curator.md)
 - **Final Wrapup Prompt Template**: [wrapup_prompt_template.md](./resources/wrapup_prompt_template.md)
 - **Banned Jargon Linter List**: [banned_jargon.txt](./resources/banned_jargon.txt)
 - **Persona Presets**: [personas.md](./references/personas.md)
@@ -127,33 +139,36 @@ Read [personas.md](./references/personas.md) if a custom tone or preset was requ
 
 1. **Prepare the Gatekeeper Binary**:
    Run [prepare.sh](./scripts/prepare.sh) as a standalone command to compile
-   `.agents/skills/lets-read/.bin/lets-read` if missing or out of date:
+   `<skill_dir>/.bin/lets-read` if missing or out of date:
 
    ```bash
-   .agents/skills/lets-read/scripts/prepare.sh
+   <skill_dir>/scripts/prepare.sh
    ```
 
 2. **Initialize the Session**:
-   Run `.agents/skills/lets-read/.bin/lets-read init` as a separate command:
+   Run `<skill_dir>/.bin/lets-read init` as a separate command:
 
    ```bash
-   .agents/skills/lets-read/.bin/lets-read init "<source_story_path>" \
+   <skill_dir>/.bin/lets-read init "<source_story_path>" \
      --session "<session_dir>" \
      --persona "<chosen_persona>"
    ```
 
-### Step 3: Define the Five Subagents
+### Step 3: Verify the Five Subagents Are Available
 
-Read each agent file under [resources/agents/](./resources/agents/) and call
-`define_subagent` using the metadata in its YAML frontmatter (`name`,
-`description`, `enable_write_tools: false`, `enable_subagent_tools: false`,
-`enable_mcp_tools: false`) and the Markdown body as `SystemPrompt`:
+When the `lets-read` plugin is installed and enabled, the five subagents are
+already registered in `<subagents>`:
 
-1. [blind-reader.md](./resources/agents/blind-reader.md) (`Name: "blind-reader"`, `Role: "Blind Story Reader"`)
-2. [prediction-judge.md](./resources/agents/prediction-judge.md) (`Name: "prediction-judge"`, `Role: "Impartial Prediction Judge"`)
-3. [fact-checker.md](./resources/agents/fact-checker.md) (`Name: "fact-checker"`, `Role: "Commentary Fact-Checker"`)
-4. [commentary-critic.md](./resources/agents/commentary-critic.md) (`Name: "commentary-critic"`, `Role: "Commentary Critic"`)
-5. [topic-curator.md](./resources/agents/topic-curator.md) (`Name: "topic-curator"`, `Role: "Topic Index Curator"`)
+1. [blind-reader.md](../../agents/blind-reader.md) (`Name: "blind-reader"`, `Role: "Blind Story Reader"`)
+2. [prediction-judge.md](../../agents/prediction-judge.md) (`Name: "prediction-judge"`, `Role: "Impartial Prediction Judge"`)
+3. [fact-checker.md](../../agents/fact-checker.md) (`Name: "fact-checker"`, `Role: "Commentary Fact-Checker"`)
+4. [commentary-critic.md](../../agents/commentary-critic.md) (`Name: "commentary-critic"`, `Role: "Commentary Critic"`)
+5. [topic-curator.md](../../agents/topic-curator.md) (`Name: "topic-curator"`, `Role: "Topic Index Curator"`)
+
+*(Fallback for uninstalled checkouts: if those five subagents do not yet appear
+in `<subagents>`, read each file under [agents/](../../agents/) and call
+`define_subagent` with `EnableWriteTools: false`, `EnableSubagentTools: false`,
+and `EnableMCPTools: false`.)*
 
 ### Step 4: Per-Chunk Execution Loop (`next` → `record` → `judge` → optional `discuss`)
 
@@ -162,7 +177,7 @@ For each chunk to be read:
 1. **Unlock the Next Chunk (`next`)**:
 
    ```bash
-   .agents/skills/lets-read/.bin/lets-read next --session "<session_dir>"
+   <skill_dir>/.bin/lets-read next --session "<session_dir>"
    ```
 
    This writes `<session_dir>/current_chunk.md`, `<session_dir>/chunks/chunk_XXXX.md`,
@@ -179,7 +194,7 @@ For each chunk to be read:
 3. **Record `blind-reader`'s Turn (`record`)**:
 
    ```bash
-   .agents/skills/lets-read/.bin/lets-read record \
+   <skill_dir>/.bin/lets-read record \
      --session "<session_dir>" \
      --subagent-log "<blind_reader_logAbsoluteUri>"
    ```
@@ -208,7 +223,7 @@ For each chunk to be read:
 5. **Apply Verdicts, Fact-Check Verification, Persona Critique & Topic Merges (`judge`)**:
 
    ```bash
-   .agents/skills/lets-read/.bin/lets-read judge \
+   <skill_dir>/.bin/lets-read judge \
      --session "<session_dir>" \
      --subagent-log "<prediction_judge_logAbsoluteUri>" \
      --fact-check-log "<fact_checker_logAbsoluteUri>" \
@@ -225,7 +240,7 @@ For each chunk to be read:
      2. Record `blind-reader`'s response:
 
         ```bash
-        .agents/skills/lets-read/.bin/lets-read discuss \
+        <skill_dir>/.bin/lets-read discuss \
           --session "<session_dir>" \
           --subagent-log "<blind_reader_logAbsoluteUri>"
         ```
@@ -236,7 +251,7 @@ For each chunk to be read:
      (`"status": "wrapup_unlocked"`).
    - Read `<session_dir>/current_prompt.md` and send it to `blind-reader` via
      `send_message`.
-   - Record the Final Wrapup with `lets-read record --session "<session_dir>" --subagent-log "<blind_reader_logAbsoluteUri>"`.
+   - Record the Final Wrapup with `<skill_dir>/.bin/lets-read record --session "<session_dir>" --subagent-log "<blind_reader_logAbsoluteUri>"`.
      (No `judge` step is needed after `wrapup_recorded`.)
 
 ### Step 5: Interactive Discussion vs. Batch Progression
@@ -256,7 +271,7 @@ For each chunk to be read:
        applicable):
 
        ```bash
-       .agents/skills/lets-read/.bin/lets-read discuss-prompt \
+       <skill_dir>/.bin/lets-read discuss-prompt \
          --session "<session_dir>" \
          --user-message "<user_message>"
        ```
@@ -267,7 +282,7 @@ For each chunk to be read:
     3. Record `blind-reader`'s response using `discuss`:
 
        ```bash
-       .agents/skills/lets-read/.bin/lets-read discuss \
+       <skill_dir>/.bin/lets-read discuss \
          --session "<session_dir>" \
          --user-message "<user_message>" \
          --subagent-log "<blind_reader_logAbsoluteUri>"
