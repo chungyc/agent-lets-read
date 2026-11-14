@@ -45,9 +45,9 @@ sandboxed, read-only subagents:
    against established session topics and outputs synonym/alias merges
    (`=== TOPIC MERGES ===`) applied by `lets-read judge`.
 
-In **Batch Mode**, a sixth orchestrator subagent—**`batch-driver`**
-([batch-driver.md](../../agents/batch-driver.md))—drives slices of ~10 chunks at
-a time so the parent session host's context window stays bounded across
+In **Batch Mode**, the host delegates sequential slices of ~10 chunks to fresh
+instances of the built-in **`self`** subagent (`Role: "Batch Read-Through
+Driver"`) so the parent session host's context window stays bounded across
 book-length works.
 
 ---
@@ -67,8 +67,6 @@ book-length works.
    - The five leaf subagents (`blind-reader`, `prediction-judge`, `fact-checker`,
      `commentary-critic`, and `topic-curator`) are defined in [agents/](../../agents/)
      with `enable_write_tools: false`, `enable_subagent_tools: false`, and
-     `enable_mcp_tools: false`, while `batch-driver` has
-     `enable_write_tools: true`, `enable_subagent_tools: true`, and
      `enable_mcp_tools: false`. When the `lets-read` plugin is installed and
      enabled, they are registered automatically; if running from an uninstalled
      checkout where they are not yet listed in `<subagents>`, define them via
@@ -97,8 +95,8 @@ book-length works.
      splitting, receipt verification, indexing, and state management natively in
      compiled Haskell. Use strictly `<skill_dir>/scripts/prepare.sh`,
      `<skill_dir>/.bin/lets-read` (`init`, `next`, `record`, `judge`,
-     `discuss-prompt`, `discuss`, `status`), `read_file`, `write_file`, and
-     `manage_subagents`.
+     `discuss-prompt`, `discuss`, `status`), `read_file`, `write_file`,
+     `invoke_subagent`, `send_message`, and `manage_subagents`.
 
 ---
 
@@ -116,7 +114,6 @@ when installed):
   - **Fact-Checker**: [fact-checker.md](../../agents/fact-checker.md)
   - **Commentary Critic**: [commentary-critic.md](../../agents/commentary-critic.md)
   - **Topic Curator**: [topic-curator.md](../../agents/topic-curator.md)
-  - **Batch Read-Through Driver**: [batch-driver.md](../../agents/batch-driver.md)
 - **Final Wrapup Prompt Template**: [wrapup_prompt_template.md](./resources/wrapup_prompt_template.md)
 - **Banned Jargon Linter List**: [banned_jargon.txt](./resources/banned_jargon.txt)
 - **Persona Presets**: [personas.md](./references/personas.md)
@@ -162,23 +159,22 @@ Read [personas.md](./references/personas.md) if a custom tone or preset was requ
      --persona "<chosen_persona>"
    ```
 
-### Step 3: Verify the Subagents Are Available
+### Step 3: Verify the Five Subagents Are Available
 
-When the `lets-read` plugin is installed and enabled, its subagents are already
-registered in `<subagents>`:
+When the `lets-read` plugin is installed and enabled, its five read-only leaf
+subagents (`EnableWriteTools: false`, `EnableSubagentTools: false`,
+`EnableMCPTools: false`) are already registered in `<subagents>`:
 
-- **Read-Only Leaf Subagents** (`EnableWriteTools: false`, `EnableSubagentTools: false`, `EnableMCPTools: false`):
-  1. [blind-reader.md](../../agents/blind-reader.md) (`Name: "blind-reader"`, `Role: "Blind Story Reader"`)
-  2. [prediction-judge.md](../../agents/prediction-judge.md) (`Name: "prediction-judge"`, `Role: "Impartial Prediction Judge"`)
-  3. [fact-checker.md](../../agents/fact-checker.md) (`Name: "fact-checker"`, `Role: "Commentary Fact-Checker"`)
-  4. [commentary-critic.md](../../agents/commentary-critic.md) (`Name: "commentary-critic"`, `Role: "Commentary Critic"`)
-  5. [topic-curator.md](../../agents/topic-curator.md) (`Name: "topic-curator"`, `Role: "Topic Index Curator"`)
-- **Batch Mode Driver Subagent** (`EnableWriteTools: true`, `EnableSubagentTools: true`, `EnableMCPTools: false`):
-  6. [batch-driver.md](../../agents/batch-driver.md) (`Name: "batch-driver"`, `Role: "Batch Read-Through Driver"`)
+1. [blind-reader.md](../../agents/blind-reader.md) (`Name: "blind-reader"`, `Role: "Blind Story Reader"`)
+2. [prediction-judge.md](../../agents/prediction-judge.md) (`Name: "prediction-judge"`, `Role: "Impartial Prediction Judge"`)
+3. [fact-checker.md](../../agents/fact-checker.md) (`Name: "fact-checker"`, `Role: "Commentary Fact-Checker"`)
+4. [commentary-critic.md](../../agents/commentary-critic.md) (`Name: "commentary-critic"`, `Role: "Commentary Critic"`)
+5. [topic-curator.md](../../agents/topic-curator.md) (`Name: "topic-curator"`, `Role: "Topic Index Curator"`)
 
-*(Fallback for uninstalled checkouts: if those subagents do not yet appear in
-`<subagents>`, read each file under [agents/](../../agents/) and call
-`define_subagent` with the corresponding tool flags above.)*
+*(Fallback for uninstalled checkouts: if those five subagents do not yet appear
+in `<subagents>`, read each file under [agents/](../../agents/) and call
+`define_subagent` with `EnableWriteTools: false`, `EnableSubagentTools: false`,
+and `EnableMCPTools: false`.)*
 
 ### Step 4: Per-Chunk Execution Loop (`next` → `record` → `judge` → optional `discuss`)
 
@@ -196,9 +192,12 @@ For each chunk to be read:
 
 2. **Dispatch `blind-reader`**:
    - Read `<session_dir>/current_prompt.md`.
-   - On Chunk 1 or when `"rotate_reader_recommended": true`, call
-     `invoke_subagent` (`TypeName: "blind-reader"`, `Role: "Blind Story Reader"`).
-     Otherwise, call `send_message` to the active `blind-reader` `conversationId`.
+   - On the first chunk of a session or batch (when no active `blind-reader`
+     exists yet) or when `"rotate_reader_recommended": true` (killing any
+     previous `blind-reader` instance via `manage_subagents` with
+     `Action: "kill"`), call `invoke_subagent` (`TypeName: "blind-reader"`,
+     `Role: "Blind Story Reader"`). Otherwise, call `send_message` to the
+     active `blind-reader` `conversationId`.
    - Pass the exact contents of `current_prompt.md`.
 
 3. **Record `blind-reader`'s Turn (`record`)**:
@@ -221,13 +220,16 @@ For each chunk to be read:
      `current_critic_prompt.md` (plus `current_topic_prompt.md` if
      `"topic_curation_needed": true`).
    - **In the same turn**, dispatch the post-record subagents in parallel:
-     - For `prediction-judge`, `fact-checker`, and `commentary-critic`, call
-       `invoke_subagent` on Chunk 1 or when its corresponding
-       `"rotate_<role>_recommended": true` flag is set; otherwise call
-       `send_message` to its active `conversationId`.
+     - For `prediction-judge`, `fact-checker`, and `commentary-critic`, on the
+       first chunk of a session or batch (when no active instance of that role
+       exists yet) or when its corresponding `"rotate_<role>_recommended": true`
+       flag is set (killing any previous instance via `manage_subagents` with
+       `Action: "kill"`), call `invoke_subagent`; otherwise call `send_message`
+       to its active `conversationId`.
      - If `"topic_curation_needed": true`, also call `invoke_subagent` for
        `topic-curator` (`Role: "Topic Index Curator"`) with the contents of
-       `current_topic_prompt.md`.
+       `current_topic_prompt.md` (and kill the finished `topic-curator` via
+       `manage_subagents` after `judge` completes).
    - Wait for all dispatched subagents to finish before running `judge`.
 
 5. **Apply Verdicts, Fact-Check Verification, Persona Critique & Topic Merges (`judge`)**:
@@ -306,12 +308,22 @@ For each chunk to be read:
     the read-through in sequential batches of **~10 chunks** (e.g., `1..10`,
     `11..20`, etc.; if $\le 3$ chunks would remain after a batch, include them
     in the current batch so the story and Final Wrapup Round finish together):
-    1. Call `invoke_subagent` (`TypeName: "batch-driver"`, `Role: "Batch
-       Read-Through Driver"`) with `<skill_dir>`, `<session_dir>`, and the
-       target ending chunk for this batch (plus an instruction to complete the
-       Final Wrapup Round if it finishes Chunk `N/N`).
-    2. When `batch-driver` completes its batch and returns its summary, kill the
-       finished `batch-driver` via `manage_subagents` (`Action: "kill"`).
+    1. Call `invoke_subagent` (`TypeName: "self"`, `Role: "Batch Read-Through
+       Driver"`), passing `<skill_dir>`, `<session_dir>`, `<skill_dir>/SKILL.md`,
+       and the target ending chunk for this batch. Instruct the `self` subagent
+       to:
+       - Read `<skill_dir>/SKILL.md` and follow the **Mandatory Anti-Spoiler &
+         Orchestrator Rules** and **Step 4: Per-Chunk Execution Loop** for each
+         chunk in its assigned batch (including the Final Wrapup Round in
+         Step 4.7 if it completes the final chunk `N/N`).
+       - Before returning, call `manage_subagents` (`Action: "kill_all"`) to
+         terminate all leaf subagents (`blind-reader`, `prediction-judge`,
+         `fact-checker`, `commentary-critic`, `topic-curator`) spawned during
+         its batch.
+       - Return a concise batch summary (`completed_range`, `chunk_index` /
+         `total_chunks`, `active_predictions_count`, and `is_finished`).
+    2. When the `self` batch driver finishes and returns its summary, terminate
+       that finished driver via `manage_subagents` (`Action: "kill"`).
     3. If more chunks remain before the user's target or `"is_finished": true`,
-       invoke a **new** `batch-driver` subagent for the next batch of ~10
-       chunks.
+       invoke a **new** `self` subagent (`Role: "Batch Read-Through Driver"`)
+       for the next batch of ~10 chunks.
