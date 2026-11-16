@@ -109,15 +109,10 @@ per-chunk loop (orchestrated by the host session):
 ```mermaid
 flowchart TD
     V["Sealed Story Vault (.vault.bin)"] -->|"unlocks 1 chunk"| GK1["Haskell Gatekeeper (next)"]
-
-    subgraph Solo["1. Solo Reading"]
-        BR["Blind Reader"]
-    end
-
-    GK1 -->|"current_chunk.md + prompt"| BR
+    GK1 -->|"current_chunk.md + prompt"| BR["Blind Reader"]
     BR -->|"commentary + new prediction"| GK2["Haskell Gatekeeper (record)"]
 
-    subgraph Concurrent["2. Concurrent Review"]
+    subgraph Concurrent["Concurrent Review"]
         PJ["Prediction Judge"]
         FC["Fact-Checker"]
         CC["Commentary Critic"]
@@ -134,8 +129,9 @@ flowchart TD
     CC --> GK3
     TC -.-> GK3
 
-    GK3 -.->|"if misread flagged: verify quote"| BR
     GK3 -->|"all clear"| Next["Session Outputs & Next Chunk"]
+    GK3 -.->|"if misread flagged"| Discuss["Blind Reader (verify quote)"]
+    Discuss -.-> Next
 ```
 
 ### Haskell Gatekeeper ([LetsRead.hs](./skills/lets-read/scripts/LetsRead.hs))
