@@ -107,40 +107,35 @@ The diagram below shows how control and session files flow through the
 per-chunk loop (orchestrated by the host session):
 
 ```mermaid
-sequenceDiagram
-    participant GK as Haskell Gatekeeper
-    participant BR as Blind Reader
-    participant PJ as Prediction Judge
-    participant FC as Fact-Checker
-    participant CC as Commentary Critic
-    participant TC as Topic Curator
+flowchart TD
+    V["Sealed Story Vault (.vault.bin)"] -->|"unlocks 1 chunk"| GK1["Haskell Gatekeeper (next)"]
 
-    loop Each chunk
-        GK->>BR: Unlock 1 chunk (current_chunk.md + current_prompt.md)
-        BR-->>GK: Commentary & new prediction (current_reader_response.md)
-        Note over GK: Record entry & generate reviewer prompts
-
-        par Parallel review
-            GK->>PJ: Evaluate active predictions
-            PJ-->>GK: Verdicts (current_judge_response.md)
-        and
-            GK->>FC: Audit factual & chronological claims
-            FC-->>GK: Audit (current_fact_check_response.md)
-        and
-            GK->>CC: Critique persona & style
-            CC-->>GK: Notes (current_critic_response.md)
-        and When new tags accumulate
-            GK->>TC: Consolidate topic tags
-            TC-->>GK: Merges (current_topic_response.md)
-        end
-
-        Note over GK: Verify & apply verdicts, feedback, and topic merges
-
-        opt Material misread flagged by Fact-Checker
-            GK->>BR: Pause next chunk & request verification
-            BR-->>GK: Verify quote & respond (current_discussion_response.md)
-        end
+    subgraph Solo["1. Solo Reading"]
+        BR["Blind Reader"]
     end
+
+    GK1 -->|"current_chunk.md + prompt"| BR
+    BR -->|"commentary + new prediction"| GK2["Haskell Gatekeeper (record)"]
+
+    subgraph Concurrent["2. Concurrent Review"]
+        PJ["Prediction Judge"]
+        FC["Fact-Checker"]
+        CC["Commentary Critic"]
+        TC["Topic Curator (when needed)"]
+    end
+
+    GK2 --> PJ
+    GK2 --> FC
+    GK2 --> CC
+    GK2 -.-> TC
+
+    PJ --> GK3["Haskell Gatekeeper (judge)"]
+    FC --> GK3
+    CC --> GK3
+    TC -.-> GK3
+
+    GK3 -.->|"if misread flagged: verify quote"| BR
+    GK3 -->|"all clear"| Next["Session Outputs & Next Chunk"]
 ```
 
 ### Haskell Gatekeeper ([LetsRead.hs](./skills/lets-read/scripts/LetsRead.hs))
