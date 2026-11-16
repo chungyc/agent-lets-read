@@ -14,7 +14,7 @@ notifications.
 
 ## How It Works
 
-### Haskell Gatekeeper ([LetsRead.hs](./skills/start/scripts/LetsRead.hs))
+### Haskell Gatekeeper ([LetsRead.hs](./skills/lets-read/scripts/LetsRead.hs))
 
 Splits the source story into chapter-aware chunks, seals them inside the
 session vault, unlocks strictly one chunk at a time, and manages all session
@@ -55,7 +55,7 @@ topic indices.
 ## Prerequisites
 
 The gatekeeper binary is compiled automatically on first use via
-[prepare.sh](./skills/start/scripts/prepare.sh) and requires:
+[prepare.sh](./skills/lets-read/scripts/prepare.sh) and requires:
 
 - `bash`
 
@@ -80,7 +80,7 @@ agy plugin list
 ## Usage
 
 Once installed, ask Antigravity to start a Let's Read of any `.txt`, `.md`,
-`.markdown`, `.html`, or `.epub` file (or invoke `/lets-read:start`):
+`.markdown`, `.html`, or `.epub` file (or invoke `/lets-read`):
 
 > Start a Let's Read of `~/Books/story.epub` in interactive mode using the
 > Mystery & Theorycrafter persona.
@@ -100,7 +100,7 @@ with a final retrospective wrapup round when the story finishes.
 ### Reader Personas
 
 You can specify any custom persona description or choose from the built-in
-presets in [personas.md](./skills/start/references/personas.md):
+presets in [personas.md](./skills/lets-read/references/personas.md):
 
 - Classic Forum Liveblogger *(default)*
 
