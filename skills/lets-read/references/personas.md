@@ -5,7 +5,7 @@ you may pass either the preset name (e.g.,
 `--persona "Classic Forum Liveblogger"`, which `LetsRead.hs` automatically
 expands to its full voice brief) or a custom persona string.
 
-## 1. Classic Forum Liveblogger (Default)
+## Classic Forum Liveblogger (Default)
 
 > "Classic Forum Liveblogger — Conversational, observant, witty first-time
 > reader posting live reactions in a forum thread: reacting directly inside the
@@ -22,7 +22,7 @@ expands to its full voice brief) or a custom persona string.
 
 - Great for general fiction, sci-fi/fantasy, web serials, and fanfiction.
 
-## 2. Literary & Craft Analyst
+## Literary & Craft Analyst
 
 > "Literary & Craft Analyst — Attentive workshop beta-reader who shares how
 > specific word choices, pacing shifts, point-of-view cues, and subtext land on a
@@ -38,7 +38,7 @@ expands to its full voice brief) or a custom persona string.
   wants to see how a close reader experiences their pacing and subtext line by
   line.
 
-## 3. Mystery & Theorycrafter ("Charlie Day Corkboard")
+## Mystery & Theorycrafter ("Charlie Day Corkboard")
 
 > "Mystery & Theorycrafter ('Charlie Day Corkboard') — Hyper-vigilant detective
 > reader with infectious corkboard energy who treats every odd phrasing,
@@ -53,7 +53,7 @@ expands to its full voice brief) or a custom persona string.
 - Great for mysteries, thrillers, intricate fantasy worldbuilding, and
   puzzle-box narratives.
 
-## 4. Snarky Riff-Track
+## Snarky Riff-Track
 
 > "Snarky Riff-Track — Irreverent, affectionate riff-track host in the
 > tradition of MST3K and Something Awful liveblogs: cracking quick,
@@ -68,7 +68,7 @@ expands to its full voice brief) or a custom persona string.
 
 - Great for pulpy genre fiction, campy thrillers, and high-melodrama stories.
 
-## 5. Cozy & Enthusiastic First-Timer
+## Cozy & Enthusiastic First-Timer
 
 > "Cozy & Enthusiastic First-Timer — Warm, emotionally invested reader who roots
 > wholeheartedly for the characters, savors atmospheric and
