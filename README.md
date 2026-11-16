@@ -12,46 +12,6 @@ fact-checking, editorial critique, and topic indexing to five isolated
 subagents that exchange data through session files and use messages strictly as
 notifications.
 
-## How It Works
-
-### Haskell Gatekeeper ([LetsRead.hs](./skills/lets-read/scripts/LetsRead.hs))
-
-Splits the source story into chapter-aware chunks, seals them inside the
-session vault, unlocks strictly one chunk at a time, and manages all session
-state, prediction scoreboards, and bounded multi-layer indices.
-
-### Blind Reader ([blind-reader.md](./agents/blind-reader.md))
-
-Reads each newly unlocked passage without access to future chapters or the
-source file. It reacts in character in the session's active persona, stakes one
-new falsifiable multi-chapter prediction per chunk, and maintains an evolving
-notebook (`memory.md`).
-
-### Prediction Judge ([prediction-judge.md](./agents/prediction-judge.md))
-
-Evaluates all active predictions impartially against each newly unlocked chunk,
-ruling predictions as `CONFIRMED`, `DEBUNKED`, `SUBVERTED`, or `ACTIVE` with
-direct textual evidence.
-
-### Fact-Checker ([fact-checker.md](./agents/fact-checker.md))
-
-Audits concrete factual and chronological claims in the reader's commentary
-against unlocked story chunks and primary sources. When it catches a material
-misread, the gatekeeper pauses progression so the reader can verify the quote
-and respond in a peer discussion turn before the next chunk unlocks.
-
-### Commentary Critic ([commentary-critic.md](./agents/commentary-critic.md))
-
-Reviews how well each entry inhabited the chosen persona and user style
-directives, writing concise editorial notes for the reader to apply on the next
-chunk.
-
-### Topic Curator ([topic-curator.md](./agents/topic-curator.md))
-
-Runs on demand when new topic tags accumulate, consolidating synonyms,
-character or faction aliases, and overly narrow scene tags across the session's
-topic indices.
-
 ## Prerequisites
 
 The gatekeeper binary is compiled automatically on first use via
@@ -140,6 +100,86 @@ indices across story events, commentary entries, and predictions.
 
 The blind reader's evolving unspoiled notebook of characters, factions, plot
 threads, and active predictions.
+
+## How It Works
+
+The diagram below shows how control and session files flow through the
+per-chunk loop (orchestrated by the host session):
+
+```mermaid
+sequenceDiagram
+    participant GK as Haskell Gatekeeper
+    participant BR as Blind Reader
+    participant PJ as Prediction Judge
+    participant FC as Fact-Checker
+    participant CC as Commentary Critic
+    participant TC as Topic Curator
+
+    loop Each chunk
+        GK->>BR: Unlock 1 chunk (current_chunk.md + current_prompt.md)
+        BR-->>GK: Commentary & new prediction (current_reader_response.md)
+        Note over GK: Record entry & generate reviewer prompts
+
+        par Parallel review
+            GK->>PJ: Evaluate active predictions
+            PJ-->>GK: Verdicts (current_judge_response.md)
+        and
+            GK->>FC: Audit factual & chronological claims
+            FC-->>GK: Audit (current_fact_check_response.md)
+        and
+            GK->>CC: Critique persona & style
+            CC-->>GK: Notes (current_critic_response.md)
+        and When new tags accumulate
+            GK->>TC: Consolidate topic tags
+            TC-->>GK: Merges (current_topic_response.md)
+        end
+
+        Note over GK: Verify & apply verdicts, feedback, and topic merges
+
+        opt Material misread flagged by Fact-Checker
+            GK->>BR: Pause next chunk & request verification
+            BR-->>GK: Verify quote & respond (current_discussion_response.md)
+        end
+    end
+```
+
+### Haskell Gatekeeper ([LetsRead.hs](./skills/lets-read/scripts/LetsRead.hs))
+
+Splits the source story into chapter-aware chunks, seals them inside the
+session vault, unlocks strictly one chunk at a time, and manages all session
+state, prediction scoreboards, and bounded multi-layer indices.
+
+### Blind Reader ([blind-reader.md](./agents/blind-reader.md))
+
+Reads each newly unlocked passage without access to future chapters or the
+source file. It reacts in character in the session's active persona, stakes one
+new falsifiable multi-chapter prediction per chunk, and maintains an evolving
+notebook (`memory.md`).
+
+### Prediction Judge ([prediction-judge.md](./agents/prediction-judge.md))
+
+Evaluates all active predictions impartially against each newly unlocked chunk,
+ruling predictions as `CONFIRMED`, `DEBUNKED`, `SUBVERTED`, or `ACTIVE` with
+direct textual evidence.
+
+### Fact-Checker ([fact-checker.md](./agents/fact-checker.md))
+
+Audits concrete factual and chronological claims in the reader's commentary
+against unlocked story chunks and primary sources. When it catches a material
+misread, the gatekeeper pauses progression so the reader can verify the quote
+and respond in a peer discussion turn before the next chunk unlocks.
+
+### Commentary Critic ([commentary-critic.md](./agents/commentary-critic.md))
+
+Reviews how well each entry inhabited the chosen persona and user style
+directives, writing concise editorial notes for the reader to apply on the next
+chunk.
+
+### Topic Curator ([topic-curator.md](./agents/topic-curator.md))
+
+Runs on demand when new topic tags accumulate, consolidating synonyms,
+character or faction aliases, and overly narrow scene tags across the session's
+topic indices.
 
 ## License
 
