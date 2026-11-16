@@ -140,3 +140,7 @@ indices across story events, commentary entries, and predictions.
 
 The blind reader's evolving unspoiled notebook of characters, factions, plot
 threads, and active predictions.
+
+## License
+
+This project is licensed under the [MIT License](./LICENSE).

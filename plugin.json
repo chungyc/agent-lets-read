@@ -9,6 +9,7 @@
     "url": "https://chungyc.org/"
   },
   "repository": "https://github.com/chungyc/agent-lets-read",
+  "license": "MIT",
   "keywords": [
     "lets-read",
     "liveblog",
