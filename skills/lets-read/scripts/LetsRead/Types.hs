@@ -18,11 +18,6 @@ module LetsRead.Types
   , ParsedChunkSummaries (..)
   , emptyParsedChunkSummaries
   , CriticSection (..)
-  , InitOptions (..)
-  , RecordOptions (..)
-  , JudgeOptions (..)
-  , DiscussPromptOptions (..)
-  , DiscussOptions (..)
   , saveVault
   , loadVaultChunk
   , saveState
@@ -201,7 +196,7 @@ data SessionState = SessionState
 instance Binary SessionState
 
 -- ---------------------------------------------------------------------------
--- Auxiliary Parsing & CLI Option Types
+-- Auxiliary Parsing Types
 -- ---------------------------------------------------------------------------
 
 data ResolutionKind = ResConfirmed | ResDebunked | ResSubverted | ResRetired
@@ -259,51 +254,6 @@ data CriticSection
   | CritSecFacts
   | CritSecStyle
   deriving (Eq, Show)
-
-data InitOptions = InitOptions
-  { initSource :: FilePath
-  , initSession :: FilePath
-  , initMaxWords :: Int
-  , initTitle :: Maybe Text
-  , initPersona :: Maybe Text
-  , initOverwrite :: Bool
-  }
-
-data RecordOptions = RecordOptions
-  { recSession :: FilePath
-  , recResponseFile :: Maybe FilePath
-  , recSubagentLog :: Maybe FilePath
-  , recCommentaryFile :: Maybe FilePath
-  , recMemoryFile :: Maybe FilePath
-  }
-
-data JudgeOptions = JudgeOptions
-  { jdgSession :: FilePath
-  , jdgResponseFile :: Maybe FilePath
-  , jdgSubagentLog :: Maybe FilePath
-  , jdgFactCheckResponseFile :: Maybe FilePath
-  , jdgFactCheckLog :: Maybe FilePath
-  , jdgCriticResponseFile :: Maybe FilePath
-  , jdgCriticLog :: Maybe FilePath
-  , jdgTopicResponseFile :: Maybe FilePath
-  , jdgTopicLog :: Maybe FilePath
-  }
-
-data DiscussPromptOptions = DiscussPromptOptions
-  { dpoSession :: FilePath
-  , dpoUserMessage :: Maybe Text
-  , dpoUserFile :: Maybe FilePath
-  }
-
-data DiscussOptions = DiscussOptions
-  { discSession :: FilePath
-  , discResponseFile :: Maybe FilePath
-  , discSubagentLog :: Maybe FilePath
-  , discCommentaryFile :: Maybe FilePath
-  , discMemoryFile :: Maybe FilePath
-  , discUserMessage :: Maybe Text
-  , discUserFile :: Maybe FilePath
-  }
 
 -- ---------------------------------------------------------------------------
 -- Vault Obfuscation & State Persistence
