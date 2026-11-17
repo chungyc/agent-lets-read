@@ -213,6 +213,13 @@ Run `<skill_dir>/.bin/lets-read init` as a separate command:
   --persona "<chosen_persona>"
 ```
 
+If resuming an existing session instead of initializing a new one, run
+`status`:
+
+```bash
+<skill_dir>/.bin/lets-read status --session "<session_dir>"
+```
+
 ### Step 3: Verify the Five Subagents Are Available
 
 When the `lets-read` plugin is installed and enabled, its five leaf subagents
