@@ -11,7 +11,7 @@ need_build=0
 if [ ! -x "$BIN_PATH" ]; then
   need_build=1
 else
-  for src in "$SCRIPTS_DIR"/LetsRead.hs "$SCRIPTS_DIR"/LetsRead/*.hs "$SCRIPTS_DIR"/LetsRead/Chunker/*.hs; do
+  for src in "$SCRIPTS_DIR"/LetsRead.hs "$SCRIPTS_DIR"/LetsRead/*.hs "$SCRIPTS_DIR"/LetsRead/Chunker/*.hs "$SCRIPTS_DIR"/LetsRead/Command/*.hs; do
     if [ -f "$src" ] && [ "$src" -nt "$BIN_PATH" ]; then
       need_build=1
       break
