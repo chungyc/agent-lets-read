@@ -129,7 +129,7 @@ cmdNext rawSessionDir forceFlag = do
               , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
               , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
               , ("orchestrator_rule", jsonStr orchestratorRuleText)
-              , ("next_step_hint", jsonStr "Send a 1-line notification to blind-reader to read subagent_prompt_file and write reader_response_file for the Final Wrapup & Retrospective, then record with 'lets-read record --session <dir> --subagent-log <reader_log>'.")
+              , ("next_step_hint", jsonStr "Send a 1-line notification to blind-reader to read subagent_prompt_file and write reader_response_file for the Final Wrapup & Retrospective, then STOP and end your turn with ZERO tool calls until blind-reader sends its idle completion notice (never emit 'Waiting...' text alongside 'record'); only after its idle notice arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'.")
               ]
         else
           TIO.putStrLn $
@@ -167,6 +167,10 @@ cmdNext rawSessionDir forceFlag = do
       saveState sessionDir st'
 
       let shouldRotate = computeShouldRotate (stStoryRecords st) chunk
+          unlockHint =
+            if shouldRotate
+              then "rotate_reader_recommended is true: kill the previous blind-reader via manage_subagents(Action: \"kill\") and invoke a fresh blind-reader with a 1-line notification to read subagent_prompt_file and write reader_response_file, then STOP and end your turn with ZERO tool calls until blind-reader sends its idle completion notice (never emit 'Waiting...' alongside 'record'); only after its idle notice arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'."
+              else "Send a 1-line notification to blind-reader to read subagent_prompt_file and write reader_response_file, then STOP and end your turn with ZERO tool calls until blind-reader sends its idle completion notice (never emit 'Waiting...' alongside 'record'); only after its idle notice arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'."
       TIO.putStrLn $
         jsonObject
           [ ("status", jsonStr "unlocked")
@@ -193,4 +197,5 @@ cmdNext rawSessionDir forceFlag = do
           , ("rotate_reader_recommended", jsonBool shouldRotate)
           , ("rotate_subagent_recommended", jsonBool shouldRotate)
           , ("orchestrator_rule", jsonStr orchestratorRuleText)
+          , ("next_step_hint", jsonStr unlockHint)
           ]

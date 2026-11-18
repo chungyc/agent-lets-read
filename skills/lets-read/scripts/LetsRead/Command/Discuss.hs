@@ -23,7 +23,7 @@ import LetsRead.Command.Common
   ( currentChunkMetaTuple
   , readOptionalMemoryFile
   , removeFileIfExists
-  , resolveCommentaryOrResponse
+  , resolveCommentaryOrResponseWithRaw
   , usage
   )
 import LetsRead.Index (applyTopicAliases)
@@ -59,7 +59,10 @@ import LetsRead.Types
   , readTextFileSafe
   , saveState
   )
-import LetsRead.Verification (checkSubagentLogUsedVerificationTools)
+import LetsRead.Verification
+  ( SubagentToolAudit (..)
+  , resolveSubagentToolAudit
+  )
 import System.Directory
   ( canonicalizePath
   , doesFileExist
@@ -119,8 +122,8 @@ cmdDiscuss opts = do
   unless (stCurrentRecorded st) $
     die "Error: Current chunk commentary has not been recorded yet. Run 'record' before 'discuss'."
 
-  (mParsedUser, replyText, parsedSummaries, mParsedPredUpdates, mParsedMem) <-
-    resolveCommentaryOrResponse
+  (rawDiscResp, mParsedUser, replyText, parsedSummaries, mParsedPredUpdates, mParsedMem) <-
+    resolveCommentaryOrResponseWithRaw
       (discResponseFile opts)
       (discCommentaryFile opts)
       [sessionDir </> "current_discussion_response.md"]
@@ -226,17 +229,15 @@ cmdDiscuss opts = do
 
   TIO.writeFile entryFile updatedEntry
 
+  discToolAudit <- resolveSubagentToolAudit (discSubagentLog opts) (Just rawDiscResp)
+  let mUsedVerifyTools = staUsedVerificationTools discToolAudit
+
   when isFactCheckDiscussion $
     removeFileIfExists questionsPath
   removeFileIfExists discPromptPath
   unless isFactCheckDiscussion $
     removeFileIfExists defaultUserFilePath
   removeFileIfExists (sessionDir </> "current_discussion_response.md")
-
-  mUsedVerifyTools <-
-    case discSubagentLog opts of
-      Just logPath -> checkSubagentLogUsedVerificationTools logPath
-      Nothing -> pure Nothing
 
   let isWrapupTarget = hasWrapup && curIdx >= stTotalChunks st
       storyRecords' =

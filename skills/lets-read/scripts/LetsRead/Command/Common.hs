@@ -16,6 +16,7 @@ module LetsRead.Command.Common
   , resolveOptionalResponse
   , resolveRequiredResponse
   , resolveCommentaryOrResponse
+  , resolveCommentaryOrResponseWithRaw
   , readOptionalMemoryFile
   , currentChunkMetaTuple
   ) where
@@ -159,16 +160,33 @@ resolveCommentaryOrResponse ::
   -- | Error message if no response source is available.
   String ->
   IO (Maybe Text, Text, ParsedChunkSummaries, Maybe Text, Maybe Text)
-resolveCommentaryOrResponse mRespFile mCommFile defaultFiles mLog label errMsg =
+resolveCommentaryOrResponse mRespFile mCommFile defaultFiles mLog label errMsg = do
+  (_, mUser, comm, sums, mPreds, mMem) <-
+    resolveCommentaryOrResponseWithRaw mRespFile mCommFile defaultFiles mLog label errMsg
+  pure (mUser, comm, sums, mPreds, mMem)
+
+-- | Like 'resolveCommentaryOrResponse', also returning the raw unparsed response
+-- text so callers can inspect structured @<!-- TOOLS: ... -->@ metadata before
+-- cleanup.
+resolveCommentaryOrResponseWithRaw ::
+  Maybe FilePath ->
+  Maybe FilePath ->
+  [FilePath] ->
+  Maybe FilePath ->
+  String ->
+  String ->
+  IO (Text, Maybe Text, Text, ParsedChunkSummaries, Maybe Text, Maybe Text)
+resolveCommentaryOrResponseWithRaw mRespFile mCommFile defaultFiles mLog label errMsg =
   case (mRespFile, mCommFile) of
     (Nothing, Just commPath) -> do
       exists <- doesFileExist commPath
       unless exists $ die ("Error: Commentary file not found: " ++ commPath)
       raw <- readTextFileSafe commPath
-      pure (Nothing, T.strip raw, emptyParsedChunkSummaries, Nothing, Nothing)
+      pure (raw, Nothing, T.strip raw, emptyParsedChunkSummaries, Nothing, Nothing)
     _ -> do
       raw <- resolveRequiredResponse mRespFile defaultFiles mLog label errMsg
-      pure (parseCombinedResponse raw)
+      let (mUser, comm, sums, mPreds, mMem) = parseCombinedResponse raw
+      pure (raw, mUser, comm, sums, mPreds, mMem)
 
 -- | Read and strip an optional @--memory-file@ override, failing if the
 -- specified path does not exist and returning 'Nothing' if omitted or blank.

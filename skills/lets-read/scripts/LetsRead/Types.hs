@@ -35,6 +35,12 @@ module LetsRead.Types
   , countWords
   , readTextFileSafe
   , stripFileUriPrefix
+  , isToolReceiptCommentLine
+  , stripToolReceiptComments
+  , stripAfterClosingBracket
+  , wrapMarkdownParagraph
+  , wrapMarkdownBullet
+  , wrapMarkdownQuote
   , resolveSkillResourcePath
   ) where
 
@@ -344,7 +350,7 @@ renderMetaJson (Just m) =
 
 orchestratorRuleText :: Text
 orchestratorRuleText =
-  "Use messages ONLY as 1-line notifications pointing subagents to read <session_dir>/current_*_prompt.md and write <session_dir>/current_*_response.md; wait for lets-read CLI commands to exit 0 before messaging subagents, never send duplicate notifications or poll, wait for all dispatched reviewers before running 'judge', and never read/paste prompt/chunk files into messages, run python/ad-hoc scripts, impersonate subagents, or edit memory.md directly."
+  "Use messages ONLY as 1-line notifications pointing subagents to read <session_dir>/current_*_prompt.md and write <session_dir>/current_*_response.md; wait for lets-read CLI commands to exit 0 before messaging subagents, never send duplicate notifications or poll, NEVER call 'record', 'judge', or 'discuss' while ANY dispatched subagent has not yet sent its idle completion notice (never emit 'Waiting...' text alongside a CLI tool call—if fewer than all dispatched subagents have reported idle, end your turn with ZERO tool calls), use 'lets-read status --session <dir>' (never ls/cat) to check state, and never read/paste prompt/chunk files into messages, run python/ad-hoc scripts, impersonate subagents, or edit memory.md directly."
 
 renderStateJson :: FilePath -> Bool -> Bool -> Bool -> SessionState -> Text
 renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt st =
@@ -427,6 +433,91 @@ stripFileUriPrefix :: FilePath -> FilePath
 stripFileUriPrefix p
   | "file://" `isPrefixOf` p = drop 7 p
   | otherwise = p
+
+-- | Return 'True' when a line is a structured @<!-- TOOLS: ... -->@ metadata
+-- comment emitted at the top of a subagent response file.
+isToolReceiptCommentLine :: Text -> Bool
+isToolReceiptCommentLine rawLine =
+  let s = T.strip rawLine
+   in "<!--" `T.isPrefixOf` s
+        && "-->" `T.isSuffixOf` s
+        && let inner = T.strip (T.dropEnd 3 (T.drop 4 s))
+            in "tools:" `T.isPrefixOf` T.toLower inner
+
+-- | Strip any @<!-- TOOLS: ... -->@ metadata lines from a response text while
+-- preserving all remaining lines intact.
+stripToolReceiptComments :: Text -> Text
+stripToolReceiptComments txt
+  | T.null txt = txt
+  | otherwise =
+      let kept = [l | l <- T.lines txt, not (isToolReceiptCommentLine l)]
+          trailNl = if "\n" `T.isSuffixOf` txt then "\n" else ""
+       in if null kept then "" else T.intercalate "\n" kept <> trailNl
+
+-- | Strip the closing bold/italic stars immediately attached to a @]@ bracket
+-- tag (such as @**[Story | Topics: ...]**@) plus an optional @:@ separator,
+-- without stripping leading Markdown emphasis (e.g. @*Title* opens...@) from
+-- the body text that follows.
+stripAfterClosingBracket :: Text -> Text
+stripAfterClosingBracket afterClose =
+  let afterBracket = T.drop 1 afterClose
+      afterClosingStars = T.dropWhile (== '*') afterBracket
+      trimmed = T.stripStart afterClosingStars
+   in case T.uncons trimmed of
+        Just (':', rest) -> T.strip rest
+        _ -> T.strip trimmed
+
+wrapWordsAt :: Int -> Text -> Text -> [Text] -> [Text]
+wrapWordsAt maxWidth firstPrefix contPrefix = go True ""
+  where
+    go _ cur [] = [cur | not (T.null cur)]
+    go isFirst cur (w : ws)
+      | T.null cur =
+          let pfx = if isFirst then firstPrefix else contPrefix
+           in go False (pfx <> w) ws
+      | T.length cur + 1 + T.length w <= maxWidth =
+          go isFirst (cur <> " " <> w) ws
+      | otherwise =
+          cur : go False (contPrefix <> w) ws
+
+-- | Word-wrap a plain Markdown paragraph at @maxWidth@ columns without breaking
+-- single non-whitespace tokens (such as long file paths or URLs).
+wrapMarkdownParagraph :: Int -> Text -> Text
+wrapMarkdownParagraph maxWidth txt =
+  let ws = T.words txt
+   in if null ws
+        then ""
+        else T.intercalate "\n" (wrapWordsAt maxWidth "" "" ws)
+
+-- | Word-wrap a Markdown list item (@- @, @* @, or @1. @), indenting continuation
+-- lines to align beneath the list marker's text column.
+wrapMarkdownBullet :: Int -> Text -> Text
+wrapMarkdownBullet maxWidth rawBullet =
+  let leadSpaces = T.takeWhile (== ' ') rawBullet
+      rest = T.drop (T.length leadSpaces) rawBullet
+      (marker, body)
+        | "- " `T.isPrefixOf` rest = ("- ", T.drop 2 rest)
+        | "* " `T.isPrefixOf` rest = ("* ", T.drop 2 rest)
+        | otherwise =
+            let (digits, afterDigits) = T.span (\c -> c >= '0' && c <= '9') rest
+             in if not (T.null digits) && ". " `T.isPrefixOf` afterDigits
+                  then (digits <> ". ", T.drop 2 afterDigits)
+                  else ("", rest)
+      firstPfx = leadSpaces <> marker
+      contPfx = leadSpaces <> T.replicate (T.length marker) " "
+      ws = T.words body
+   in if null ws
+        then T.stripEnd rawBullet
+        else T.intercalate "\n" (wrapWordsAt maxWidth firstPfx contPfx ws)
+
+-- | Word-wrap a Markdown blockquote paragraph at @maxWidth@ columns with a @> @
+-- prefix on every line.
+wrapMarkdownQuote :: Int -> Text -> Text
+wrapMarkdownQuote maxWidth txt =
+  let ws = T.words txt
+   in if null ws
+        then ">"
+        else T.intercalate "\n" (wrapWordsAt maxWidth "> " "> " ws)
 
 -- | Locate a file inside the skill directory (skills/lets-read/<relPath>)
 -- using the compiled executable's location (.bin/lets-read -> parent directory),

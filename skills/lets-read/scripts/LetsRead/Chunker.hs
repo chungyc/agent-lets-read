@@ -6,6 +6,7 @@ module LetsRead.Chunker
   , splitChapterIntoChunks
   , buildChunksFromSource
   , computeShouldRotate
+  , computeShouldRotateMeta
   ) where
 
 import Control.Monad (when)
@@ -24,7 +25,9 @@ import LetsRead.Chunker.Markdown
   )
 import LetsRead.Types
   ( Chunk (..)
+  , ChunkMeta (..)
   , StoryChunkRecord (..)
+  , chunkToMeta
   , countWords
   , readTextFileSafe
   )
@@ -290,8 +293,11 @@ buildChunksFromSource sourcePath maxWords mTitleOverride = do
   pure (bookTitle, allChunks)
 
 computeShouldRotate :: [StoryChunkRecord] -> Chunk -> Bool
-computeShouldRotate history chunk =
-  let nextIdx = chunkIndex chunk
+computeShouldRotate history chunk = computeShouldRotateMeta history (chunkToMeta chunk)
+
+computeShouldRotateMeta :: [StoryChunkRecord] -> ChunkMeta -> Bool
+computeShouldRotateMeta history meta =
+  let nextIdx = metaChunkIndex meta
       priorEntries =
         sortOn
           scrChunkIndex
@@ -310,8 +316,8 @@ computeShouldRotate history chunk =
       lastRotIdx = foldl' stepLastRot 1 priorEntries
       chunksSinceRotation = nextIdx - lastRotIdx
    in nextIdx > 1
-        && ( ( isChapterStart chunk
-                 && (chunksSinceRotation >= 6 || chunksSinceRotation + partsInChapter chunk > 9)
+        && ( ( metaIsChapterStart meta
+                 && (chunksSinceRotation >= 6 || chunksSinceRotation + metaPartsInChapter meta > 9)
              )
                || chunksSinceRotation >= 15
            )

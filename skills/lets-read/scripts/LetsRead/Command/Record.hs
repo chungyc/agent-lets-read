@@ -20,11 +20,12 @@ import Data.List (sort, sortOn)
 import Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import LetsRead.Chunker (computeShouldRotateMeta)
 import LetsRead.Command.Common
   ( currentChunkMetaTuple
   , readOptionalMemoryFile
   , removeFileIfExists
-  , resolveCommentaryOrResponse
+  , resolveCommentaryOrResponseWithRaw
   , usage
   )
 import LetsRead.Index
@@ -33,7 +34,7 @@ import LetsRead.Index
   )
 import LetsRead.Memory
   ( extractFallbackSummary
-  , mergeCuratedNarrativeMemory
+  , mergeCuratedNarrativeMemoryForTurn
   , rebuildMasterLog
   , resolveAndAuditTurn
   , stripLeadingChunkHeading
@@ -66,8 +67,11 @@ import LetsRead.Types
   , saveState
   )
 import LetsRead.Verification
-  ( lintReaderCommentary
+  ( auditReaderToolUsage
+  , lintReaderCommentary
+  , lintStorySummaryBullets
   , loadBannedJargonIO
+  , resolveSubagentToolAudit
   )
 import System.Directory
   ( canonicalizePath
@@ -116,8 +120,8 @@ cmdRecord opts = do
   when (curIdx < 1) $
     die "Error: No chunk is currently unlocked. Run 'next' first."
 
-  (_, commText, parsedSummaries, mParsedPredUpdates, mParsedMem) <-
-    resolveCommentaryOrResponse
+  (rawResp, _, commText, parsedSummaries, mParsedPredUpdates, mParsedMem) <-
+    resolveCommentaryOrResponseWithRaw
       (recResponseFile opts)
       (recCommentaryFile opts)
       [sessionDir </> "current_reader_response.md"]
@@ -140,7 +144,7 @@ cmdRecord opts = do
 
   if isWrapupTurn
     then do
-      let curated' = mergeCuratedNarrativeMemory (stCuratedMemory st) finalMem
+      let curated' = mergeCuratedNarrativeMemoryForTurn True (stCuratedMemory st) finalMem
           (wrapupTopics, wrapupSumTxt) =
             fromMaybe (["Wrapup", "Retrospective"], extractFallbackSummary commText) (pcsEntry parsedSummaries)
           wrapupIdx = curIdx + 1
@@ -205,7 +209,13 @@ cmdRecord opts = do
           ]
     else do
       bannedJargon <- loadBannedJargonIO
+      readerAudit <- resolveSubagentToolAudit (recSubagentLog opts) (Just rawResp)
       let (chapNum, chapTitle, partNum, partsTotal) = currentChunkMetaTuple st
+          priorStory = [e | e <- stStoryRecords st, scrChunkIndex e < curIdx]
+          shouldRotateHere =
+            case stCurrentMeta st of
+              Just m -> computeShouldRotateMeta priorStory m
+              Nothing -> False
 
           (curated', preds', pendingRetires, auditBlocks, trackerUpdates) =
             resolveAndAuditTurn
@@ -229,7 +239,12 @@ cmdRecord opts = do
               , prOriginChunk pr == curIdx
               , all (\oldPr -> prOriginChunk oldPr /= curIdx) (stPredictions st)
               ]
-          linterWarnings = lintReaderCommentary bannedJargon cleanedCommText parsedSummaries mNewlyLoggedPred
+          commAndPredForAudit =
+            cleanedCommText
+              <> "\n"
+              <> fromMaybe "" mParsedPredUpdates
+          (mReadPrevChunk, callbackReadsCnt, readerCallbackWarns) =
+            auditReaderToolUsage curIdx shouldRotateHere commAndPredForAudit readerAudit
           (storyTopics, storySumTxt) =
             fromMaybe ([], "Story events recorded.") (pcsStory parsedSummaries)
           (entryTopics, entrySumTxt) =
@@ -276,6 +291,10 @@ cmdRecord opts = do
             sortOn
               scrChunkIndex
               (newStoryRecord : filter (\e -> scrChunkIndex e /= curIdx) (stStoryRecords st))
+          linterWarnings =
+            lintReaderCommentary bannedJargon cleanedCommText parsedSummaries mNewlyLoggedPred
+              ++ lintStorySummaryBullets curated' storyRecords'
+              ++ readerCallbackWarns
           existingDiscussions =
             case [elrDiscussions e | e <- stEntryRecords st, elrEntryIndex e == curIdx, not (elrIsWrapup e)] of
               (ds : _) -> ds
@@ -341,8 +360,8 @@ cmdRecord opts = do
           rotateJudge = curIdx > 1 && (curIdx - 1) `mod` 11 == 0
           nextHint =
             if curateTopics
-              then "Notify prediction-judge (judge_prompt_file), fact-checker (fact_check_prompt_file), commentary-critic (critic_prompt_file), and topic-curator (topic_prompt_file) in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log> --topic-log <topic_log>'."
-              else "Notify prediction-judge (judge_prompt_file), fact-checker (fact_check_prompt_file), and commentary-critic (critic_prompt_file) in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log>'."
+              then "Notify prediction-judge (judge_prompt_file), fact-checker (fact_check_prompt_file), commentary-critic (critic_prompt_file), and topic-curator (topic_prompt_file) in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then STOP and end your turn with ZERO tool calls until ALL 4 dispatched subagents have sent their idle completion notices (never emit 'Waiting...' text alongside 'judge'); only after all 4 idle notices arrive, run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log> --topic-log <topic_log>'."
+              else "Notify prediction-judge (judge_prompt_file), fact-checker (fact_check_prompt_file), and commentary-critic (critic_prompt_file) in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then STOP and end your turn with ZERO tool calls until ALL 3 dispatched reviewers have sent their idle completion notices (never emit 'Waiting...' text alongside 'judge'); only after all 3 idle notices arrive, run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log>'."
       TIO.putStrLn $
         jsonObject
           [ ("status", jsonStr "awaiting_judge")
@@ -370,6 +389,9 @@ cmdRecord opts = do
           , ("active_predictions_count", jsonInt (countActivePredictions (stPredictions st')))
           , ("pending_retirements_count", jsonInt (length pendingRetires))
           , ("linter_warnings_count", jsonInt (length linterWarnings))
+          , ("reader_read_prev_chunk", maybe "null" jsonBool mReadPrevChunk)
+          , ("reader_callback_reads_count", jsonInt callbackReadsCnt)
+          , ("reader_callback_audit_warnings_count", jsonInt (length readerCallbackWarns))
           , ("total_predictions_count", jsonInt (length (stPredictions st')))
           , ("prediction_audit_warnings_count", jsonInt (length auditBlocks))
           , ("memory_compaction_needed", jsonBool needsCompaction)

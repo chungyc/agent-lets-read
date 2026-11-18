@@ -32,6 +32,7 @@ import LetsRead.Types
   , orchestratorRuleText
   , saveState
   , saveVault
+  , wrapMarkdownParagraph
   )
 import System.Directory
   ( canonicalizePath
@@ -149,8 +150,8 @@ cmdInit opts = do
       logPath
       ( "# Let's Read: "
           <> bookTitle
-          <> "\n\n*Reader Persona*: "
-          <> persona
+          <> "\n\n## Reader Persona\n\n"
+          <> wrapMarkdownParagraph 78 persona
           <> "\n\n---\n\n"
       )
 

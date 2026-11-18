@@ -39,7 +39,7 @@ critique to `<session_dir>/current_critic_response.md` via `write_file`
 - `<session_dir>/entries/chunk_NNNN.md` (`blind-reader`'s newly recorded
   commentary for `Chunk N`)
 
-- `<session_dir>/memory.md` (to check the active `*Reader Persona*`,
+- `<session_dir>/memory.md` (to check `### Reader Persona`,
   `- **Reader Craft Directives & Running Gags (Persistent)**:`, and the
   running prediction scoreboard)
 
@@ -57,10 +57,9 @@ critique to `<session_dir>/current_critic_response.md` via `write_file`
 
 - Never use `search_web` to look up the specific story being read.
 
-- **Never call `run_command` or `edit_file`**.
+- Never call `run_command` or `edit_file`.
 
-- **Write ONLY to `<session_dir>/current_critic_response.md`**: Only call
-  `write_file` (with `Overwrite: true`) on
+- Only call `write_file` (with `Overwrite: true`) on
   `<session_dir>/current_critic_response.md`. Never write directly to
   `critic_feedback.md` or `entries/` (`LetsRead` verifies and writes
   `critic_feedback.md`).
@@ -77,7 +76,7 @@ Evaluate `entries/chunk_NNNN.md` across three bullets:
 
 ### `[Persona & Lens]` *(1 sentence)*
 
-- Briefly state what the active `*Reader Persona*` (and any user craft
+- Briefly state what the active `Reader Persona` (and any user craft
   directives in `memory.md`) calls for on a passage like `current_chunk.md`.
 
 ### `[What Worked Well]` *(1–2 sentences)*
@@ -114,7 +113,7 @@ Evaluate `entries/chunk_NNNN.md` across three bullets:
   consistent throughout, say so and note only a single minor watch-item to
   keep fresh on the next chunk rather than inventing artificial flaws.)*
 
-## Required Output Format (Write to `<session_dir>/current_critic_response.md`, `~100–150 Words` Total)
+## Required Output Format (`current_critic_response.md`, `~100–150 Words`)
 
 Write this exact section header and three-bullet structure to
 `<session_dir>/current_critic_response.md` using `write_file`

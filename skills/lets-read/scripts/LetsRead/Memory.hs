@@ -5,6 +5,7 @@ module LetsRead.Memory
   , isPlaceholderSection
   , parseMemorySections
   , mergeCuratedNarrativeMemory
+  , mergeCuratedNarrativeMemoryForTurn
   , resolveAndAuditTurn
   , renderCuratedSections
   , checkMemoryCompaction
@@ -24,7 +25,7 @@ module LetsRead.Memory
 
 import Control.Monad (forM_, when)
 import qualified Data.ByteString as BS
-import Data.Char (isAlphaNum, isSpace)
+import Data.Char (isAlphaNum)
 import Data.List (isPrefixOf, isSuffixOf, sort, sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
@@ -35,6 +36,7 @@ import qualified Data.Text.IO as TIO
 import LetsRead.Chunker (parseMarkdownHeading)
 import LetsRead.Index
   ( collectCanonicalSessionTopics
+  , completedStoryArcRollups
   , entryIndexSpec
   , predictionIndexSpec
   , renderStoryBullet
@@ -63,9 +65,14 @@ import LetsRead.Types
   , jsonInt
   , padChunkNumber
   , readTextFileSafe
+  , stripAfterClosingBracket
+  , stripToolReceiptComments
+  , wrapMarkdownBullet
+  , wrapMarkdownParagraph
+  , wrapMarkdownQuote
   )
 import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory)
-import System.FilePath ((</>))
+import System.FilePath (takeFileName, (</>))
 
 defaultCuratedMemory :: [(Text, Text)]
 defaultCuratedMemory =
@@ -116,11 +123,34 @@ parseMemorySections txt = Map.fromListWith (\new old -> old <> "\n" <> new) (go 
            in flush curH acc ++ go (classifyMemoryHeading hName) [] ls
       | otherwise = go curH (l : acc) ls
 
+isTemplatePlaceholderOnly :: Text -> Bool
+isTemplatePlaceholderOnly body =
+  let s = T.strip body
+      low = T.toLower s
+   in T.null s
+        || "- <" `T.isPrefixOf` low
+        || "* <" `T.isPrefixOf` low
+        || "<questions" `T.isPrefixOf` low
+
+isFinalChunkMysteryResolution :: Text -> Bool
+isFinalChunkMysteryResolution body =
+  let low = T.toLower (T.strip body)
+   in not (isTemplatePlaceholderOnly body)
+        && ( "story complete" `T.isInfixOf` low
+               || "none" `T.isInfixOf` low
+               || "resolved" `T.isInfixOf` low
+               || "no unanswered" `T.isInfixOf` low
+               || "no active myster" `T.isInfixOf` low
+           )
+
 mergeCuratedNarrativeMemory :: [(Text, Text)] -> Maybe Text -> [(Text, Text)]
-mergeCuratedNarrativeMemory prevSections Nothing =
+mergeCuratedNarrativeMemory = mergeCuratedNarrativeMemoryForTurn False
+
+mergeCuratedNarrativeMemoryForTurn :: Bool -> [(Text, Text)] -> Maybe Text -> [(Text, Text)]
+mergeCuratedNarrativeMemoryForTurn _ prevSections Nothing =
   if null prevSections then defaultCuratedMemory else prevSections
-mergeCuratedNarrativeMemory prevSections (Just memTxt) =
-  let incoming = parseMemorySections memTxt
+mergeCuratedNarrativeMemoryForTurn isFinalTurn prevSections (Just memTxt) =
+  let incoming = parseMemorySections (stripToolReceiptComments memTxt)
       baseSections =
         [ (secName, oldBody)
         | (secName, oldBody) <- if null prevSections then defaultCuratedMemory else prevSections
@@ -132,8 +162,14 @@ mergeCuratedNarrativeMemory prevSections (Just memTxt) =
               case Map.lookup secName incoming of
                 Nothing -> oldBody
                 Just newBody
-                  | isPlaceholderSection newBody && not (isPlaceholderSection oldBody) -> oldBody
-                  | otherwise -> newBody
+                  | isFinalTurn
+                      && secName == "Active Mysteries & Unanswered Questions"
+                      && isFinalChunkMysteryResolution newBody ->
+                      newBody
+                  | isPlaceholderSection newBody && not (isPlaceholderSection oldBody) ->
+                      oldBody
+                  | otherwise ->
+                      newBody
       ]
 
 resolveAndAuditTurn
@@ -152,7 +188,8 @@ resolveAndAuditTurn
   -> Maybe Text
   -> ([(Text, Text)], [PredictionRecord], [(Int, Text)], [Text], [Text])
 resolveAndAuditTurn curIdx totalChunks chapNum chapTitle partNum partsTotal isRecordTurn commText prevSections prevPreds prevWarns mPredUpdates mMemTxt =
-  let curated' = mergeCuratedNarrativeMemory prevSections mMemTxt
+  let isFinalTurn = totalChunks > 0 && curIdx >= totalChunks
+      curated' = mergeCuratedNarrativeMemoryForTurn isFinalTurn prevSections mMemTxt
       (preds', pendingRetires, auditBlocks, trackerUpdates) =
         if isRecordTurn || isJust mPredUpdates
           then
@@ -193,16 +230,16 @@ cleanChunkSummary raw =
         if "- " `T.isPrefixOf` oneLine || "* " `T.isPrefixOf` oneLine
           then T.strip (T.drop 2 oneLine)
           else oneLine
-      strippedStars = T.dropAround (== '*') noBullet
-      (beforeColon, afterColon) = T.breakOn ":" strippedStars
+      (beforeColonRaw, afterColon) = T.breakOn ":" noBullet
+      beforeColonClean = T.toLower (T.strip (T.dropAround (== '*') (T.strip beforeColonRaw)))
    in if not (T.null afterColon)
-        && ("chunk " `T.isPrefixOf` T.toLower (T.strip beforeColon) || "chunk_" `T.isPrefixOf` T.toLower (T.strip beforeColon))
-        then T.strip (T.drop 1 afterColon)
+        && ("chunk " `T.isPrefixOf` beforeColonClean || "chunk_" `T.isPrefixOf` beforeColonClean)
+        then T.strip (T.dropWhile (== '*') (T.drop 1 afterColon))
         else noBullet
 
 parseChunkSummaries :: Text -> ParsedChunkSummaries
 parseChunkSummaries raw =
-  let bullets = coalesceBulletLines (T.lines raw)
+  let bullets = coalesceBulletLines (T.lines (stripToolReceiptComments raw))
       step acc line =
         let s = T.strip line
             (_, afterOpen) = T.breakOn "[" s
@@ -214,7 +251,7 @@ parseChunkSummaries raw =
                       case T.splitOn "|" inside of
                         (h : _) -> T.toLower (T.strip h)
                         [] -> ""
-                    bodyRaw = T.strip (T.dropWhile (\c -> c == '*' || c == ':' || isSpace c) (T.drop 1 afterClose))
+                    bodyRaw = stripAfterClosingBracket afterClose
                     body = cleanChunkSummary bodyRaw
                     topics = parseTopicsFromBracket inside body
                  in if T.null body
@@ -234,22 +271,25 @@ parseChunkSummaries raw =
 extractFallbackSummary :: Text -> Text
 extractFallbackSummary commText =
   let candidates =
-        [ T.strip l
-        | l <- T.lines commText
+        [ if "- " `T.isPrefixOf` s || "* " `T.isPrefixOf` s
+            then T.strip (T.drop 2 s)
+            else s
+        | l <- T.lines (stripToolReceiptComments commText)
         , let s = T.strip l
         , not (T.null s)
         , not ("#" `T.isPrefixOf` s)
         , not (">" `T.isPrefixOf` s)
         , not ("---" `T.isPrefixOf` s)
         ]
-      firstLine = fromMaybe "Commentary recorded." (listToMaybe candidates)
+      firstLine = fromMaybe "Commentary recorded." (listToMaybe (filter (not . T.null) candidates))
    in if T.length firstLine > 160
         then T.take 157 firstLine <> "..."
         else firstLine
 
 parseCombinedResponse :: Text -> (Maybe Text, Text, ParsedChunkSummaries, Maybe Text, Maybe Text)
 parseCombinedResponse raw =
-  let classifyLine l =
+  let cleanRaw = stripToolReceiptComments raw
+      classifyLine l =
         let s = T.toUpper (T.strip l)
          in if s == "=== USER ===" || s == "=== QUESTION ===" || s == "=== USER MESSAGE ==="
               then Just SecUserQuestion
@@ -267,7 +307,7 @@ parseCombinedResponse raw =
         case classifyLine l of
           Just newSec -> go newSec ls
           Nothing -> (curSec, l) : go curSec ls
-      tagged = go SecCommentary (T.lines raw)
+      tagged = go SecCommentary (T.lines cleanRaw)
       extract sec = T.strip (T.unlines [l | (s, l) <- tagged, s == sec])
       userPart = extract SecUserQuestion
       commPart = extract SecCommentary
@@ -360,62 +400,113 @@ renderMemoryMarkdown sessionDir st =
         | needsCompaction =
             [ ""
             , "> [!IMPORTANT]"
-            , "> **MEMORY COMPACTION NEEDED**: Your 4 curated narrative memory sections (`Story Summary So Far`, `Characters & Relationships`, `Active Mysteries & Unanswered Questions`, `Notable Quotes, Themes & Running Jokes`) are currently "
-                <> jsonInt curLines
-                <> " lines ("
-                <> jsonInt curBytes
-                <> " bytes), exceeding the 80-line / 8,000-byte target. On your next turn, condense older chapters in `## Story Summary So Far` into high-level multi-chapter arc bullets and prune minor resolved mysteries. All earlier story chunk summaries, commentary entries, historical memory snapshots, and predictions are permanently preserved in `<session_dir>/chunks/`, `<session_dir>/entries/`, `<session_dir>/predictions/`, and `<session_dir>/archive/`, so condensing `memory.md` will not lose any history."
+            , wrapMarkdownQuote
+                78
+                ( "**Memory Compaction Needed**: Your 4 curated narrative memory sections (`Story Summary So Far`, `Characters & Relationships`, `Active Mysteries & Unanswered Questions`, `Notable Quotes, Themes & Running Jokes`) are currently "
+                    <> jsonInt curLines
+                    <> " lines ("
+                    <> jsonInt curBytes
+                    <> " bytes), exceeding the 80-line / 8,000-byte target. On your next turn, condense older chapters in `## Story Summary So Far` into high-level multi-chapter arc bullets and prune minor resolved mysteries. All earlier story chunk summaries, commentary entries, historical memory snapshots, and predictions are permanently preserved in `<session_dir>/chunks/`, `<session_dir>/entries/`, `<session_dir>/predictions/`, and `<session_dir>/archive/`, so condensing `memory.md` will not lose any history."
+                )
             ]
         | otherwise = []
       lookupSec name =
         fromMaybe "- *(None yet.)*" (lookup name curated)
       orderedStory = sortOn scrChunkIndex (stStoryRecords st)
       recentStory = drop (max 0 (length orderedStory - 5)) orderedStory
-      recentStoryLines
-        | null recentStory = ["- *(No story chunks read yet.)*"]
-        | otherwise = map (renderStoryBullet sessionDir) recentStory
+      recentStoryBlock
+        | null recentStory = "- *(No story chunks read yet.)*"
+        | otherwise = T.intercalate "\n\n" (map (wrapMarkdownBullet 78 . renderStoryBullet sessionDir) recentStory)
       canonTopics = collectCanonicalSessionTopics st
-      canonTopicsLine
-        | null canonTopics = "- *(Established topic tags will appear here as chunks are recorded.)*"
-        | otherwise = "- **Established Topic Tags (Reuse When Applicable)**: `" <> T.intercalate "`, `" canonTopics <> "`"
+      canonTopicsBlock
+        | null canonTopics =
+            wrapMarkdownParagraph
+              78
+              "Established topic tags will appear here as chunks are recorded. Coin clean canonical tags as distinct recurring characters, factions, locations, or plot threads emerge."
+        | otherwise =
+            wrapMarkdownParagraph
+              78
+              "Reuse established tags where accurate, and coin clean canonical tags when genuinely distinct recurring characters, factions, locations, or plot threads emerge:"
+              <> "\n\n"
+              <> wrapMarkdownParagraph 78 ("`" <> T.intercalate "`, `" canonTopics <> "`")
+      completedArcs = completedStoryArcRollups orderedStory
+      completedArcsBlock
+        | null completedArcs =
+            wrapMarkdownParagraph
+              78
+              "None archived yet (still in Arc 1). Consolidate completed chapters in the current arc to 1–2 bullets max in `## Story Summary So Far`."
+        | otherwise =
+            wrapMarkdownParagraph
+              78
+              "Collapse each completed arc below to 1 bullet in `## Story Summary So Far`, and consolidate completed chapters in the current arc to 1–2 bullets max:"
+              <> "\n\n"
+              <> T.intercalate
+                   "\n"
+                   [ "- **" <> lbl <> "**: [" <> T.pack (takeFileName fp) <> "](" <> T.pack fp <> ")"
+                   | (_, lbl, fp) <- completedArcs
+                   ]
+      indexIntroPara =
+        wrapMarkdownParagraph
+          78
+          "Do not manually re-emit this section in `=== UPDATED MEMORY ===`; `LetsRead` updates it automatically from your `=== CHUNK SUMMARY ===`."
       indexDirectorySection =
-        T.unlines $
-          [ "## Session Indexes & Recent Story Context (Auto-Maintained by Gatekeeper)"
-          , "*(Do not manually re-emit this section in `=== UPDATED MEMORY ===`; `LetsRead` updates it automatically from your `=== CHUNK SUMMARY ===`.)*"
+        T.unlines
+          [ "## Session Indexes & Recent Story Context"
           , ""
-          , "### Multi-Layer Domain Indexes (On-Demand `read_file`)"
-          , "- **Story Chunks (In-Text Canon)**: [Chronological Index](chunks/by_chronology.md) | [Semantic Topic Index](chunks/by_topic.md) | [Unlocked Chunks (`chunk_XXXX.md`)](chunks/)"
-          , "- **Session Logs (Commentary, Gags & Discussions)**: [Chronological Index](entries/by_chronology.md) | [Semantic Topic Index](entries/by_topic.md) | [Entry Files (`chunk_XXXX.md`)](entries/)"
-          , "- **Predictions (Theories & Verdicts)**: [Chronological Index](predictions/by_chronology.md) | [Semantic Topic Index](predictions/by_topic.md) | [Prediction Files (`pred_XXXX.md`)](predictions/)"
-          , canonTopicsLine
+          , indexIntroPara
           , ""
-          , "### Recent Story Chunks (Last 5 Chunks)"
+          , "### Multi-Layer Domain Indexes"
+          , ""
+          , "- Story Chunks: [Chronological Index](chunks/by_chronology.md) | [Semantic Topic Index](chunks/by_topic.md) | [Unlocked Chunks](chunks/)"
+          , "- Session Logs: [Chronological Index](entries/by_chronology.md) | [Semantic Topic Index](entries/by_topic.md) | [Entry Files](entries/)"
+          , "- Predictions: [Chronological Index](predictions/by_chronology.md) | [Semantic Topic Index](predictions/by_topic.md) | [Prediction Files](predictions/)"
+          , ""
+          , "### Established Topic Tags"
+          , ""
+          , canonTopicsBlock
+          , ""
+          , "### Completed L1 Story Arcs"
+          , ""
+          , completedArcsBlock
+          , ""
+          , "### Recent Story Chunks"
+          , ""
+          , recentStoryBlock
           ]
-            ++ recentStoryLines
       predictionSlateSection = renderPredictionSlateSection st
+      personaPara = wrapMarkdownParagraph 78 (expandPersonaPreset (stPersona st))
    in T.unlines $
         [ "# Reader Memory & Notes: " <> stTitle st
         , ""
-        , "*Session Directory*: `" <> T.pack sessionDir <> "`"
-        , "*Reader Persona*: " <> expandPersonaPreset (stPersona st)
-        , "*Progress*: " <> progressStr
+        , "## Session Overview"
+        , ""
+        , "- Session Directory: `" <> T.pack sessionDir <> "`"
+        , "- Progress: " <> progressStr
+        , ""
+        , "### Reader Persona"
+        , ""
+        , personaPara
         ]
           ++ compactionBanner
           ++ [ ""
              , "## Story Summary So Far"
+             , ""
              , T.strip (lookupSec "Story Summary So Far")
              , ""
              , T.strip indexDirectorySection
              , ""
              , "## Characters & Relationships"
+             , ""
              , T.strip (lookupSec "Characters & Relationships")
              , ""
              , "## Active Mysteries & Unanswered Questions"
+             , ""
              , T.strip (lookupSec "Active Mysteries & Unanswered Questions")
              , ""
              , T.strip predictionSlateSection
              , ""
              , "## Notable Quotes, Themes & Running Jokes"
+             , ""
              , T.strip (lookupSec "Notable Quotes, Themes & Running Jokes")
              ]
 
@@ -467,8 +558,8 @@ rebuildMasterLog sessionDir st = do
       logHeader =
         "# Let's Read: "
           <> stTitle st
-          <> "\n\n*Reader Persona*: "
-          <> stPersona st
+          <> "\n\n## Reader Persona\n\n"
+          <> wrapMarkdownParagraph 78 (stPersona st)
           <> "\n\n---\n\n"
       logPath = sessionDir </> "lets_read_log.md"
   TIO.writeFile logPath (logHeader <> T.concat entryContents <> wrapupContent <> hofSuffix)

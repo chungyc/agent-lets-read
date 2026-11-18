@@ -11,6 +11,8 @@ module LetsRead.Predictions
   , canonicalizeResolvedLine
   , renderRecordActiveLine
   , renderRecordResolvedLine
+  , renderOriginalPredictionSummary
+  , checkPredictionConcisenessIssues
   , parsePredictionLine
   , auditAndApplyPredictionUpdates
   , extractJudgeSection
@@ -43,6 +45,10 @@ import LetsRead.Types
   , formatChapLabel
   , jsonInt
   , padChunkNumber
+  , stripAfterClosingBracket
+  , stripToolReceiptComments
+  , wrapMarkdownBullet
+  , wrapMarkdownParagraph
   )
 import System.FilePath ((</>))
 
@@ -277,9 +283,7 @@ parsePredictionLine rawLine =
           let (insideBeforePipe, _) = T.breakOn "|" insideRaw
               (insideBeforeParen, _) = T.breakOn "(" insideBeforePipe
               inside = T.toLower (T.strip insideBeforeParen)
-              rawAfterBracket =
-                T.strip
-                  (T.dropWhile (\c -> c == '*' || c == ':') (T.drop 1 afterClose))
+              rawAfterBracket = stripAfterClosingBracket afterClose
               shortHorizonPrefix = "(short-horizon <3 chunks"
               afterBracket =
                 if shortHorizonPrefix `T.isPrefixOf` T.toLower rawAfterBracket
@@ -381,14 +385,60 @@ renderRecordResolvedLine pr =
         PredStatusSubverted resC -> canonicalizeResolvedLine origC resC ResSubverted noteTxt
         PredStatusRetired resC -> canonicalizeResolvedLine origC resC ResRetired noteTxt
 
+renderOriginalPredictionSummary :: PredictionRecord -> Text
+renderOriginalPredictionSummary pr
+  | not (T.null (prClue pr)) && not (T.null (prTheory pr)) =
+      "**Clue/Anomaly**: "
+        <> prClue pr
+        <> " -> **Theory**: "
+        <> prTheory pr
+        <> (if T.null (prRival pr) then "" else " (vs. **Plausible Rival**: " <> prRival pr <> ")")
+  | otherwise = T.strip (prRawBody pr)
+
+checkPredictionConcisenessIssues :: PredictionRecord -> [Text]
+checkPredictionConcisenessIssues pr =
+  let bodyLen = T.length (prRawBody pr)
+      clueLen = T.length (prClue pr)
+      theoryLen = T.length (prTheory pr)
+      rivalLen = T.length (prRival pr)
+      clueHasQuote = T.any (\c -> c == '"' || c == '\x201C' || c == '\x201D') (prClue pr)
+   in [ "total body was " <> jsonInt bodyLen <> " chars (cap: <= 450 chars)" | bodyLen > 450 ]
+        ++ [ "`**Clue/Anomaly**` was " <> jsonInt clueLen <> " chars (cap: <= 120 chars)" | clueLen > 120 ]
+        ++ [ "`**Clue/Anomaly**` contained inline quotation marks (summarize the detail in 1 short clause without quoting)" | clueHasQuote ]
+        ++ [ "`**Theory**` was " <> jsonInt theoryLen <> " chars (cap: <= 160 chars)" | theoryLen > 160 ]
+        ++ [ "`**Plausible Rival**` was " <> jsonInt rivalLen <> " chars (cap: <= 120 chars)" | rivalLen > 120 ]
+
+renderConcisenessAuditBlock :: Text -> PredictionRecord -> [Text] -> Text
+renderConcisenessAuditBlock nextStr pr issues =
+  let cPad = T.pack (padChunkNumber (prOriginChunk pr))
+   in T.intercalate
+        "\n"
+        [ "- **[PREDICTION CONCISENESS / SUB-CLAUSE OVERFLOW]**"
+        , wrapMarkdownBullet
+            78
+            ( "  - Issue: Prediction `[Predicted Chunk "
+                <> cPad
+                <> "]` exceeded the conciseness budget ("
+                <> T.intercalate "; " issues
+                <> ")."
+            )
+        , "  - Line: " <> renderRecordActiveLine pr
+        , wrapMarkdownBullet
+            78
+            ( "  - Action Required: On Chunk "
+                <> nextStr
+                <> ", keep the post-bracket prediction body `<= 450 chars` total (`**Clue/Anomaly** <= 120 chars` with no inline quotes, `**Theory** <= 160 chars` stating 1 direct outcome, `**Plausible Rival** <= 120 chars`)."
+            )
+        ]
+
 renderTagFormatAuditBlock :: Text -> Text -> Text -> Text
 renderTagFormatAuditBlock issueTxt invalidLineTxt actionTxt =
   T.intercalate
     "\n"
     [ "- **[INVALID PREDICTION TAG OR FORMAT]**"
-    , "  - *Issue*: " <> T.strip issueTxt
-    , "  - *Line*: " <> T.strip invalidLineTxt
-    , "  - *Action Required*: " <> T.strip actionTxt
+    , wrapMarkdownBullet 78 ("  - Issue: " <> T.strip issueTxt)
+    , "  - Line: " <> T.strip invalidLineTxt
+    , wrapMarkdownBullet 78 ("  - Action Required: " <> T.strip actionTxt)
     ]
 
 isPredictionMentionedInComm :: Text -> Text -> Bool
@@ -581,6 +631,13 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
       newOrAmendedRecords = map toPredictionRecord validNewActiveParsed
       replacedOrigins = map prOriginChunk newOrAmendedRecords
 
+      concisenessAuditBlocks =
+        [ renderConcisenessAuditBlock nextStr pr issues
+        | pr <- newOrAmendedRecords
+        , let issues = checkPredictionConcisenessIssues pr
+        , not (null issues)
+        ]
+
       candidateRecords =
         sortOn
           prOriginChunk
@@ -680,6 +737,7 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
         activeAuditBlocks
           ++ invalidAuditBlocks
           ++ duplicateChunkAuditBlocks
+          ++ concisenessAuditBlocks
           ++ selfJudgedAuditBlocks
           ++ unmatchedRetireAuditBlocks
           ++ prematureRetireAuditBlocks
@@ -696,18 +754,19 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
 
 extractJudgeSection :: Text -> Text
 extractJudgeSection raw =
-  let isJudgeHeader l =
+  let cleanRaw = stripToolReceiptComments raw
+      isJudgeHeader l =
         let s = T.toUpper (T.strip l)
          in s == "=== PREDICTION JUDGMENTS ==="
               || s == "=== PREDICTION JUDGEMENTS ==="
               || s == "=== JUDGMENTS ==="
               || s == "=== JUDGEMENTS ==="
               || s == "=== PREDICTION UPDATES ==="
-      ls = T.lines raw
+      ls = T.lines cleanRaw
       afterHeader = drop 1 (dropWhile (not . isJudgeHeader) ls)
       untilNextSec = takeWhile (\l -> not ("===" `T.isPrefixOf` T.strip l)) afterHeader
    in if null afterHeader
-        then T.strip raw
+        then T.strip cleanRaw
         else T.strip (T.unlines untilNextSec)
 
 applyJudgeVerdicts
@@ -828,7 +887,7 @@ applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
                         <> nextStr
                         <> "'s new prediction, nominate "
                         <> jsonInt excess
-                        <> " extra prediction(s) (choosing those most likely to never be resolved or most likely to be debunked in future installments) in `=== PREDICTION UPDATES ===` using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
+                        <> " extra prediction(s) (prioritizing `[DUPLICATE-THESIS]`, `[LINEAR]`/`[SHORT-HORIZON]`/`[SPLIT-CONTINUATION]`, or expired-trigger bets over unique subplot bets—never defaulting to mechanical oldest-first FIFO) in `=== PREDICTION UPDATES ===` using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
                         <> nextStr
                         <> "]** <reason>` so that at most 10 unresolved predictions remain."
                     )
@@ -1116,45 +1175,61 @@ renderHallOfFameMarkdown sessionDir st =
       renderDetailedBullet pr =
         let origPad = padChunkNumber (prOriginChunk pr)
             predFile = T.pack ("predictions" </> ("pred_" ++ origPad ++ ".md"))
-         in renderRecordResolvedLine pr
-              <> " ([pred_"
-              <> T.pack origPad
-              <> "]("
-              <> predFile
-              <> "))"
+            origBet = renderOriginalPredictionSummary pr
+            topLine =
+              wrapMarkdownBullet
+                78
+                ( renderRecordResolvedLine pr
+                    <> " ([pred_"
+                    <> T.pack origPad
+                    <> "]("
+                    <> predFile
+                    <> "))"
+                )
+            origLine = wrapMarkdownBullet 78 ("  - Original prediction — " <> origBet)
+         in topLine <> "\n" <> origLine
       renderUnresolvedBullet pr =
         let origPad = padChunkNumber (prOriginChunk pr)
             predFile = T.pack ("predictions" </> ("pred_" ++ origPad ++ ".md"))
-         in renderRecordActiveLine pr
-              <> " ([pred_"
-              <> T.pack origPad
-              <> "]("
-              <> predFile
-              <> "))"
+         in wrapMarkdownBullet
+              78
+              ( renderRecordActiveLine pr
+                  <> " ([pred_"
+                  <> T.pack origPad
+                  <> "]("
+                  <> predFile
+                  <> "))"
+              )
       sectionOrEmpty emptyMsg items renderFn =
         if null items
           then [emptyMsg]
-          else map renderFn items
+          else [T.intercalate "\n\n" (map renderFn items)]
+      introPara =
+        wrapMarkdownParagraph
+          78
+          ( "Generated automatically upon story completion from all "
+              <> jsonInt totalLogged
+              <> " recorded predictions in `"
+              <> T.pack sessionDir
+              <> "`."
+          )
    in T.unlines $
         [ "# Prediction Hall of Fame & Shame: " <> stTitle st
         , ""
-        , "*Session Directory*: `" <> T.pack sessionDir <> "`"
-        , "*Generated automatically upon story completion from all "
-            <> jsonInt totalLogged
-            <> " recorded predictions.*"
+        , introPara
         , ""
         , "## Final Prediction Scoreboard"
         , ""
-        , "- **Total Predictions Logged**: " <> jsonInt totalLogged
-        , "- **Major Confirmed Hits (>= 3 Chunks Foresight)**: **" <> jsonInt (length majorHits) <> "**"
-        , "- **Subverted Twists (Right Clue, Surprise Twist)**: **" <> jsonInt (length subvertedList) <> "**"
-        , "- **Debunked Misses (Glorious Corkboard Wipeouts)**: **" <> jsonInt (length debunkedList) <> "**"
-        , "- **Short-Horizon Confirmations (< 3 Chunks — No Hit Credit)**: " <> jsonInt (length shortConfirmations)
-        , "- **Retired for 10-Prediction Cap**: " <> jsonInt (length retiredList)
-        , "- **Unresolved / Open-Ended at Finale**: " <> jsonInt (length unresolvedList)
-        , "- **Multi-Chunk Hit Rate**: " <> accuracyNote
+        , "- Total Predictions Logged: " <> jsonInt totalLogged
+        , "- Major Confirmed Hits (>= 3 Chunks Foresight): **" <> jsonInt (length majorHits) <> "**"
+        , "- Subverted Twists (Right Clue, Surprise Twist): **" <> jsonInt (length subvertedList) <> "**"
+        , "- Debunked Misses (Glorious Corkboard Wipeouts): **" <> jsonInt (length debunkedList) <> "**"
+        , "- Short-Horizon Confirmations (< 3 Chunks — No Hit Credit): " <> jsonInt (length shortConfirmations)
+        , "- Retired for 10-Prediction Cap: " <> jsonInt (length retiredList)
+        , "- Unresolved / Open-Ended at Finale: " <> jsonInt (length unresolvedList)
+        , "- Multi-Chunk Hit Rate: " <> accuracyNote
         , ""
-        , "## Hall of Fame — Major Confirmed Hits (>= 3 Chunks Foresight)"
+        , "## Hall of Fame — Major Confirmed Hits"
         , ""
         ]
           ++ sectionOrEmpty
@@ -1162,7 +1237,7 @@ renderHallOfFameMarkdown sessionDir st =
             majorHits
             renderDetailedBullet
           ++ [ ""
-             , "## Best Twists — Subverted Predictions (Right Clue, Different Payoff)"
+             , "## Best Twists — Subverted Predictions"
              , ""
              ]
           ++ sectionOrEmpty
@@ -1170,7 +1245,7 @@ renderHallOfFameMarkdown sessionDir st =
             subvertedList
             renderDetailedBullet
           ++ [ ""
-             , "## Hall of Shame — Debunked Predictions & Glorious Misses"
+             , "## Hall of Shame — Debunked Predictions"
              , ""
              ]
           ++ sectionOrEmpty
@@ -1178,7 +1253,7 @@ renderHallOfFameMarkdown sessionDir st =
             debunkedList
             renderDetailedBullet
           ++ [ ""
-             , "## Short-Horizon Confirmations (< 3 Chunks — No Hit Credit)"
+             , "## Short-Horizon Confirmations"
              , ""
              ]
           ++ sectionOrEmpty
@@ -1186,7 +1261,7 @@ renderHallOfFameMarkdown sessionDir st =
             shortConfirmations
             renderDetailedBullet
           ++ [ ""
-             , "## Unresolved / Open-Ended Predictions at Finale"
+             , "## Unresolved Predictions at Finale"
              , ""
              ]
           ++ sectionOrEmpty
@@ -1194,7 +1269,7 @@ renderHallOfFameMarkdown sessionDir st =
             unresolvedList
             renderUnresolvedBullet
           ++ [ ""
-             , "## Retired Predictions (Pruned Under the 10-Prediction Cap)"
+             , "## Retired Predictions"
              , ""
              ]
           ++ sectionOrEmpty
@@ -1261,55 +1336,69 @@ renderPredictionSlateSection st =
       topicPath = T.pack ("predictions" </> "by_topic.md")
       hofLinkSuffix =
         if isFinished
-          then " | [End-of-Story Hall of Fame & Shame](" <> T.pack ("predictions" </> "hall_of_fame.md") <> ")"
+          then " | [Hall of Fame & Shame](" <> T.pack ("predictions" </> "hall_of_fame.md") <> ")"
           else ""
-      scoreboardLine =
-        "- **Running Tally**: "
-          <> jsonInt (length preds)
-          <> " logged | **"
-          <> jsonInt majorHitsCnt
-          <> " Major Hits** (>=3 chunks) | "
-          <> jsonInt shortHitsCnt
-          <> " Short-Horizon (<3 chunks) | **"
-          <> jsonInt subvertedCnt
-          <> " Subverted** | **"
-          <> jsonInt debunkedCnt
-          <> " Debunked** | "
-          <> jsonInt retiredCnt
-          <> " Retired | **"
-          <> jsonInt (length activePreds)
-          <> "/10 Active**"
-      indexLinksLine =
-        "- **Prediction Indices (On-Demand `read_file`)**: [Chronological Index]("
+      scoreboardPara =
+        wrapMarkdownParagraph
+          78
+          ( jsonInt (length preds)
+              <> " logged | **"
+              <> jsonInt majorHitsCnt
+              <> " Major Hits** (>=3 chunks) | "
+              <> jsonInt shortHitsCnt
+              <> " Short-Horizon (<3 chunks) | **"
+              <> jsonInt subvertedCnt
+              <> " Subverted** | **"
+              <> jsonInt debunkedCnt
+              <> " Debunked** | "
+              <> jsonInt retiredCnt
+              <> " Retired | **"
+              <> jsonInt (length activePreds)
+              <> "/10 Active**"
+          )
+      indexLinksPara =
+        "[Chronological Index]("
           <> chronPath
           <> ") | [Semantic Topic Index]("
           <> topicPath
-          <> ") | [Prediction Files (`pred_XXXX.md`)](predictions/)"
+          <> ") | [Prediction Files](predictions/)"
           <> hofLinkSuffix
+      slateIntroPara =
+        wrapMarkdownParagraph
+          78
+          "Do not re-emit this section in `=== UPDATED MEMORY ===`; submit only this turn's new prediction and any conditional `RETIRED` nomination in `=== PREDICTION UPDATES ===`. The `prediction-judge` subagent evaluates all active predictions after your turn."
       lastJudgeLines =
         if null (stLastJudgeSummary st)
           then []
           else
             [ ""
-            , "### Latest Prediction Judge Rulings (React to Any Confirmed / Debunked / Subverted Verdicts in Your Commentary!)"
+            , "### Latest Prediction Judge Rulings"
+            , ""
+            , wrapMarkdownParagraph 78 "React naturally in your commentary to any `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` verdicts below:"
+            , ""
+            , T.intercalate "\n\n" (map (wrapMarkdownBullet 78) (stLastJudgeSummary st))
             ]
-              ++ stLastJudgeSummary st
       recentResLines =
         if null recentResolved
           then []
           else
             [ ""
-            , "### Recently Resolved (Last 2 Chunks)"
+            , "### Recently Resolved"
+            , ""
+            , T.intercalate
+                "\n\n"
+                [ let origPad = padChunkNumber (prOriginChunk pr)
+                      pPath = T.pack ("predictions" </> ("pred_" ++ origPad ++ ".md"))
+                   in wrapMarkdownBullet 78 (renderRecordResolvedLine pr <> " ([details](" <> pPath <> "))")
+                | pr <- recentResolved
+                ]
             ]
-              ++ [ let origPad = padChunkNumber (prOriginChunk pr)
-                       pPath = T.pack ("predictions" </> ("pred_" ++ origPad ++ ".md"))
-                    in renderRecordResolvedLine pr <> " ([details](" <> pPath <> "))"
-                 | pr <- recentResolved
-                 ]
       activeLines =
         if null activePreds
           then
-            [ "- *(No active predictions yet. On every chunk before the final chunk, output 1 new non-softball, multi-chapter prediction (`<= 450 chars` total) in `=== PREDICTION UPDATES ===` using `- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 120 chars, no quotes> -> **Theory**: <direct bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)`.)*"
+            [ wrapMarkdownParagraph
+                78
+                "No active predictions yet. On every chunk before the final chunk, output 1 new non-softball, multi-chapter prediction (`<= 450 chars` total) in `=== PREDICTION UPDATES ===`."
             ]
           else
             [ let origPad = padChunkNumber (prOriginChunk pr)
@@ -1317,21 +1406,34 @@ renderPredictionSlateSection st =
                in renderRecordActiveLine pr <> " ([details](" <> pPath <> "))"
             | pr <- activePreds
             ]
-      warningLines = stPredictionAuditWarnings st
+      warningSection =
+        if null (stPredictionAuditWarnings st)
+          then []
+          else
+            [ ""
+            , "### Prediction Audit Warnings"
+            , ""
+            , T.intercalate "\n\n" (stPredictionAuditWarnings st)
+            ]
    in T.unlines $
-        [ "## Active Prediction Slate & Index (Auto-Maintained by Gatekeeper & Prediction Judge)"
-        , "*(Do not re-emit this section in `=== UPDATED MEMORY ===`; submit only this turn's new prediction and any conditional `RETIRED` nomination in `=== PREDICTION UPDATES ===`. The `prediction-judge` subagent evaluates all active predictions after your turn.)*"
+        [ "## Active Prediction Slate & Index"
         , ""
-        , scoreboardLine
-        , indexLinksLine
+        , slateIntroPara
+        , ""
+        , "### Prediction Scoreboard and Indexes"
+        , ""
+        , scoreboardPara
+        , ""
+        , indexLinksPara
         ]
           ++ lastJudgeLines
           ++ recentResLines
           ++ [ ""
              , "### Currently Active Unresolved Predictions (" <> jsonInt (length activePreds) <> "/10)"
+             , ""
              ]
           ++ activeLines
-          ++ warningLines
+          ++ warningSection
 
 formatPredictionTrackerCallout :: [Text] -> Text
 formatPredictionTrackerCallout [] = ""

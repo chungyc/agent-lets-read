@@ -17,6 +17,8 @@ module LetsRead.Index
   , entryIndexSpec
   , predictionIndexSpec
   , syncMultiLayerIndex
+  , completedStoryArcRollups
+  , checkStorySummaryStructure
   ) where
 
 import Control.Exception (IOException, catch)
@@ -28,7 +30,12 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import LetsRead.Predictions (cleanTopicTag, renderPredSummaryBullet)
+import LetsRead.Predictions
+  ( cleanTopicTag
+  , coalesceBulletLines
+  , isPlaceholderLine
+  , renderPredSummaryBullet
+  )
 import LetsRead.Types
   ( EntryDiscussionRecord (..)
   , EntryLogRecord (..)
@@ -40,6 +47,8 @@ import LetsRead.Types
   , jsonInt
   , padChunkNumber
   , readTextFileSafe
+  , stripToolReceiptComments
+  , wrapMarkdownParagraph
   )
 import System.Directory
   ( createDirectoryIfMissing
@@ -138,7 +147,7 @@ rollupIndexLevelsWithPrefix sessionDir relArcDir filePrefix dirHeading level nod
               T.unlines
                 ( [ "# " <> parentLabel
                   , ""
-                  , "*Session Directory*: `" <> T.pack sessionDir <> "`"
+                  , "Session Directory: `" <> T.pack sessionDir <> "`"
                   , ""
                   , "Read the linked archive files below to inspect detailed entries:"
                   , ""
@@ -267,9 +276,9 @@ syncChronologicalTree sessionDir st spec items = do
         T.unlines $
           [ "# " <> isDomainTitle spec <> " Index by Story Chronology: " <> stTitle st
           , ""
-          , "*Session Directory*: `" <> T.pack sessionDir <> "`"
+          , "Session Directory: `" <> T.pack sessionDir <> "`"
           , ""
-          , isChronIntro spec
+          , wrapMarkdownParagraph 78 (isChronIntro spec)
           , ""
           , "## Completed Arc Archives"
           , ""
@@ -419,9 +428,9 @@ syncTopicTree sessionDir st spec items = do
             T.unlines $
               [ "# " <> isDomainTitle spec <> " Index by Semantic Topic & Entity: " <> stTitle st
               , ""
-              , "*Session Directory*: `" <> T.pack sessionDir <> "`"
+              , "Session Directory: `" <> T.pack sessionDir <> "`"
               , ""
-              , isTopicIntro spec
+              , wrapMarkdownParagraph 78 (isTopicIntro spec)
               , ""
               , "## Indexed Topics (" <> jsonInt (length renderedTopics) <> ")"
               , ""
@@ -518,9 +527,9 @@ syncTopicTree sessionDir st spec items = do
             T.unlines $
               [ "# " <> isDomainTitle spec <> " Index by Semantic Topic & Entity: " <> stTitle st
               , ""
-              , "*Session Directory*: `" <> T.pack sessionDir <> "`"
+              , "Session Directory: `" <> T.pack sessionDir <> "`"
               , ""
-              , isTopicIntro spec
+              , wrapMarkdownParagraph 78 (isTopicIntro spec)
               , ""
               , "## Topic Archive Shards (" <> jsonInt (length renderedTopics) <> " Topics)"
               , ""
@@ -805,7 +814,7 @@ applyTopicAliases st
 
 parseTopicMergesSection :: Text -> [(Text, [Text])]
 parseTopicMergesSection raw =
-  let ls = T.lines raw
+  let ls = T.lines (stripToolReceiptComments raw)
       afterHeader =
         case break (\l -> "=== TOPIC MERGES ===" `T.isInfixOf` T.toUpper l) ls of
           (_, _ : rest) -> takeWhile (\l -> not ("===" `T.isPrefixOf` T.stripStart l)) rest
@@ -878,3 +887,93 @@ applyTopicCuratorResponse rawResp st =
       postTopics = [topicNormKey disp | (disp, _) <- collectSessionTopicCounts stWithAliases]
       stFinal = stWithAliases {stCuratedTopics = postTopics}
    in (stFinal, length validPairs)
+
+-- | Compute the completed @L1@ story arc rollup labels and relative file paths
+-- from the session's recorded story chunks, matching the exact @Arc K@ ranges
+-- archived in @chunks/archive/chronology/L1_XXXX.md@.
+completedStoryArcRollups :: [StoryChunkRecord] -> [(Int, Text, FilePath)]
+completedStoryArcRollups records =
+  let sorted = sortOn scrChunkIndex records
+      arcs =
+        groupItemsIntoArcs
+          (\r -> (scrChapterNumber r, scrChapterTitle r))
+          (\r -> (scrPartInChapter r, scrPartsInChapter r))
+          sorted
+      completedArcs = if length arcs <= 1 then [] else init arcs
+      mkArc (grpIdx, arcItems) =
+        let (startIdx, startChap) =
+              case arcItems of
+                (firstE : _) -> (scrChunkIndex firstE, scrChapterNumber firstE)
+                [] -> (1, 1)
+            (endIdx, endChap) =
+              case reverse arcItems of
+                (lastE : _) -> (scrChunkIndex lastE, scrChapterNumber lastE)
+                [] -> (1, 1)
+            chapRange
+              | startChap == 0 && endChap == 0 = "Front Matter"
+              | startChap == endChap = "Ch. " <> jsonInt startChap
+              | otherwise = "Ch. " <> jsonInt startChap <> "–" <> jsonInt endChap
+            itemRange =
+              if startIdx == endIdx
+                then "Chunk " <> T.pack (padChunkNumber startIdx)
+                else "Chunks " <> T.pack (padChunkNumber startIdx) <> "–" <> T.pack (padChunkNumber endIdx)
+            lbl = "Arc " <> jsonInt grpIdx <> " (" <> chapRange <> " | " <> itemRange <> ")"
+            relPath = "chunks" </> "archive" </> "chronology" </> ("L1_" ++ padChunkNumber grpIdx ++ ".md")
+         in (grpIdx, lbl, relPath)
+   in map mkArc (zip [1 :: Int ..] completedArcs)
+
+-- | Check whether @## Story Summary So Far@ has accumulated excessive
+-- uncollapsed chapter bullets beyond 1 bullet per completed @Arc K@ plus 2
+-- current-arc bullets (after Bullet 1 @Core Premise, Timeline & Baseline Facts@),
+-- or failed to collapse a completed @Arc K@ into an @Arc K@ bullet.
+checkStorySummaryStructure :: [(Text, Text)] -> [(Int, Text, FilePath)] -> Maybe Text
+checkStorySummaryStructure curated completedArcs =
+  case lookup "Story Summary So Far" curated of
+    Nothing -> Nothing
+    Just rawSec ->
+      let bullets =
+            [ T.strip l
+            | l <- coalesceBulletLines (T.lines rawSec)
+            , let s = T.strip l
+            , "- " `T.isPrefixOf` s || "* " `T.isPrefixOf` s
+            , not (isPlaceholderLine s)
+            ]
+          isBaselineBullet b =
+            let low = T.toLower b
+             in "core premise" `T.isInfixOf` low || "baseline facts" `T.isInfixOf` low
+          nonBaselineBullets =
+            case bullets of
+              (firstB : rest) | isBaselineBullet firstB -> rest
+              allBs -> filter (not . isBaselineBullet) allBs
+          completedCnt = length completedArcs
+          maxAllowedNonBaseline = completedCnt + 2
+          missingCompletedArcs =
+            [ lbl
+            | (arcNum, lbl, _) <- completedArcs
+            , let arcTag = "arc " <> jsonInt arcNum
+            , not (any (\b -> arcTag `T.isInfixOf` T.toLower b) nonBaselineBullets)
+            ]
+          hasUncollapsedArc = not (null missingCompletedArcs) && length nonBaselineBullets >= 2
+          hasExcessBullets = length nonBaselineBullets > maxAllowedNonBaseline
+       in if not hasExcessBullets && not hasUncollapsedArc
+            then Nothing
+            else
+              let arcHint =
+                    if null completedArcs
+                      then "consolidate completed chapters in the current arc into 1–2 bullets max (after Bullet 1 `Core Premise, Timeline & Baseline Facts (Persistent)`)"
+                      else
+                        "collapse each completed L1 arc ("
+                          <> T.intercalate "; " [lbl | (_, lbl, _) <- completedArcs]
+                          <> ") into 1 `Arc K` bullet and consolidate completed chapters in the current unarchived arc into 1–2 bullets max"
+               in Just $
+                    "`## Story Summary So Far` currently has "
+                      <> jsonInt (length nonBaselineBullets)
+                      <> " chapter/arc summary bullets after Bullet 1 (target max: "
+                      <> jsonInt maxAllowedNonBaseline
+                      <> " = "
+                      <> jsonInt completedCnt
+                      <> " completed `Arc K` bullet(s) + 1–2 current-arc bullets"
+                      <> (if null missingCompletedArcs then "" else "; uncollapsed completed arc(s): " <> T.intercalate ", " missingCompletedArcs)
+                      <> "). In `=== UPDATED MEMORY ===`, "
+                      <> arcHint
+                      <> "."

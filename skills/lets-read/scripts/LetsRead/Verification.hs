@@ -2,12 +2,20 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module LetsRead.Verification
-  ( loadBannedJargonIO
+  ( SubagentToolAudit (..)
+  , emptySubagentToolAudit
+  , loadBannedJargonIO
   , lintReaderCommentary
+  , lintStorySummaryBullets
   , parseCriticAndFactSections
   , verifyAndFilterCriticFactBullets
   , renderCriticFeedbackMarkdown
   , processCriticFeedback
+  , processCriticFeedbackWithAudit
+  , parseToolReceiptTag
+  , resolveSubagentToolAudit
+  , auditReaderToolUsage
+  , auditFactCheckerClaims
   , extractSubagentLogResponse
   , checkSubagentLogUsedSearchWeb
   , checkSubagentLogUsedVerificationTools
@@ -15,25 +23,32 @@ module LetsRead.Verification
 
 import Control.Exception (IOException, catch)
 import Control.Monad (filterM, forM, when)
-import Data.Char (chr, isHexDigit)
+import Data.Char (chr, isDigit, isHexDigit)
 import Data.List (isPrefixOf, isSuffixOf, maximumBy, nub)
-import Data.Maybe (fromMaybe, isJust, listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Ord (comparing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import LetsRead.Predictions (coalesceBulletLines)
+import Data.Time.Clock (UTCTime)
+import LetsRead.Index (checkStorySummaryStructure, completedStoryArcRollups)
+import LetsRead.Predictions (checkPredictionConcisenessIssues, coalesceBulletLines)
 import LetsRead.Prompts (writeFactCheckDiscussionPromptFile)
 import LetsRead.Types
   ( CriticSection (..)
   , ParsedChunkSummaries (..)
   , PredictionRecord (..)
   , SessionState (..)
+  , StoryChunkRecord
   , jsonInt
   , padChunkNumber
   , readTextFileSafe
   , resolveSkillResourcePath
+  , stripAfterClosingBracket
   , stripFileUriPrefix
+  , stripToolReceiptComments
+  , wrapMarkdownBullet
+  , wrapMarkdownQuote
   )
 import Numeric (readHex)
 import System.Directory
@@ -143,17 +158,7 @@ lintReaderCommentary bannedJargon commText parsedSummaries mNewPred =
         case mNewPred of
           Nothing -> []
           Just pr ->
-            let bodyLen = T.length (prRawBody pr)
-                clueLen = T.length (prClue pr)
-                theoryLen = T.length (prTheory pr)
-                rivalLen = T.length (prRival pr)
-                clueHasQuote = T.any (\c -> c == '"' || c == '\x201C' || c == '\x201D') (prClue pr)
-                issues =
-                  [ "total body was " <> jsonInt bodyLen <> " chars (cap: <= 450 chars)" | bodyLen > 450 ]
-                    ++ [ "`**Clue/Anomaly**` was " <> jsonInt clueLen <> " chars (cap: <= 120 chars)" | clueLen > 120 ]
-                    ++ [ "`**Clue/Anomaly**` contained inline quotation marks (summarize the detail in 1 short clause without quoting)" | clueHasQuote ]
-                    ++ [ "`**Theory**` was " <> jsonInt theoryLen <> " chars (cap: <= 160 chars)" | theoryLen > 160 ]
-                    ++ [ "`**Plausible Rival**` was " <> jsonInt rivalLen <> " chars (cap: <= 120 chars)" | rivalLen > 120 ]
+            let issues = checkPredictionConcisenessIssues pr
                 cPad = T.pack (padChunkNumber (prOriginChunk pr))
              in if null issues
                   then []
@@ -165,6 +170,12 @@ lintReaderCommentary bannedJargon commText parsedSummaries mNewPred =
                         <> "). On your next turn, keep the prediction body `<= 450 chars` total (`**Clue/Anomaly** <= 120 chars` with no inline quotes, `**Theory** <= 160 chars` stating 1 direct outcome, `**Plausible Rival** <= 120 chars`)."
                     ]
    in jargonWarn ++ headingWarn ++ emoteWarn ++ summaryWarn ++ predLenWarn
+
+lintStorySummaryBullets :: [(Text, Text)] -> [StoryChunkRecord] -> [Text]
+lintStorySummaryBullets curated storyRecords =
+  case checkStorySummaryStructure curated (completedStoryArcRollups storyRecords) of
+    Nothing -> []
+    Just msg -> ["- **[Deterministic Style Linter (`LetsRead`)]** " <> msg]
 
 isCriticPassLine :: Text -> Bool
 isCriticPassLine raw =
@@ -199,7 +210,7 @@ parseCriticAndFactSections raw =
         case classifyHeader l of
           Just newSec -> go newSec ls
           Nothing -> (curSec, l) : go curSec ls
-      tagged = go CritSecGeneral (coalesceBulletLines (T.lines raw))
+      tagged = go CritSecGeneral (coalesceBulletLines (T.lines (stripToolReceiptComments raw)))
       isBullet l =
         let t = T.strip l
          in ("- " `T.isPrefixOf` t || "* " `T.isPrefixOf` t) && not (isCriticPassLine t)
@@ -289,7 +300,7 @@ formatFactBulletAsPeerQuery rawBullet =
    in if T.null afterOpen || T.null afterClose
         then s
         else
-          let bodyAfter = T.strip (T.dropWhile (\c -> c == '*' || c == ':') (T.drop 1 afterClose))
+          let bodyAfter = stripAfterClosingBracket afterClose
               parts = map T.strip (T.splitOn "|" inside)
               rewritePart idx p =
                 let low = T.toLower p
@@ -357,19 +368,21 @@ verifyAndFilterCriticFactBullets sessionDir hasSearchWebCall bullets = do
 renderCriticFeedbackMarkdown :: FilePath -> Int -> Bool -> [Text] -> [Text] -> [Text] -> Text
 renderCriticFeedbackMarkdown sessionDir curIdx isArchiveDoc verifiedLog peerQueries styleCoaching =
   let curPad = T.pack (padChunkNumber curIdx)
-      styleLines =
+      styleBlock =
         if null styleCoaching
-          then ["- *(None flagged on Chunk " <> curPad <> " — persona and style were on target.)*"]
-          else styleCoaching
+          then "- *(None flagged on Chunk " <> curPad <> " — persona and style were on target.)*"
+          else T.intercalate "\n\n" (map (wrapMarkdownBullet 78) styleCoaching)
       factArchiveSection =
         if not isArchiveDoc
           then []
           else
             [ ""
-            , "## Fact-Checker Peer Verification Queries (Delivered via Pre-Next `Reader Discussion`)"
+            , "## Fact-Checker Peer Verification Queries"
             , ""
+            , if null peerQueries
+                then "- *(None flagged on Chunk " <> curPad <> ".)*"
+                else T.intercalate "\n\n" (map (wrapMarkdownBullet 78) peerQueries)
             ]
-              ++ (if null peerQueries then ["- *(None flagged on Chunk " <> curPad <> ".)*"] else peerQueries)
       verifiedLogSection =
         if not isArchiveDoc || null verifiedLog
           then []
@@ -377,27 +390,250 @@ renderCriticFeedbackMarkdown sessionDir curIdx isArchiveDoc verifiedLog peerQuer
             [ ""
             , "## Fact-Checker Verified Claims Audit Log"
             , ""
+            , T.intercalate "\n\n" (map (wrapMarkdownBullet 78) verifiedLog)
             ]
-              ++ verifiedLog
+      howToUseQuote =
+        wrapMarkdownQuote
+          78
+          "Read `commentary-critic`'s editorial review of how your previous entry aligned with your Active Persona. Apply useful voice and craft adjustments silently as you write this chunk's commentary (while retaining editorial autonomy over what fits the current scene). Never apologize for, mention, or meta-reference style feedback inside `=== COMMENTARY ===`."
    in T.unlines $
-        [ "# Persona & Style Critique Notes (From Chunk " <> curPad <> ")"
+        [ "# Persona & Style Critique Notes (Chunk " <> curPad <> ")"
         , ""
-        , "*Session Directory*: `" <> T.pack sessionDir <> "`"
+        , "Session Directory: `" <> T.pack sessionDir <> "`"
         , ""
         , "> [!IMPORTANT]"
-        , "> **HOW TO USE THIS FILE**:"
-        , "> Read `commentary-critic`'s editorial review of how your previous entry aligned with your Active Persona. Apply useful voice and craft adjustments **silently** as you write this chunk's commentary (while retaining editorial autonomy over what fits the current scene). **NEVER** apologize for, mention, or meta-reference style/coaching feedback inside `=== COMMENTARY ===`."
+        , howToUseQuote
         , ""
-        , "## Persona & Style Critique (Apply Silently — Never Mention in Commentary)"
+        , "## Persona & Style Critique"
         , ""
+        , styleBlock
         ]
-          ++ styleLines
           ++ factArchiveSection
           ++ verifiedLogSection
 
+data SubagentToolAudit = SubagentToolAudit
+  { staSource :: !Text
+  -- ^ @"transcript"@ | @"parent_log"@ | @"response_header"@ | @"unavailable"@
+  , staUsedSearchWeb :: !(Maybe Bool)
+  , staUsedVerificationTools :: !(Maybe Bool)
+  , staReadFiles :: ![Text]
+  , staPriorTranscriptReadFiles :: ![Text]
+  , staIsFirstTurnInTranscript :: !(Maybe Bool)
+  }
+  deriving (Eq, Show)
+
+emptySubagentToolAudit :: SubagentToolAudit
+emptySubagentToolAudit =
+  SubagentToolAudit
+    { staSource = "unavailable"
+    , staUsedSearchWeb = Nothing
+    , staUsedVerificationTools = Nothing
+    , staReadFiles = []
+    , staPriorTranscriptReadFiles = []
+    , staIsFirstTurnInTranscript = Nothing
+    }
+
+isStoryChunkFileRef :: Text -> Maybe Int
+isStoryChunkFileRef rawRef =
+  let norm = T.map (\c -> if c == '\\' then '/' else c) (T.dropAround (\c -> c == '"' || c == '\'' || c == '`') (T.strip rawRef))
+      low = T.toLower norm
+      base = T.unpack (snd (T.breakOnEnd "/" norm))
+      inExcludedDir = "entries/" `T.isInfixOf` low || "archive/" `T.isInfixOf` low || "predictions/" `T.isInfixOf` low
+      isChunkDirOrBare =
+        not ("/" `T.isInfixOf` norm)
+          || ("/chunks/" <> T.pack base) `T.isSuffixOf` low
+          || ("chunks/" <> T.pack base) == low
+   in if not inExcludedDir && isChunkDirOrBare && "chunk_" `isPrefixOf` base && ".md" `isSuffixOf` base
+        then
+          let digits = take (length base - 9) (drop 6 base)
+           in if not (null digits) && all isDigit digits
+                then case reads digits of
+                  [(n, "")] | n >= 1 -> Just n
+                  _ -> Nothing
+                else Nothing
+        else Nothing
+
+extractExplicitStoryChunkRefs :: Text -> [Int]
+extractExplicitStoryChunkRefs txt =
+  let norm = T.map (\c -> if c == '\\' then '/' else c) txt
+      cleaned = T.map (\c -> if isDigit c || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c `elem` ['_', '/', '.'] then c else ' ') norm
+   in nub [n | rawTok <- T.words cleaned, let tok = T.dropAround (\c -> c == '.' || c == '/') rawTok, Just n <- [isStoryChunkFileRef tok]]
+
+auditReaderToolUsage :: Int -> Bool -> Text -> SubagentToolAudit -> (Maybe Bool, Int, [Text])
+auditReaderToolUsage curIdx shouldRotateRecommended commAndPredText audit =
+  let readPriorChunks = nub [n | f <- staReadFiles audit, Just n <- [isStoryChunkFileRef f], n < curIdx]
+      allKnownReadChunks =
+        nub
+          [ n
+          | f <- staReadFiles audit ++ staPriorTranscriptReadFiles audit
+          , Just n <- [isStoryChunkFileRef f]
+          , n < curIdx
+          ]
+      callbackCount = length readPriorChunks
+   in if staSource audit == "unavailable" || curIdx <= 1
+        then (Nothing, callbackCount, [])
+        else
+          let didReadPrev = (curIdx - 1) `elem` readPriorChunks
+              isFreshRotation =
+                case staIsFirstTurnInTranscript audit of
+                  Just isFirst -> isFirst
+                  Nothing -> shouldRotateRecommended
+              curPad = T.pack (padChunkNumber curIdx)
+              prevPad = T.pack (padChunkNumber (curIdx - 1))
+              rotWarn =
+                [ "- **[Callback & Continuity Audit (`LetsRead`)]** Newly rotated `blind-reader` on Chunk "
+                    <> curPad
+                    <> " did not call `read_file` on `chunks/chunk_"
+                    <> prevPad
+                    <> ".md`. On rotated turns (`Chunk > 1`), read `chunks/chunk_(N-1).md` before writing your response so continuity stays anchored in primary text."
+                | isFreshRotation && not didReadPrev
+                ]
+              unverifiedExplicitRefs =
+                [ n
+                | n <- extractExplicitStoryChunkRefs commAndPredText
+                , n < curIdx
+                , n `notElem` allKnownReadChunks
+                ]
+              citeWarn =
+                [ "- **[Callback & Continuity Audit (`LetsRead`)]** Chunk "
+                    <> curPad
+                    <> " cited earlier story chunk file(s) ("
+                    <> T.intercalate ", " ["`chunks/chunk_" <> T.pack (padChunkNumber n) <> ".md`" | n <- unverifiedExplicitRefs]
+                    <> ") without a `read_file` receipt. Verify earlier-chunk callbacks via `read_file` on `chunks/chunk_XXXX.md` rather than relying on `memory.md`."
+                | not (null unverifiedExplicitRefs)
+                ]
+           in (Just didReadPrev, callbackCount, rotWarn ++ citeWarn)
+
+auditFactCheckerClaims :: FilePath -> Int -> SubagentToolAudit -> [Text] -> [Text] -> IO ([Text], [Text])
+auditFactCheckerClaims sessionDir curIdx audit verifiedLogBullets factBullets = do
+  let curChunkPath = sessionDir </> "current_chunk.md"
+  hasCurChunk <- doesFileExist curChunkPath
+  mCurChunkNorm <-
+    if hasCurChunk
+      then Just . normalizeForQuoteCheck <$> readTextFileSafe curChunkPath
+      else pure Nothing
+  let allKnownReadChunks =
+        nub
+          [ n
+          | f <- staReadFiles audit ++ staPriorTranscriptReadFiles audit
+          , Just n <- [isStoryChunkFileRef f]
+          ]
+      hasSearchWebCall = fromMaybe True (staUsedSearchWeb audit)
+      extractSourceText hdr =
+        let parts = map T.strip (T.splitOn "|" hdr)
+            findPrefix pfx =
+              listToMaybe
+                [ T.strip (T.drop (T.length pfx) p)
+                | p <- parts
+                , pfx `T.isPrefixOf` T.toLower p
+                ]
+         in case findPrefix "source:" of
+              Just s -> Just s
+              Nothing -> findPrefix "cited passage:"
+      auditSingleVerifiedLine l =
+        let low = T.toLower l
+            searchIssue =
+              [ "search_web tool was not invoked on this turn"
+              | not hasSearchWebCall && "search_web" `T.isInfixOf` low
+              ]
+            hdrIssues =
+              case extractBracketHeaderFromBullet l of
+                Nothing -> []
+                Just hdr ->
+                  let hdrLow = T.toLower (T.strip hdr)
+                      isOk = "ok" `T.isPrefixOf` hdrLow
+                      mSrcTxt = extractSourceText hdr
+                      srcTxt = fromMaybe "" mSrcTxt
+                      srcLow = T.toLower srcTxt
+                      citedPriorChunks =
+                        [ n
+                        | n <- extractExplicitStoryChunkRefs srcTxt
+                        , n < curIdx
+                        ]
+                      unverifiedPrior =
+                        [ "cited chunks/chunk_" <> T.pack (padChunkNumber n) <> ".md without a read_file receipt"
+                        | staSource audit /= "unavailable"
+                        , n <- citedPriorChunks
+                        , n `notElem` allKnownReadChunks
+                        ]
+                      curPad = T.pack (padChunkNumber curIdx)
+                      citesOnlyCurrentChunk =
+                        null citedPriorChunks
+                          && not ("search_web" `T.isInfixOf` srcLow)
+                          && not ("memory.md" `T.isInfixOf` srcLow)
+                          && ( "current_chunk.md" `T.isInfixOf` srcLow
+                                 || ("chunk_" <> curPad <> ".md") `T.isInfixOf` srcLow
+                             )
+                      (_, afterOpen) = T.breakOn "[" l
+                      (_, afterClose) = T.breakOn "]" (T.drop 1 afterOpen)
+                      claimBody = if T.null afterClose then "" else stripAfterClosingBracket afterClose
+                      bodyPriorRefs =
+                        [ n
+                        | n <- extractExplicitStoryChunkRefs claimBody
+                        , n < curIdx
+                        ]
+                      misusedCurChunkForPriorRef =
+                        [ "Source: current_chunk.md cited for claim referencing earlier chunks/chunk_"
+                            <> T.pack (padChunkNumber n)
+                            <> ".md"
+                        | isOk && citesOnlyCurrentChunk
+                        , n <- bodyPriorRefs
+                        ]
+                      misusedCurChunkQuote =
+                        case (isOk && citesOnlyCurrentChunk, extractSourceAndQuote hdr, mCurChunkNorm) of
+                          (True, Just (_, qTxt), Just normCur) ->
+                            let rawSegs = concatMap (T.splitOn "...") (T.splitOn "[...]" qTxt)
+                                normSegs = [normalizeForQuoteCheck s | s <- rawSegs, not (T.null (T.strip s))]
+                             in [ "Quote cited under Source: current_chunk.md was not found in current_chunk.md"
+                                | not (null normSegs) && any (\s -> not (s `T.isInfixOf` normCur)) normSegs
+                                ]
+                          _ -> []
+                      citesMemoryAsPrimary =
+                        [ "Source: memory.md cited as primary verification source instead of chunks/chunk_XXXX.md"
+                        | isOk
+                        , "memory.md" `T.isInfixOf` srcLow
+                        , not ("core premise" `T.isInfixOf` T.toLower claimBody)
+                        , not ("bullet 1" `T.isInfixOf` T.toLower claimBody)
+                        , not ("current_chunk.md" `T.isInfixOf` srcLow)
+                        , null citedPriorChunks
+                        ]
+                   in unverifiedPrior ++ misusedCurChunkForPriorRef ++ misusedCurChunkQuote ++ citesMemoryAsPrimary
+            allIssues = searchIssue ++ hdrIssues
+            annotatedLine =
+              if null allIssues
+                then l
+                else l <> " *(note: " <> T.intercalate "; " allIssues <> ")*"
+         in (annotatedLine, allIssues)
+      disputedPriorReadIssues =
+        [ "Disputed fact bullet cited chunks/chunk_" <> T.pack (padChunkNumber n) <> ".md without a read_file receipt"
+        | staSource audit /= "unavailable"
+        , b <- factBullets
+        , Just hdr <- [extractBracketHeaderFromBullet b]
+        , Just srcTxt <- [extractSourceText hdr]
+        , n <- extractExplicitStoryChunkRefs srcTxt
+        , n < curIdx
+        , n `notElem` allKnownReadChunks
+        ]
+      auditedPairs = map auditSingleVerifiedLine verifiedLogBullets
+      annotatedVerified = map fst auditedPairs
+      allWarnings = concatMap snd auditedPairs ++ disputedPriorReadIssues
+  pure (annotatedVerified, allWarnings)
+
 processCriticFeedback :: FilePath -> SessionState -> Int -> Bool -> [Text] -> Maybe Text -> Maybe Text -> IO (Bool, Int, Bool, Int, Int)
 processCriticFeedback sessionDir st curIdx hasSearchWebCall linterWarnings mRawFactCheck mRawCritic = do
-  let (factVerLog1, rawFacts1, rawStyles1) =
+  let syntheticAudit =
+        emptySubagentToolAudit
+          { staSource = "legacy_bool"
+          , staUsedSearchWeb = Just hasSearchWebCall
+          }
+  (fbW, notesCnt, hasFQ, fqCnt, rejCnt, _) <-
+    processCriticFeedbackWithAudit sessionDir st curIdx syntheticAudit linterWarnings mRawFactCheck mRawCritic
+  pure (fbW, notesCnt, hasFQ, fqCnt, rejCnt)
+
+processCriticFeedbackWithAudit :: FilePath -> SessionState -> Int -> SubagentToolAudit -> [Text] -> Maybe Text -> Maybe Text -> IO (Bool, Int, Bool, Int, Int, Int)
+processCriticFeedbackWithAudit sessionDir st curIdx factAudit linterWarnings mRawFactCheck mRawCritic = do
+  let hasSearchWebCall = fromMaybe True (staUsedSearchWeb factAudit)
+      (factVerLog1, rawFacts1, rawStyles1) =
         case mRawFactCheck of
           Nothing -> ([], [], [])
           Just txt -> parseCriticAndFactSections txt
@@ -405,18 +641,17 @@ processCriticFeedback sessionDir st curIdx hasSearchWebCall linterWarnings mRawF
         case mRawCritic of
           Nothing -> ([], [], [])
           Just txt -> parseCriticAndFactSections txt
-      annotateSearchWeb l
-        | not hasSearchWebCall && "search_web" `T.isInfixOf` T.toLower l =
-            l <> " *(note: search_web tool was not invoked on this turn)*"
-        | otherwise = l
-      allVerifiedLog = map annotateSearchWeb (factVerLog1 ++ factVerLog2)
+      rawVerifiedLog = factVerLog1 ++ factVerLog2
       allRawFacts = rawFacts1 ++ rawFacts2
       allRawStyles = rawStyles1 ++ rawStyles2
+  (allVerifiedLog, factAuditWarnings) <-
+    auditFactCheckerClaims sessionDir curIdx factAudit rawVerifiedLog allRawFacts
   (peerQueries, rejectedCount) <- verifyAndFilterCriticFactBullets sessionDir hasSearchWebCall allRawFacts
   let combinedStyles = linterWarnings ++ allRawStyles
       totalStyleNotes = length combinedStyles
       factQueriesCount = length peerQueries
       hasFactQueries = factQueriesCount > 0
+      factAuditWarnCount = length factAuditWarnings
       feedbackPath = sessionDir </> "critic_feedback.md"
       questionsPath = sessionDir </> "current_fact_check_questions.md"
       discPromptPath = sessionDir </> "current_discussion_prompt.md"
@@ -438,14 +673,14 @@ processCriticFeedback sessionDir st curIdx hasSearchWebCall linterWarnings mRawF
     then do
       fbExists <- doesFileExist feedbackPath
       when fbExists (removeFile feedbackPath `catch` (\(_ :: IOException) -> pure ()))
-      pure (False, 0, hasFactQueries, factQueriesCount, rejectedCount)
+      pure (False, 0, hasFactQueries, factQueriesCount, rejectedCount, factAuditWarnCount)
     else do
       let rendered = renderCriticFeedbackMarkdown sessionDir curIdx False [] [] combinedStyles
       TIO.writeFile feedbackPath rendered
-      pure (True, totalStyleNotes, hasFactQueries, factQueriesCount, rejectedCount)
+      pure (True, totalStyleNotes, hasFactQueries, factQueriesCount, rejectedCount, factAuditWarnCount)
 
 -- ---------------------------------------------------------------------------
--- Subagent Transcript JSONL Extraction & Tool-Call Auditing
+-- Subagent Transcript JSONL Extraction & Sandbox-Safe Tool-Call Auditing
 -- ---------------------------------------------------------------------------
 
 parseJsonStringLiteral :: Text -> Maybe Text
@@ -518,6 +753,25 @@ deriveBrainDirFromLogPath rawPath =
              in if parent == d then Nothing else walkUp parent
    in walkUp clean
 
+-- | Extract the inner response text when a message is a runtime idle wakeup
+-- (@Subagent <subId> has gone idle. This was the subagent's most recent response: ...@).
+extractIdleSubagentResponse :: Text -> Text -> Maybe Text
+extractIdleSubagentResponse subId rawContent =
+  let marker = "Subagent " <> subId <> " has gone idle"
+      (_, afterSub) = T.breakOn marker rawContent
+   in if T.null afterSub
+        then Nothing
+        else
+          let respMarker = "This was the subagent's most recent response:"
+              (_, afterResp) = T.breakOn respMarker afterSub
+              rawPayload =
+                if T.null afterResp
+                  then T.drop (T.length marker) afterSub
+                  else T.drop (T.length respMarker) afterResp
+              withoutClosingTag = fst (T.breakOn "</SYSTEM_MESSAGE>" rawPayload)
+              cleaned = T.strip withoutClosingTag
+           in if T.null cleaned then Nothing else Just cleaned
+
 findSubagentMessageFromParent :: FilePath -> Text -> IO (Maybe Text)
 findSubagentMessageFromParent rawLogPath subId = do
   homeDir <- getHomeDirectory
@@ -531,28 +785,68 @@ findSubagentMessageFromParent rawLogPath subId = do
   if null existingBrainDirs
     then pure Nothing
     else do
-      msgDirs <- fmap concat $ forM existingBrainDirs $ \brainDir -> do
+      convPairs <- fmap concat $ forM existingBrainDirs $ \brainDir -> do
         convs <- listDirectory brainDir `catch` (\(_ :: IOException) -> pure [])
-        pure $
-          concat
-            [ [ brainDir </> c </> ".system_generated" </> "messages"
-              , brainDir </> c </> ".system_generated" </> "messages" </> "undelivered"
-              ]
-            | c <- convs
-            ]
-      existingMsgDirs <- filterM doesDirectoryExist (nub msgDirs)
+        pure [(brainDir, c) | c <- convs, T.pack c /= subId]
+      let msgDirs =
+            nub $
+              concat
+                [ [ brainDir </> c </> ".system_generated" </> "messages"
+                  , brainDir </> c </> ".system_generated" </> "messages" </> "undelivered"
+                  ]
+                | (brainDir, c) <- convPairs
+                ]
+      existingMsgDirs <- filterM doesDirectoryExist msgDirs
       allMsgFiles <- concatMapM listJsonFiles existingMsgDirs
-      matches <- forM allMsgFiles $ \f -> do
+      msgMatches <- forM allMsgFiles $ \f -> do
         txt <- readTextFileSafe f
         let senderField = extractJsonStringField "sender" txt
-            contentField = extractJsonStringField "content" txt
+            mContent = extractJsonStringField "content" txt
             tsField = fromMaybe "" (extractJsonStringField "timestamp" txt)
-        if senderField == Just subId && isJust contentField
-          then do
+            mPayload =
+              case mContent of
+                Nothing -> Nothing
+                Just c
+                  | senderField == Just subId -> Just (T.strip c)
+                  | otherwise -> extractIdleSubagentResponse subId c
+        case mPayload of
+          Just payload | not (T.null payload) -> do
             mtime <- getModificationTime f
-            pure (Just ((tsField, mtime), fromMaybe "" contentField))
-          else pure Nothing
-      let valid = [ (k, c) | Just (k, c) <- matches, not (T.null c) ]
+            pure (Just ((tsField, mtime, 1 :: Int), payload))
+          _ -> pure Nothing
+
+      parentLogMatches <- forM convPairs $ \(brainDir, c) -> do
+        let logDir = brainDir </> c </> ".system_generated" </> "logs"
+            fullLog = logDir </> "transcript_full.jsonl"
+            compactLog = logDir </> "transcript.jsonl"
+        hasFullLog <- doesFileExist fullLog
+        pPath <-
+          if hasFullLog
+            then pure fullLog
+            else do
+              hasCompact <- doesFileExist compactLog
+              pure (if hasCompact then compactLog else "")
+        if null pPath
+          then pure []
+          else do
+            raw <- readTextFileSafe pPath
+            mtime <- getModificationTime pPath
+            let marker = "Subagent " <> subId <> " has gone idle"
+                matchedLines =
+                  [ ( (fromMaybe "" (extractJsonStringField "created_at" l), mtime, idx)
+                    , payload
+                    )
+                  | (idx, l) <- zip [1 :: Int ..] (T.lines raw)
+                  , marker `T.isInfixOf` l
+                  , Just contentTxt <- [extractJsonStringField "content" l]
+                  , Just payload <- [extractIdleSubagentResponse subId contentTxt]
+                  ]
+            pure matchedLines
+
+      let valid :: [((Text, UTCTime, Int), Text)]
+          valid =
+            [ m | Just m <- msgMatches ]
+              ++ concat parentLogMatches
       if null valid
         then pure Nothing
         else pure (Just (snd (maximumBy (comparing fst) valid)))
@@ -561,6 +855,174 @@ findSubagentMessageFromParent rawLogPath subId = do
       names <- listDirectory d `catch` (\(_ :: IOException) -> pure [])
       pure [d </> n | n <- names, ".json" `isSuffixOf` n]
     concatMapM f xs = fmap concat (mapM f xs)
+
+-- | Parse a @<!-- TOOLS: ... -->@ comment or @[Tools: ...]@ completion-notice
+-- receipt tag into @(usedSearchWeb, readFilePaths, bareReadFile)@.
+parseToolReceiptTag :: Text -> Maybe (Bool, [Text], Bool)
+parseToolReceiptTag raw =
+  case extractCommentToolsSpec raw of
+    Just spec -> Just (parseToolsSpecBody spec)
+    Nothing ->
+      case extractBracketToolsSpec raw of
+        Just spec -> Just (parseToolsSpecBody spec)
+        Nothing -> Nothing
+  where
+    extractCommentToolsSpec txt =
+      listToMaybe
+        [ T.strip (T.drop 6 inner)
+        | l <- T.lines txt
+        , let s = T.strip l
+        , "<!--" `T.isPrefixOf` s && "-->" `T.isSuffixOf` s
+        , let inner = T.strip (T.dropEnd 3 (T.drop 4 s))
+        , "tools:" `T.isPrefixOf` T.toLower inner
+        ]
+
+    extractBracketToolsSpec txt =
+      let low = T.toLower txt
+          (_, afterIdx) = T.breakOn "[tools:" low
+       in if T.null afterIdx
+            then Nothing
+            else
+              let startOffset = T.length txt - T.length afterIdx + 7
+                  restOrig = T.drop startOffset txt
+               in takeUntilMatchingBracket (0 :: Int) False [] restOrig
+
+    takeUntilMatchingBracket _ _ _ t | T.null t = Nothing
+    takeUntilMatchingBracket parenDepth inQuotes acc t =
+      case T.uncons t of
+        Nothing -> Nothing
+        Just ('\\', rest)
+          | inQuotes ->
+              case T.uncons rest of
+                Nothing -> Nothing
+                Just (c2, r2) -> takeUntilMatchingBracket parenDepth inQuotes (c2 : '\\' : acc) r2
+        Just ('"', rest) ->
+          takeUntilMatchingBracket parenDepth (not inQuotes) ('"' : acc) rest
+        Just ('(', rest)
+          | not inQuotes ->
+              takeUntilMatchingBracket (parenDepth + 1) inQuotes ('(' : acc) rest
+        Just (')', rest)
+          | not inQuotes && parenDepth > 0 ->
+              takeUntilMatchingBracket (parenDepth - 1) inQuotes (')' : acc) rest
+        Just (']', _)
+          | not inQuotes && parenDepth == 0 ->
+              Just (T.strip (T.pack (reverse acc)))
+        Just (c, rest) ->
+          takeUntilMatchingBracket parenDepth inQuotes (c : acc) rest
+
+    splitOutsideQuotes :: (Char -> Bool) -> Text -> [Text]
+    splitOutsideQuotes isSep = go (0 :: Int) False []
+      where
+        flush cur =
+          let tok = T.strip (T.pack (reverse cur))
+           in [tok | not (T.null tok)]
+        go _ _ cur s
+          | T.null s = flush cur
+        go pDepth inQ cur s =
+          case T.uncons s of
+            Nothing -> flush cur
+            Just ('"', r) -> go pDepth (not inQ) ('"' : cur) r
+            Just ('(', r) | not inQ -> go (pDepth + 1) inQ ('(' : cur) r
+            Just (')', r) | not inQ && pDepth > 0 -> go (pDepth - 1) inQ (')' : cur) r
+            Just (c, r)
+              | not inQ && pDepth == 0 && isSep c ->
+                  flush cur ++ go pDepth inQ [] r
+              | otherwise ->
+                  go pDepth inQ (c : cur) r
+
+    cleanPathTok :: Text -> Text
+    cleanPathTok =
+      T.strip . T.dropAround (\c -> c == '"' || c == '\'' || c == '`') . T.strip
+
+    parseToolsSpecBody :: Text -> (Bool, [Text], Bool)
+    parseToolsSpecBody spec =
+      let trimmed = T.strip spec
+          low = T.toLower trimmed
+       in if T.null trimmed || low == "none" || low == "n/a"
+            then (False, [], False)
+            else
+              let items = splitOutsideQuotes (\c -> c == ',' || c == ';') trimmed
+                  usedSearch =
+                    any
+                      ( \it ->
+                          let il = T.toLower it
+                           in "search_web" `T.isInfixOf` il
+                                && not ("no search_web" `T.isInfixOf` il)
+                                && not ("search_web: false" `T.isInfixOf` il)
+                                && not ("search_web=false" `T.isInfixOf` il)
+                      )
+                      items
+                  parseItem it =
+                    let il = T.toLower (T.strip it)
+                     in if "read_file" `T.isPrefixOf` il
+                          then
+                            let afterRf = T.strip (T.drop 9 (T.strip it))
+                             in if "(" `T.isPrefixOf` afterRf && ")" `T.isSuffixOf` afterRf
+                                  then
+                                    let inside = T.dropEnd 1 (T.drop 1 afterRf)
+                                        ps = filter (not . T.null) (map cleanPathTok (splitOutsideQuotes (\c -> c == ',' || c == ';') inside))
+                                     in (ps, null ps)
+                                  else ([], True)
+                          else
+                            if "search_web" `T.isPrefixOf` il
+                              then ([], False)
+                              else
+                                let cleaned = cleanPathTok it
+                                 in if ".md" `T.isSuffixOf` T.toLower cleaned
+                                      then ([cleaned], False)
+                                      else ([], False)
+                  parsedItems = map parseItem items
+                  allFiles = nub (concatMap fst parsedItems)
+                  bareRead = any snd parsedItems
+               in (usedSearch, allFiles, bareRead)
+
+isTurnPromptFilePath :: Text -> Bool
+isTurnPromptFilePath rawP =
+  takeFileName (stripFileUriPrefix (T.unpack (T.strip rawP)))
+    `elem` [ "current_prompt.md"
+           , "current_discussion_prompt.md"
+           , "current_fact_check_prompt.md"
+           , "current_judge_prompt.md"
+           , "current_critic_prompt.md"
+           , "current_topic_prompt.md"
+           ]
+
+auditFromReceiptTuple :: Text -> (Bool, [Text], Bool) -> SubagentToolAudit
+auditFromReceiptTuple src (usedSearch, files, bareRead) =
+  let nonPromptFiles = filter (not . isTurnPromptFilePath) files
+      usedVerify = usedSearch || not (null nonPromptFiles) || bareRead
+   in SubagentToolAudit
+        { staSource = src
+        , staUsedSearchWeb = Just usedSearch
+        , staUsedVerificationTools = Just usedVerify
+        , staReadFiles = files
+        , staPriorTranscriptReadFiles = []
+        , staIsFirstTurnInTranscript = Nothing
+        }
+
+extractReadFileCallsFromPlannerLine :: Text -> (Bool, [Text])
+extractReadFileCallsFromPlannerLine line =
+  let segs1 = T.splitOn "\"name\":\"read_file\"" line
+      afterCalls =
+        case segs1 of
+          (_ : rs@(_ : _)) -> concatMap (T.splitOn "\"name\": \"read_file\"") rs
+          _ ->
+            case T.splitOn "\"name\": \"read_file\"" line of
+              (_ : rs) -> rs
+              [] -> []
+      extractPathFromSeg seg =
+        let beforeNextTool = fst (T.breakOn "\"name\":" seg)
+            mRawPath =
+              case extractJsonStringField "Path" beforeNextTool of
+                Just p -> Just p
+                Nothing -> extractJsonStringField "path" beforeNextTool
+         in case mRawPath of
+              Nothing -> Nothing
+              Just p ->
+                let cleaned = T.pack (stripFileUriPrefix (T.unpack (T.strip (T.dropAround (== '"') (T.strip p)))))
+                 in if T.null cleaned then Nothing else Just cleaned
+      paths = [p | seg <- afterCalls, Just p <- [extractPathFromSeg seg]]
+   in (not (null afterCalls), paths)
 
 isolateLatestTurnLines :: [Text] -> [Text]
 isolateLatestTurnLines allRevLines =
@@ -602,93 +1064,109 @@ isCompletionNoticeOnly raw =
                || ("wrote " `T.isInfixOf` low && "_response.md" `T.isInfixOf` low)
            )
 
-checkSubagentLogUsedSearchWeb :: FilePath -> IO (Maybe Bool)
-checkSubagentLogUsedSearchWeb rawLogPath = do
+resolveTranscriptTargetPath :: FilePath -> IO FilePath
+resolveTranscriptTargetPath rawLogPath = do
   let cleanPath = stripFileUriPrefix rawLogPath
       fullCandidate = takeDirectory cleanPath </> "transcript_full.jsonl"
   hasFull <- doesFileExist fullCandidate
-  targetPath <-
-    if hasFull
-      then pure fullCandidate
-      else do
-        hasClean <- doesFileExist cleanPath
-        if hasClean
-          then pure cleanPath
-          else pure ""
-  if null targetPath
-    then case extractSubagentIdFromPath rawLogPath of
-      Nothing -> pure Nothing
-      Just subId -> do
-        mMsg <- findSubagentMessageFromParent rawLogPath subId
-        case mMsg of
-          Nothing -> pure Nothing
-          Just msg
-            | "search_web" `T.isInfixOf` T.toLower msg -> pure (Just True)
-            | isCompletionNoticeOnly msg -> pure Nothing
-            | otherwise -> pure (Just False)
+  if hasFull
+    then pure fullCandidate
     else do
+      hasClean <- doesFileExist cleanPath
+      pure (if hasClean then cleanPath else "")
+
+-- | Resolve subagent tool-usage telemetry with 3-tier sandbox compatibility:
+--
+-- 1. Direct child transcript (@transcript_full.jsonl@ / @transcript.jsonl@) when accessible.
+-- 2. Mounted parent/caller @<brain>/<caller_id>/.system_generated/@ logs & messages
+--    (including @[Tools: ...]@ tags on 1-line completion notices).
+-- 3. Optional @<!-- TOOLS: ... -->@ header comment inside the subagent's response file.
+resolveSubagentToolAudit :: Maybe FilePath -> Maybe Text -> IO SubagentToolAudit
+resolveSubagentToolAudit mRawLogPath mRawResponseText = do
+  targetPath <-
+    case mRawLogPath of
+      Nothing -> pure ""
+      Just lp -> resolveTranscriptTargetPath lp
+  if not (null targetPath)
+    then do
       raw <- readTextFileSafe targetPath
-      let revLines = reverse (T.lines raw)
+      let allLines = filter (not . T.null . T.strip) (T.lines raw)
+          isTurnStart l =
+            let t = extractJsonStringField "type" l
+             in t == Just "SYSTEM_MESSAGE" || t == Just "USER_INPUT"
+          turnStartCount = length (filter isTurnStart allLines)
+          revLines = reverse allLines
           currentTurnLines = isolateLatestTurnLines revLines
+          priorTurnLines = drop (length currentTurnLines) revLines
+          isPlanner l = extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
+          curPlannerLines = filter isPlanner currentTurnLines
+          priorPlannerLines = filter isPlanner priorTurnLines
           hasSearchCall l =
-            extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
-              && ("\"name\":\"search_web\"" `T.isInfixOf` l || "\"name\": \"search_web\"" `T.isInfixOf` l)
-      pure (Just (any hasSearchCall currentTurnLines))
+            "\"name\":\"search_web\"" `T.isInfixOf` l || "\"name\": \"search_web\"" `T.isInfixOf` l
+          usedSearch = any hasSearchCall curPlannerLines
+          curReadPairs = map extractReadFileCallsFromPlannerLine curPlannerLines
+          hasAnyReadCall = any fst curReadPairs
+          curReadPaths = nub (concatMap snd curReadPairs)
+          priorReadPaths = nub (concatMap (snd . extractReadFileCallsFromPlannerLine) priorPlannerLines)
+          bareRead = hasAnyReadCall && null curReadPaths
+          nonPromptReads = filter (not . isTurnPromptFilePath) curReadPaths
+          usedVerify = usedSearch || not (null nonPromptReads) || bareRead
+      pure
+        SubagentToolAudit
+          { staSource = "transcript"
+          , staUsedSearchWeb = Just usedSearch
+          , staUsedVerificationTools = Just usedVerify
+          , staReadFiles = curReadPaths
+          , staPriorTranscriptReadFiles = priorReadPaths
+          , staIsFirstTurnInTranscript = Just (turnStartCount <= 1)
+          }
+    else do
+      mParentAudit <-
+        case mRawLogPath >>= extractSubagentIdFromPath of
+          Nothing -> pure Nothing
+          Just subId -> do
+            let rawLp = fromMaybe "" mRawLogPath
+            mMsg <- findSubagentMessageFromParent rawLp subId
+            case mMsg of
+              Nothing -> pure Nothing
+              Just msg ->
+                case parseToolReceiptTag msg of
+                  Just tup -> pure (Just (auditFromReceiptTuple "parent_log" tup))
+                  Nothing
+                    | isCompletionNoticeOnly msg -> pure Nothing
+                    | otherwise ->
+                        let low = T.toLower msg
+                            hasSW = "search_web" `T.isInfixOf` low
+                            hasRF = "read_file" `T.isInfixOf` low
+                         in pure
+                              ( Just
+                                  SubagentToolAudit
+                                    { staSource = "parent_log"
+                                    , staUsedSearchWeb = Just hasSW
+                                    , staUsedVerificationTools = Just (hasSW || hasRF)
+                                    , staReadFiles = []
+                                    , staPriorTranscriptReadFiles = []
+                                    , staIsFirstTurnInTranscript = Nothing
+                                    }
+                              )
+      case mParentAudit of
+        Just pa -> pure pa
+        Nothing ->
+          case mRawResponseText >>= parseToolReceiptTag of
+            Just tup -> pure (auditFromReceiptTuple "response_header" tup)
+            Nothing -> pure emptySubagentToolAudit
+
+checkSubagentLogUsedSearchWeb :: FilePath -> IO (Maybe Bool)
+checkSubagentLogUsedSearchWeb rawLogPath =
+  staUsedSearchWeb <$> resolveSubagentToolAudit (Just rawLogPath) Nothing
 
 checkSubagentLogUsedVerificationTools :: FilePath -> IO (Maybe Bool)
-checkSubagentLogUsedVerificationTools rawLogPath = do
-  let cleanPath = stripFileUriPrefix rawLogPath
-      fullCandidate = takeDirectory cleanPath </> "transcript_full.jsonl"
-  hasFull <- doesFileExist fullCandidate
-  targetPath <-
-    if hasFull
-      then pure fullCandidate
-      else do
-        hasClean <- doesFileExist cleanPath
-        if hasClean
-          then pure cleanPath
-          else pure ""
-  if null targetPath
-    then case extractSubagentIdFromPath rawLogPath of
-      Nothing -> pure Nothing
-      Just subId -> do
-        mMsg <- findSubagentMessageFromParent rawLogPath subId
-        case mMsg of
-          Nothing -> pure Nothing
-          Just msg ->
-            let low = T.toLower msg
-             in if "read_file" `T.isInfixOf` low || "search_web" `T.isInfixOf` low
-                  then pure (Just True)
-                  else
-                    if isCompletionNoticeOnly msg
-                      then pure Nothing
-                      else pure (Just False)
-    else do
-      raw <- readTextFileSafe targetPath
-      let revLines = reverse (T.lines raw)
-          currentTurnLines = isolateLatestTurnLines revLines
-          hasVerifyCall l =
-            extractJsonStringField "type" l == Just "PLANNER_RESPONSE"
-              && ( "\"name\":\"read_file\"" `T.isInfixOf` l
-                     || "\"name\": \"read_file\"" `T.isInfixOf` l
-                     || "\"name\":\"search_web\"" `T.isInfixOf` l
-                     || "\"name\": \"search_web\"" `T.isInfixOf` l
-                 )
-      pure (Just (any hasVerifyCall currentTurnLines))
+checkSubagentLogUsedVerificationTools rawLogPath =
+  staUsedVerificationTools <$> resolveSubagentToolAudit (Just rawLogPath) Nothing
 
 extractSubagentLogResponse :: FilePath -> IO (Maybe Text)
 extractSubagentLogResponse rawLogPath = do
-  let cleanPath = stripFileUriPrefix rawLogPath
-      fullCandidate = takeDirectory cleanPath </> "transcript_full.jsonl"
-  hasFull <- doesFileExist fullCandidate
-  targetPath <-
-    if hasFull
-      then pure fullCandidate
-      else do
-        hasClean <- doesFileExist cleanPath
-        if hasClean
-          then pure cleanPath
-          else pure ""
+  targetPath <- resolveTranscriptTargetPath rawLogPath
   if null targetPath
     then case extractSubagentIdFromPath rawLogPath of
       Just subId -> do

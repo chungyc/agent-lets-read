@@ -17,7 +17,7 @@ module LetsRead.Command.Judge
   ) where
 
 import Control.Monad (unless, when)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (isJust)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import LetsRead.Command.Common
@@ -56,8 +56,9 @@ import LetsRead.Types
   , saveState
   )
 import LetsRead.Verification
-  ( checkSubagentLogUsedSearchWeb
-  , processCriticFeedback
+  ( SubagentToolAudit (..)
+  , processCriticFeedbackWithAudit
+  , resolveSubagentToolAudit
   )
 import System.Directory
   ( canonicalizePath
@@ -135,11 +136,7 @@ cmdJudge opts = do
       (jdgFactCheckLog opts)
       "Fact-check"
       "Error: Provide --fact-check-response-file, --fact-check-log, or write current_fact_check_response.md for 'judge'."
-  mFactCheckSearchWeb <-
-    case jdgFactCheckLog opts of
-      Just fLogPath -> checkSubagentLogUsedSearchWeb fLogPath
-      Nothing -> pure Nothing
-  let hasFactCheckSearchWeb = fromMaybe True mFactCheckSearchWeb
+  factAudit <- resolveSubagentToolAudit (jdgFactCheckLog opts) (Just rawFactCheck)
 
   rawCritic <-
     resolveRequiredResponse
@@ -151,8 +148,9 @@ cmdJudge opts = do
 
   let topicPromptPath = sessionDir </> "current_topic_prompt.md"
   hasTopicPrompt <- doesFileExist topicPromptPath
+  let usedTopicCurator = hasTopicPrompt || isJust (jdgTopicResponseFile opts) || isJust (jdgTopicLog opts)
   mRawTopic <-
-    if hasTopicPrompt || isJust (jdgTopicResponseFile opts) || isJust (jdgTopicLog opts)
+    if usedTopicCurator
       then do
         mT <-
           resolveOptionalResponse
@@ -168,8 +166,8 @@ cmdJudge opts = do
               else pure Nothing
       else pure Nothing
 
-  (criticFeedbackWritten, criticNotesCount, factCheckPending, factQueriesCount, rejectedCriticQuotesCount) <-
-    processCriticFeedback sessionDir st curIdx hasFactCheckSearchWeb (stPendingLinterWarnings st) (Just rawFactCheck) (Just rawCritic)
+  (criticFeedbackWritten, criticNotesCount, factCheckPending, factQueriesCount, rejectedCriticQuotesCount, factCheckAuditWarningsCount) <-
+    processCriticFeedbackWithAudit sessionDir st curIdx factAudit (stPendingLinterWarnings st) (Just rawFactCheck) (Just rawCritic)
 
   let judgeSec = extractJudgeSection rawJudge
       (preds', judgeAuditBlocks, judgeSummaryLines) =
@@ -220,17 +218,22 @@ cmdJudge opts = do
   let storyChunksDone = curIdx >= stTotalChunks st
       isFin = storyChunksDone && hasWrapup && not factCheckPending
       statusStr = if factCheckPending then "awaiting_fact_check_response" else "judged"
-      nextHint
+      topicKillPrefix =
+        if usedTopicCurator
+          then "Kill the finished one-shot topic-curator subagent immediately via manage_subagents(Action: \"kill\")! "
+          else ""
+      nextHintBase
         | factCheckPending =
             "Fact-checker raised "
               <> jsonInt factQueriesCount
               <> " peer verification query(ies) on Chunk "
               <> jsonInt curIdx
-              <> "! Send a 1-line notification via send_message to the active blind-reader subagent to read <session_dir>/current_discussion_prompt.md and write <session_dir>/current_discussion_response.md, then record the response using 'lets-read discuss --session <dir> --subagent-log <reader_log>' BEFORE running 'next'."
+              <> "! Send a 1-line notification via send_message to the active blind-reader subagent to read <session_dir>/current_discussion_prompt.md and write <session_dir>/current_discussion_response.md, then STOP and end your turn with ZERO tool calls until blind-reader sends its idle completion notice (never emit 'Waiting...' alongside 'discuss'); only after its idle notice arrives, run 'lets-read discuss --session <dir> --subagent-log <reader_log>' BEFORE running 'next'."
         | storyChunksDone && not hasWrapup =
             "All story chunks have been judged! Run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round for blind-reader."
         | otherwise =
             "Run 'lets-read next --session <dir>' to unlock the next chunk (or present the commentary to the user)."
+      nextHint = topicKillPrefix <> nextHintBase
   TIO.putStrLn $
     jsonObject
       [ ("status", jsonStr statusStr)
@@ -251,6 +254,8 @@ cmdJudge opts = do
       , ("critic_feedback_written", jsonBool criticFeedbackWritten)
       , ("critic_notes_count", jsonInt criticNotesCount)
       , ("rejected_unverified_critic_quotes_count", jsonInt rejectedCriticQuotesCount)
+      , ("fact_checker_used_search_web", maybe "null" jsonBool (staUsedSearchWeb factAudit))
+      , ("fact_check_audit_warnings_count", jsonInt factCheckAuditWarningsCount)
       , ("topic_merges_applied_count", jsonInt topicMergesApplied)
       , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
       , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
@@ -264,5 +269,5 @@ cmdJudge opts = do
       , ("curated_memory_bytes", jsonInt curBytes)
       , ("orchestrator_rule", jsonStr orchestratorRuleText)
       , ("next_step_hint", jsonStr nextHint)
-      , ("discussion_command_hint", jsonStr "If fact_check_discussion_pending is true, notify blind-reader to read discussion_prompt_file and write discussion_response_file, then run 'lets-read discuss --session <dir> --subagent-log <reader_log>'. If the user replies with comments or questions, run 'lets-read discuss-prompt --session <dir> --user-message \"...\"' (or --user-file), notify blind-reader to read discussion_prompt_file, and record with 'lets-read discuss'.")
+      , ("discussion_command_hint", jsonStr "If fact_check_discussion_pending is true, notify blind-reader to read discussion_prompt_file and write discussion_response_file, wait for its idle notice (ZERO tool calls while waiting), then run 'lets-read discuss --session <dir> --subagent-log <reader_log>'. If the user replies with comments or questions, run 'lets-read discuss-prompt --session <dir> --user-message \"...\"' (or --user-file), notify blind-reader to read discussion_prompt_file, wait for its idle notice, and record with 'lets-read discuss'.")
       ]
