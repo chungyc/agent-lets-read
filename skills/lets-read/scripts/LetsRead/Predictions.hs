@@ -229,8 +229,8 @@ canonicalizeResolvedLine c1 c2 rKind body =
       tag =
         case rKind of
           ResConfirmed
-            | c2 - c1 < 3 ->
-                "Predicted Chunk " <> c1Str <> " -> CONFIRMED Chunk " <> c2Str <> " (Short-Horizon <3 Chunks — No Hit Credit)"
+            | c2 <= c1 ->
+                "Predicted Chunk " <> c1Str <> " -> CONFIRMED Chunk " <> c2Str <> " (Same-Chunk — No Foresight Credit)"
             | otherwise ->
                 "Predicted Chunk " <> c1Str <> " -> CONFIRMED Chunk " <> c2Str
           ResDebunked ->
@@ -284,9 +284,12 @@ parsePredictionLine rawLine =
               (insideBeforeParen, _) = T.breakOn "(" insideBeforePipe
               inside = T.toLower (T.strip insideBeforeParen)
               rawAfterBracket = stripAfterClosingBracket afterClose
-              shortHorizonPrefix = "(short-horizon <3 chunks"
+              rawAfterLow = T.toLower rawAfterBracket
+              hasStatusParenPrefix =
+                "(short-horizon <3 chunks" `T.isPrefixOf` rawAfterLow
+                  || "(same-chunk" `T.isPrefixOf` rawAfterLow
               afterBracket =
-                if shortHorizonPrefix `T.isPrefixOf` T.toLower rawAfterBracket
+                if hasStatusParenPrefix
                   then T.strip (T.drop 1 (snd (T.breakOn ")" rawAfterBracket)))
                   else rawAfterBracket
               nums :: [Int]
@@ -402,11 +405,11 @@ checkPredictionConcisenessIssues pr =
       theoryLen = T.length (prTheory pr)
       rivalLen = T.length (prRival pr)
       clueHasQuote = T.any (\c -> c == '"' || c == '\x201C' || c == '\x201D') (prClue pr)
-   in [ "total body was " <> jsonInt bodyLen <> " chars (cap: <= 450 chars)" | bodyLen > 450 ]
-        ++ [ "`**Clue/Anomaly**` was " <> jsonInt clueLen <> " chars (cap: <= 120 chars)" | clueLen > 120 ]
-        ++ [ "`**Clue/Anomaly**` contained inline quotation marks (summarize the detail in 1 short clause without quoting)" | clueHasQuote ]
-        ++ [ "`**Theory**` was " <> jsonInt theoryLen <> " chars (cap: <= 160 chars)" | theoryLen > 160 ]
-        ++ [ "`**Plausible Rival**` was " <> jsonInt rivalLen <> " chars (cap: <= 120 chars)" | rivalLen > 120 ]
+   in [ "total body was " <> jsonInt bodyLen <> " chars (cap: <= 550 chars)" | bodyLen > 550 ]
+        ++ [ "`**Clue/Anomaly**` was " <> jsonInt clueLen <> " chars (cap: <= 150 chars)" | clueLen > 150 ]
+        ++ [ "`**Clue/Anomaly**` contained inline quotation marks (summarize the detail concisely without quoting)" | clueHasQuote ]
+        ++ [ "`**Theory**` was " <> jsonInt theoryLen <> " chars (cap: <= 220 chars)" | theoryLen > 220 ]
+        ++ [ "`**Plausible Rival**` was " <> jsonInt rivalLen <> " chars (cap: <= 150 chars)" | rivalLen > 150 ]
 
 renderConcisenessAuditBlock :: Text -> PredictionRecord -> [Text] -> Text
 renderConcisenessAuditBlock nextStr pr issues =
@@ -427,7 +430,7 @@ renderConcisenessAuditBlock nextStr pr issues =
             78
             ( "  - Action Required: On Chunk "
                 <> nextStr
-                <> ", keep the post-bracket prediction body `<= 450 chars` total (`**Clue/Anomaly** <= 120 chars` with no inline quotes, `**Theory** <= 160 chars` stating 1 direct outcome, `**Plausible Rival** <= 120 chars`)."
+                <> ", keep the post-bracket prediction body `<= 550 chars` total (`**Clue/Anomaly** <= 150 chars` with no inline quotes, `**Theory** <= 220 chars`, `**Plausible Rival** <= 150 chars`)."
             )
         ]
 
@@ -722,11 +725,11 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
       missingNewPredAuditBlocks
         | isRecordTurn && curIdx >= 1 && curIdx < totalChunks && not hasNewForCur =
             [ renderTagFormatAuditBlock
-                ("No new prediction was logged for Chunk " <> curStr <> " (every chunk before the final chunk must log 1 new non-softball, multi-chapter prediction, capped at 10 unresolved predictions).")
+                ("No new prediction was logged for Chunk " <> curStr <> " (every chunk before the final chunk must log 1 new specific, non-obvious prediction, capped at 10 unresolved predictions).")
                 ("*(Missing `- **[Predicted Chunk " <> curStr <> " | Topics: Topic 1, Topic 2]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` in `=== PREDICTION UPDATES ===`)*")
                 ( "On Chunk "
                     <> nextStr
-                    <> ", make sure to log 1 new non-softball, multi-chapter prediction using `- **[Predicted Chunk "
+                    <> ", make sure to log 1 new specific, non-obvious prediction using `- **[Predicted Chunk "
                     <> nextStr
                     <> " | Topics: Topic 1, Topic 2]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` in both `=== COMMENTARY ===` and `=== PREDICTION UPDATES ===`."
                 )
@@ -834,7 +837,7 @@ applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
                     else T.strip (ppBodyAfterBracket r)
                 newStatus =
                   case ppResKind r of
-                    ResConfirmed -> PredStatusConfirmed curIdx (curIdx - origC < 3)
+                    ResConfirmed -> PredStatusConfirmed curIdx (curIdx <= origC)
                     ResDebunked -> PredStatusDebunked curIdx
                     ResSubverted -> PredStatusSubverted curIdx
                     ResRetired -> PredStatusRetired curIdx
@@ -887,7 +890,7 @@ applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
                         <> nextStr
                         <> "'s new prediction, nominate "
                         <> jsonInt excess
-                        <> " extra prediction(s) (prioritizing `[DUPLICATE-THESIS]`, `[LINEAR]`/`[SHORT-HORIZON]`/`[SPLIT-CONTINUATION]`, or expired-trigger bets over unique subplot bets—never defaulting to mechanical oldest-first FIFO) in `=== PREDICTION UPDATES ===` using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
+                        <> " extra prediction(s) (prioritizing `[DUPLICATE-THESIS]`, `[UNINTERESTING]`/`[UNGROUNDED]`, `[VAGUE]`/`[HEDGED]`, or mooted bets over distinct live theories—never defaulting to mechanical oldest-first FIFO) in `=== PREDICTION UPDATES ===` using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
                         <> nextStr
                         <> "]** <reason>` so that at most 10 unresolved predictions remain."
                     )
@@ -977,17 +980,20 @@ predStatusBadge :: PredictionRecord -> Text
 predStatusBadge pr =
   case prStatus pr of
     PredStatusActive -> "ACTIVE (Unresolved)"
-    PredStatusConfirmed resC isShort
-      | isShort ->
+    PredStatusConfirmed resC isSameChunk
+      | isSameChunk ->
           "CONFIRMED in Chunk "
             <> T.pack (padChunkNumber resC)
-            <> " (Short-Horizon <3 Chunks — No Hit Credit)"
+            <> " (Same-Chunk — No Foresight Credit)"
       | otherwise ->
-          "CONFIRMED in Chunk "
-            <> T.pack (padChunkNumber resC)
-            <> " (Major Hit, +"
-            <> jsonInt (resC - prOriginChunk pr)
-            <> " chunks foresight)"
+          let delta = resC - prOriginChunk pr
+              unitTxt = if delta == 1 then " chunk" else " chunks"
+           in "CONFIRMED in Chunk "
+                <> T.pack (padChunkNumber resC)
+                <> " (Confirmed Hit, +"
+                <> jsonInt delta
+                <> unitTxt
+                <> " foresight)"
     PredStatusDebunked resC ->
       "DEBUNKED in Chunk " <> T.pack (padChunkNumber resC)
     PredStatusSubverted resC ->
@@ -999,8 +1005,8 @@ predShortStatusTag :: PredictionRecord -> Text
 predShortStatusTag pr =
   case prStatus pr of
     PredStatusActive -> "ACTIVE"
-    PredStatusConfirmed resC isShort
-      | isShort -> "CONFIRMED Chk " <> T.pack (padChunkNumber resC) <> " (<3 Chk)"
+    PredStatusConfirmed resC isSameChunk
+      | isSameChunk -> "CONFIRMED Chk " <> T.pack (padChunkNumber resC) <> " (0 Chk)"
       | otherwise -> "CONFIRMED Chk " <> T.pack (padChunkNumber resC) <> " (Hit)"
     PredStatusDebunked resC -> "DEBUNKED Chk " <> T.pack (padChunkNumber resC)
     PredStatusSubverted resC -> "SUBVERTED Chk " <> T.pack (padChunkNumber resC)
@@ -1117,7 +1123,7 @@ renderPredSummaryBullet pr =
 renderHallOfFameMarkdown :: FilePath -> SessionState -> Text
 renderHallOfFameMarkdown sessionDir st =
   let preds = stPredictions st
-      majorHits =
+      confirmedHits =
         sortOn
           ( \pr ->
               case prStatus pr of
@@ -1127,14 +1133,14 @@ renderHallOfFameMarkdown sessionDir st =
           [ pr
           | pr <- preds
           , case prStatus pr of
-              PredStatusConfirmed _ isShort -> not isShort
+              PredStatusConfirmed _ isSameChunk -> not isSameChunk
               _ -> False
           ]
-      shortConfirmations =
+      sameChunkConfirmations =
         [ pr
         | pr <- preds
         , case prStatus pr of
-            PredStatusConfirmed _ isShort -> isShort
+            PredStatusConfirmed _ isSameChunk -> isSameChunk
             _ -> False
         ]
       subvertedList =
@@ -1164,17 +1170,17 @@ renderHallOfFameMarkdown sessionDir st =
         , prStatus pr == PredStatusActive
         ]
       totalLogged = length preds
-      storyJudgedCount = length majorHits + length subvertedList + length debunkedList
+      storyJudgedCount = length confirmedHits + length subvertedList + length debunkedList
       accuracyNote
-        | storyJudgedCount == 0 = "N/A (0 multi-chunk story-judged predictions)"
+        | storyJudgedCount == 0 = "N/A (0 story-judged predictions)"
         | otherwise =
-            let pct = (length majorHits * 100) `div` storyJudgedCount
+            let pct = (length confirmedHits * 100) `div` storyJudgedCount
              in jsonInt pct
                   <> "% ("
-                  <> jsonInt (length majorHits)
-                  <> " Major Hits out of "
+                  <> jsonInt (length confirmedHits)
+                  <> " Confirmed Hits out of "
                   <> jsonInt storyJudgedCount
-                  <> " non-short-horizon story-resolved predictions)"
+                  <> " story-resolved predictions)"
       renderDetailedBullet pr =
         let origPad = padChunkNumber (prOriginChunk pr)
             predFile = T.pack ("predictions" </> ("pred_" ++ origPad ++ ".md"))
@@ -1207,6 +1213,19 @@ renderHallOfFameMarkdown sessionDir st =
         if null items
           then [emptyMsg]
           else [T.intercalate "\n\n" (map renderFn items)]
+      sameChunkScoreLine =
+        [ "- Same-Chunk Confirmations (0 Chunks Foresight): " <> jsonInt (length sameChunkConfirmations)
+        | not (null sameChunkConfirmations)
+        ]
+      sameChunkSection =
+        if null sameChunkConfirmations
+          then []
+          else
+            [ ""
+            , "## Same-Chunk Confirmations"
+            , ""
+            , T.intercalate "\n\n" (map renderDetailedBullet sameChunkConfirmations)
+            ]
       introPara =
         wrapMarkdownParagraph
           78
@@ -1224,20 +1243,21 @@ renderHallOfFameMarkdown sessionDir st =
         , "## Final Prediction Scoreboard"
         , ""
         , "- Total Predictions Logged: " <> jsonInt totalLogged
-        , "- Major Confirmed Hits (>= 3 Chunks Foresight): **" <> jsonInt (length majorHits) <> "**"
+        , "- Confirmed Hits: **" <> jsonInt (length confirmedHits) <> "**"
         , "- Subverted Twists (Right Clue, Surprise Twist): **" <> jsonInt (length subvertedList) <> "**"
         , "- Debunked Misses: **" <> jsonInt (length debunkedList) <> "**"
-        , "- Short-Horizon Confirmations (< 3 Chunks — No Hit Credit): " <> jsonInt (length shortConfirmations)
-        , "- Retired for 10-Prediction Cap: " <> jsonInt (length retiredList)
-        , "- Unresolved / Open-Ended at Finale: " <> jsonInt (length unresolvedList)
-        , "- Multi-Chunk Hit Rate: " <> accuracyNote
-        , ""
-        , "## Hall of Fame — Major Confirmed Hits"
-        , ""
         ]
+          ++ sameChunkScoreLine
+          ++ [ "- Retired for 10-Prediction Cap: " <> jsonInt (length retiredList)
+             , "- Unresolved / Open-Ended at Finale: " <> jsonInt (length unresolvedList)
+             , "- Hit Rate: " <> accuracyNote
+             , ""
+             , "## Hall of Fame — Confirmed Hits"
+             , ""
+             ]
           ++ sectionOrEmpty
-            "- *(No major multi-chunk confirmed hits recorded.)*"
-            majorHits
+            "- *(No confirmed hits recorded.)*"
+            confirmedHits
             renderDetailedBullet
           ++ [ ""
              , "## Best Twists — Subverted Predictions"
@@ -1255,14 +1275,7 @@ renderHallOfFameMarkdown sessionDir st =
             "- *(No debunked predictions recorded.)*"
             debunkedList
             renderDetailedBullet
-          ++ [ ""
-             , "## Short-Horizon Confirmations"
-             , ""
-             ]
-          ++ sectionOrEmpty
-            "- *(None.)*"
-            shortConfirmations
-            renderDetailedBullet
+          ++ sameChunkSection
           ++ [ ""
              , "## Unresolved Predictions at Finale"
              , ""
@@ -1286,20 +1299,20 @@ renderPredictionSlateSection st =
       curIdx = stCurrentIndex st
       isFinished = curIdx >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
       activePreds = [pr | pr <- preds, prStatus pr == PredStatusActive]
-      majorHitsCnt =
+      confirmedHitsCnt =
         length
           [ pr
           | pr <- preds
           , case prStatus pr of
-              PredStatusConfirmed _ isShort -> not isShort
+              PredStatusConfirmed _ isSameChunk -> not isSameChunk
               _ -> False
           ]
-      shortHitsCnt =
+      sameChunkCnt =
         length
           [ pr
           | pr <- preds
           , case prStatus pr of
-              PredStatusConfirmed _ isShort -> isShort
+              PredStatusConfirmed _ isSameChunk -> isSameChunk
               _ -> False
           ]
       debunkedCnt =
@@ -1341,15 +1354,19 @@ renderPredictionSlateSection st =
         if isFinished
           then " | [Hall of Fame & Shame](" <> T.pack ("predictions" </> "hall_of_fame.md") <> ")"
           else ""
+      sameChunkSeg =
+        if sameChunkCnt > 0
+          then jsonInt sameChunkCnt <> " Same-Chunk | "
+          else ""
       scoreboardPara =
         wrapMarkdownParagraph
           78
           ( jsonInt (length preds)
               <> " logged | **"
-              <> jsonInt majorHitsCnt
-              <> " Major Hits** (>=3 chunks) | "
-              <> jsonInt shortHitsCnt
-              <> " Short-Horizon (<3 chunks) | **"
+              <> jsonInt confirmedHitsCnt
+              <> " Confirmed** | "
+              <> sameChunkSeg
+              <> "**"
               <> jsonInt subvertedCnt
               <> " Subverted** | **"
               <> jsonInt debunkedCnt
@@ -1377,7 +1394,7 @@ renderPredictionSlateSection st =
             [ ""
             , "### Latest Prediction Judge Rulings"
             , ""
-            , wrapMarkdownParagraph 78 "React naturally in your commentary to any `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` verdicts below:"
+            , wrapMarkdownParagraph 78 "React naturally in `=== COMMENTARY ===` to any `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` verdicts below (use any `-> ACTIVE` notes silently when calibrating future bets or retirements—never mention screening flags in `=== COMMENTARY ===`):"
             , ""
             , T.intercalate "\n\n" (map (wrapMarkdownBullet 78) (stLastJudgeSummary st))
             ]
@@ -1401,7 +1418,7 @@ renderPredictionSlateSection st =
           then
             [ wrapMarkdownParagraph
                 78
-                "No active predictions yet. On every chunk before the final chunk, output 1 new non-softball, multi-chapter prediction (`<= 450 chars` total) in `=== PREDICTION UPDATES ===`."
+                "No active predictions yet. On every chunk before the final chunk, output 1 new specific, non-obvious prediction (`<= 550 chars` total) in `=== PREDICTION UPDATES ===`."
             ]
           else
             [ let origPad = padChunkNumber (prOriginChunk pr)

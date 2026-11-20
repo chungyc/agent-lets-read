@@ -27,55 +27,68 @@ Primary source of truth for all in-story text, verbatim quotes, dialogue, event
 order, elapsed time, counts, titles, and prediction premises
 (`**Clue/Anomaly**`).
 
-- `<session_dir>/current_chunk.md` — Newly unlocked story passage for the active
-  chunk (`Chunk N`), including chapter/part progress and mid-chapter split
-  notices.
+#### `<session_dir>/current_chunk.md`
 
-- `<session_dir>/chunks/chunk_XXXX.md` — Permanent copy of each unlocked story
-  chunk (`0001`..`NNNN`). Always verify earlier-chunk details against
-  `chunks/chunk_XXXX.md` rather than relying on condensed summaries.
+Newly unlocked story passage for the active chunk (`Chunk N`), including
+chapter/part progress and mid-chapter split notices.
 
-- `<session_dir>/chunks/by_chronology.md` & `<session_dir>/chunks/by_topic.md`
-  (plus `chunks/archive/`) — Chronological and semantic topic indexes of 1-line
-  `[Story]` summaries used to locate which `chunks/chunk_XXXX.md` file covers a
-  character, faction, location, prop, or event.
+#### `<session_dir>/chunks/chunk_XXXX.md`
+
+Permanent copy of each unlocked story chunk (`0001`..`NNNN`). Always verify
+earlier-chunk details against `chunks/chunk_XXXX.md` rather than relying on
+condensed summaries.
+
+#### `<session_dir>/chunks/by_chronology.md` & `by_topic.md`
+
+Chronological and semantic topic indexes (along with `chunks/archive/`) of
+1-line `[Story]` summaries used to locate which `chunks/chunk_XXXX.md` file
+covers a character, faction, location, prop, or event.
 
 ### Reader Working Notebook & Snapshots (`memory.md` & `archive/memory/`)
 
 Working reader continuity notes and historical point-in-time snapshots.
 
-- `<session_dir>/memory.md` — Combines `blind-reader`'s four curated sections
-  (`Story Summary So Far`, `Characters & Relationships`,
-  `Active Mysteries & Unanswered Questions`,
-  `Notable Quotes, Themes & Running Jokes`) with auto-maintained index links,
-  `Established Topic Tags`, `Completed L1 Story Arcs`, the last 5 chunk
-  summaries, and the `Active Prediction Slate`.
+#### `<session_dir>/memory.md`
 
-- Aside from established canon divergences and user corrections in Bullet 1 of
-  `Story Summary So Far`, treat `memory.md` as a condensed working summary
-  rather than primary proof of earlier-chunk text.
+Combines `blind-reader`'s four curated sections (`Story Summary So Far`,
+`Characters & Relationships`, `Active Mysteries & Unanswered Questions`,
+`Notable Quotes, Themes & Running Jokes`) with auto-maintained index links,
+`Established Topic Tags`, `Completed L1 Story Arcs`, the last 5 chunk summaries,
+and the `Active Prediction Slate`.
 
-- `<session_dir>/archive/memory/curated_XXXX.md` &
-  `<session_dir>/archive/memory/chunk_XXXX.md` — Snapshots of the 4 curated
-  sections (`curated_XXXX.md`) and full `memory.md` (`chunk_XXXX.md`) recorded
-  after `Chunk XXXX`, used to check when a note or belief was first recorded.
+Aside from established canon divergences and user corrections in Bullet 1 of
+`Story Summary So Far`, treat `memory.md` as a condensed working summary rather
+than primary proof of earlier-chunk text.
 
-### Liveblog Commentary & Discussions (`entries/`)
+#### `archive/memory/curated_XXXX.md` & `archive/memory/chunk_XXXX.md`
+
+Point-in-time snapshots of the 4 curated sections (`curated_XXXX.md`) and full
+`memory.md` (`chunk_XXXX.md`) recorded after `Chunk XXXX`, used to check when a
+note or belief was first recorded.
+
+### Liveblog Commentary & Discussions (`entries/` & `lets_read_log.md`)
 
 Recorded liveblog reactions, running gags, peer verification replies, and user
 discussions.
 
-- `<session_dir>/entries/chunk_XXXX.md` — Recorded commentary for `Chunk XXXX`,
-  including any appended `### Reader Discussion` exchanges and
-  `Prediction Judge` or gatekeeper audit callouts.
+#### `<session_dir>/entries/chunk_XXXX.md`
 
-- `<session_dir>/entries/wrapup.md` — Post-story Final Wrapup & Retrospective
-  entry written after all story chunks are judged.
+Recorded commentary for `Chunk XXXX`, including any appended
+`### Reader Discussion` exchanges and `Prediction Judge` or gatekeeper audit
+callouts.
 
-- `<session_dir>/entries/by_chronology.md` & `<session_dir>/entries/by_topic.md`
-  (plus `entries/archive/`) — Chronological and topic indexes of `[Entry]` and
-  `[Discussion]` summaries used to look up prior reactions, running gags, style
-  patterns, or discussion exchanges.
+#### `<session_dir>/entries/wrapup.md`
+
+Post-story Final Wrapup & Retrospective entry written after all story chunks are
+judged.
+
+#### `<session_dir>/entries/by_chronology.md` & `by_topic.md`
+
+Chronological and topic indexes (along with `entries/archive/`) of `[Entry]` and
+`[Discussion]` summaries used to look up prior reactions, running gags, style
+patterns, or discussion exchanges.
+
+#### `<session_dir>/lets_read_log.md`
 
 Do **not** call `read_file` on `<session_dir>/lets_read_log.md` (the
 concatenated full-session liveblog maintained for the human reader); use
@@ -87,29 +100,36 @@ instead.
 Structured `Clue/Anomaly -> Theory (vs. Plausible Rival)` prediction records,
 Judge rulings, and final session scoreboard.
 
-- `<session_dir>/predictions/pred_XXXX.md` — Full record for the prediction
-  logged on `Chunk XXXX`, including origin chapter/part metadata, topic tags,
-  structured clauses, status (`ACTIVE`, `CONFIRMED`, `DEBUNKED`, `SUBVERTED`,
-  `RETIRED`), and Judge explanation with origin and resolution chunk links.
+#### `<session_dir>/predictions/pred_XXXX.md`
 
-- `<session_dir>/predictions/by_chronology.md` &
-  `<session_dir>/predictions/by_topic.md` (plus `predictions/archive/`) —
-  Chronological and topic indexes across all active and resolved predictions.
+Full record for the prediction logged on `Chunk XXXX`, including origin
+chapter/part metadata, topic tags, structured clauses, status (`ACTIVE`,
+`CONFIRMED`, `DEBUNKED`, `SUBVERTED`, `RETIRED`), and Judge explanation with
+origin and resolution chunk links.
 
-- `<session_dir>/predictions/hall_of_fame.md` — Final prediction scoreboard and
-  retrospective report generated once the final story chunk is recorded and
-  judged (read by `blind-reader` on the Final Wrapup turn).
+#### `<session_dir>/predictions/by_chronology.md` & `by_topic.md`
+
+Chronological and topic indexes (along with `predictions/archive/`) across all
+active and resolved predictions.
+
+#### `<session_dir>/predictions/hall_of_fame.md`
+
+Final prediction scoreboard and retrospective report generated once the final
+story chunk is recorded and judged (read by `blind-reader` on the Final Wrapup
+turn).
 
 ### Turn Prompts & Editorial Review Files
 
 Per-turn subagent I/O files and editorial/fact-check archives.
 
-- `<session_dir>/current_*_prompt.md` & `<session_dir>/current_*_response.md` —
-  Active turn prompt input and response output for each subagent.
+#### `<session_dir>/current_*_prompt.md` & `current_*_response.md`
 
-- `<session_dir>/critic_feedback.md` &
-  `<session_dir>/archive/critic/chunk_XXXX.md` — Latest and per-chunk archived
-  editorial style critiques and fact-check verification logs.
+Active turn prompt input and response output for each subagent.
+
+#### `<session_dir>/critic_feedback.md` & `archive/critic/chunk_XXXX.md`
+
+Latest and per-chunk archived editorial style critiques and fact-check
+verification logs.
 
 ## Multi-Layer Index Organization & Navigation
 
@@ -175,14 +195,16 @@ topic's full bullet list inline under `### <Topic> (<Count>)`.
 Once entries exceed the inline budget, `<domain>/by_topic.md` switches
 automatically to two sections:
 
-- `## Topic Archive Shards` — Alphabetical range shards (`Topic Shard L1.K`)
-  linking to `<domain>/archive/topics/L1_XXXX.md` (with `L2_XXXX.md` rollups if
-  shard links exceed 25 nodes or 12 KB) and listing the topics and entry counts
-  in each shard.
+##### `## Topic Archive Shards`
 
-- `## Recently Updated Topics (Last 3 Turns Inline)` — Shows entries from the
-  last 3 chunks inline alongside a `*(+N earlier entries in [L1_XXXX.md](...))*`
-  pointer to that topic's shard.
+Alphabetical range shards (`Topic Shard L1.K`) linking to
+`<domain>/archive/topics/L1_XXXX.md` (with `L2_XXXX.md` rollups if shard links
+exceed 25 nodes or 12 KB) and listing the topics and entry counts in each shard.
+
+##### `## Recently Updated Topics (Last 3 Turns Inline)`
+
+Shows entries from the last 3 chunks inline alongside a
+`*(+N earlier entries in [L1_XXXX.md](...))*` pointer to that topic's shard.
 
 #### High-Frequency Per-Topic Archives (`topic_XXXX_L1_YYYY.md`)
 

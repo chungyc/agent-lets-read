@@ -195,9 +195,9 @@ renderPredictionSlateNote curIdx totalChunks activeCount
        in wrapMarkdownParagraph
             78
             ( jsonInt activeCount
-                <> "/10 active unresolved predictions in `memory.md`. React naturally in `=== COMMENTARY ===` to any `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` rulings from the previous chunk, and log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total; avoid mid-chapter `Part 1 of K` continuations, 1-chunk cliffhanger props, and near-duplicate restatements of already-active bets) on this chunk using `- **[Predicted Chunk "
+                <> "/10 active unresolved predictions in `memory.md`. React naturally in `=== COMMENTARY ===` to any `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` rulings from the previous chunk (absorb any `-> ACTIVE` notes silently), and log 1 new specific, non-obvious prediction (`<= 550 chars` total; avoid routine continuations, stated plans, generic placeholders, and near-duplicate restatements of active bets) on this chunk using `- **[Predicted Chunk "
                 <> curPad
-                <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 120 chars, no quotes> -> **Theory**: <direct bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)` at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`."
+                <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars> (vs. **Plausible Rival**: <rival explanation, <= 150 chars>)` at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`."
             )
   | otherwise =
       let curPad = T.pack (padChunkNumber curIdx)
@@ -205,13 +205,13 @@ renderPredictionSlateNote curIdx totalChunks activeCount
        in wrapMarkdownParagraph
             78
             ( jsonInt activeCount
-                <> "/10 active unresolved predictions in `memory.md` (AT 10-PREDICTION CAP). React naturally in `=== COMMENTARY ===` to any `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` rulings from the previous chunk, log 1 new non-softball, multi-chapter prediction (`<= 450 chars` total; avoid mid-chapter continuations, 1-chunk cliffhangers, and near-duplicate restatements of active bets) using `- **[Predicted Chunk "
+                <> "/10 active unresolved predictions in `memory.md` (AT 10-PREDICTION CAP). React naturally in `=== COMMENTARY ===` to any `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` rulings from the previous chunk (absorb any `-> ACTIVE` notes silently), log 1 new specific, non-obvious prediction (`<= 550 chars` total; avoid routine continuations, stated plans, generic placeholders, and near-duplicate restatements of active bets) using `- **[Predicted Chunk "
                 <> curPad
-                <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 120 chars, no quotes> -> **Theory**: <direct bet, <= 160 chars> (vs. **Plausible Rival**: <rival explanation, <= 120 chars>)` at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`, AND nominate "
+                <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars> (vs. **Plausible Rival**: <rival explanation, <= 150 chars>)` at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`, AND nominate "
                 <> jsonInt needRetire
                 <> " conditional retirement candidate(s) in `=== PREDICTION UPDATES ===` using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
                 <> curPad
-                <> "]** <reason>` (prioritize `[DUPLICATE-THESIS]`, `[LINEAR]`/`[SHORT-HORIZON]`/`[SPLIT-CONTINUATION]`, or expired-trigger bets over unique character/subplot bets—do NOT default to mechanical oldest-first FIFO)."
+                <> "]** <reason>` (prioritize `[DUPLICATE-THESIS]`, `[UNINTERESTING]`/`[UNGROUNDED]`, `[VAGUE]`/`[HEDGED]`, or mooted bets over distinct live theories—do NOT default to mechanical oldest-first FIFO)."
             )
 
 writeCurrentChunkFile :: FilePath -> Chunk -> Int -> Int -> Int -> IO ()
@@ -261,7 +261,7 @@ writeCurrentChunkFile path c totalChunks totalChapters activeCount = do
                     <> jsonInt (partInChapter c)
                     <> " of "
                     <> jsonInt (partsInChapter c)
-                    <> " — this chapter continues in the next chunk. Do not log immediate next-part scene continuations or chapter-title payoffs as predictions)."
+                    <> " — this chapter continues in the next chunk. Do not log routine next-part scene continuations as predictions)."
                 )
             ]
       header =
@@ -375,7 +375,7 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
       predictionUpdatesBody =
         if curIdx >= totalChunks
           then "Output `- None (story complete!).` on this final chunk (`prediction-judge` still evaluates prior predictions against this chunk)"
-          else "`- **[Predicted Chunk " <> curPad <> " | Topics: ...]** **Clue/Anomaly**: <detail, <= 120 chars, no quotes> -> **Theory**: <direct bet, <= 160 chars> (vs. **Plausible Rival**: <rival, <= 120 chars>)` (`<= 450 chars` total) plus diversified non-FIFO conditional `RETIRED` if at 10/10 active"
+          else "`- **[Predicted Chunk " <> curPad <> " | Topics: ...]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars> (vs. **Plausible Rival**: <rival, <= 150 chars>)` (`<= 550 chars` total) plus diversified non-FIFO conditional `RETIRED` if at 10/10 active"
       updatedMemoryBody =
         if curIdx >= totalChunks
           then "the 4 narrative sections only; keep Bullet 1 (`Core Premise, Timeline & Baseline Facts (Persistent)`) accurate, collapse completed `Arc K` rollups, and clear resolved mysteries in `Active Mysteries & Unanswered Questions` with `- None (story complete).` unless genuine open-ended mysteries remain"
@@ -608,9 +608,9 @@ writeCurrentJudgePromptFile sessionDir st = do
                         <> jsonInt (metaPartInChapter m)
                         <> " of "
                         <> jsonInt (metaPartsInChapter m)
-                        <> " of its chapter. Flag immediate next-part continuations on `Predicted Chunk "
+                        <> " of its chapter. Flag routine, predictable next-part continuations on `Predicted Chunk "
                         <> curPad
-                        <> " -> ACTIVE` as `[SPLIT-CONTINUATION]`."
+                        <> " -> ACTIVE` as `[UNINTERESTING]` (do not flag genuinely surprising or non-obvious predictions solely because they could resolve soon)."
                     )
                 ]
           _ -> []
@@ -633,7 +633,7 @@ writeCurrentJudgePromptFile sessionDir st = do
           , ""
           , "- Session Directory: `" <> T.pack absSession <> "`"
           , "- Current Story Chunk (mandatory read): " <> T.pack (absSession </> "current_chunk.md")
-          , "- Reader Memory File (optional context read): " <> T.pack (absSession </> "memory.md")
+          , "- Reader Memory File (mandatory context read): " <> T.pack (absSession </> "memory.md")
           , "- Predictions Directory (optional on-demand `read_file`): " <> T.pack (absSession </> "predictions")
           , "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
           , "- Output Response File (mandatory `write_file`, `Overwrite: true`): " <> T.pack judgeRespPath
@@ -650,7 +650,7 @@ writeCurrentJudgePromptFile sessionDir st = do
                , ""
                , wrapMarkdownParagraph
                    78
-                   ( "Read `current_chunk.md` and write `=== PREDICTION JUDGMENTS ===` with one bullet per active prediction (`[Predicted Chunk XXXX -> ACTIVE]`, `CONFIRMED Chunk "
+                   ( "Read `current_chunk.md` and `memory.md`, and write `=== PREDICTION JUDGMENTS ===` with one bullet per active prediction (`[Predicted Chunk XXXX -> ACTIVE]`, `CONFIRMED Chunk "
                        <> curPad
                        <> "`, `DEBUNKED Chunk "
                        <> curPad
@@ -670,13 +670,13 @@ writeCurrentJudgePromptFile sessionDir st = do
                        <> "` promptly rather than holding it `ACTIVE`."
                    )
                , ""
-               , "### Anti-Rubber-Stamping Screening on Newly Logged Predictions"
+               , "### Interestingness and Quality Screening on Newly Logged Predictions"
                , ""
                , wrapMarkdownParagraph
                    78
                    ( "On `Predicted Chunk "
                        <> curPad
-                       <> " -> ACTIVE` (`<= 200 chars`), audit synthesis and falsifiability honestly: explicitly tag `[SPLIT-CONTINUATION]` (mid-chapter `Part 1 of K` continuation), `[SHORT-HORIZON]` (immediate 1-chunk cliffhanger prop), `[DUPLICATE-THESIS]` (near-duplicate restatement of an already-active bet rather than a distinct mechanism, cause, or trajectory), `[LINEAR]` (single-beat $A \\rightarrow A'$ extrapolation), or `[HEDGED]` / `[VAGUE]` when applicable, and never emit generic `\"Strong/Clean synthesis\"` praise when any flag applies."
+                       <> " -> ACTIVE` (`<= 200 chars`), weigh both why the prediction might fail to be interesting (openly telegraphed, routine, generic placeholder, or arbitrary non-sequitur) and why it might be interesting (perceptive cue/tell + specific, non-obvious, story-coherent bet, including bold long-shots and canon hooks in derivative works) strictly from unlocked text and `memory.md`, then write 1 decisive sentence: prefix `[UNINTERESTING]` (obvious/telegraphed/generic—never flagging a clever call just for coming from one scene or resolving soon), `[UNGROUNDED]` (true non-sequitur—never penalizing coherent long-shots or canon hooks), `[DUPLICATE-THESIS]`, or `[HEDGED]` / `[VAGUE]` when applicable; note plainly without a flag if passable yet safe/expected; and praise only genuinely sharp, non-obvious calls."
                    )
                , ""
                , "### Completion Notice"

@@ -27,8 +27,8 @@ subagents that exchange bulk data via predetermined `<session_dir>` files.
 ### `blind-reader`
 
 Reads `<session_dir>/current_prompt.md` and `current_chunk.md`, reacts in the
-session's Active Persona, stakes 1 multi-chapter prediction per chunk (plus 1
-conditional retirement candidate when at the 10-prediction cap), writes
+session's Active Persona, stakes 1 specific, non-obvious prediction per chunk
+(plus 1 conditional retirement candidate when at the 10-prediction cap), writes
 `<session_dir>/current_reader_response.md` (or `current_discussion_response.md`
 on discussion turns), and ends its turn with a 1-line completion notice ending
 in a `[Tools: ...]` receipt.

@@ -9,7 +9,7 @@ All {{TOTAL_CHUNKS}} story chunks of *{{TITLE}}* have been read and
 - Reader Memory (`memory.md`, mandatory read — includes final Judge rulings):
   {{MEMORY_FILE}}
 
-- Prediction Hall of Fame & Shame (mandatory read — final scoreboard, Major
+- Prediction Hall of Fame & Shame (mandatory read — final scoreboard, Confirmed
   Hits, Subverted Twists, and Debunked Misses): {{HALL_OF_FAME_FILE}}
 
 - Story Chunks Indices (`chunks/by_chronology.md` & `chunks/by_topic.md`,
@@ -83,10 +83,9 @@ and how the central mysteries, themes, or plot threads locked together.
 #### Prediction Scoreboard Retrospective (`hall_of_fame.md`)
 
 Review your final prediction scoreboard with good humor—highlighting your
-proudest multi-chunk `CONFIRMED` hits (summarizing their actual original
-`**Theory**` accurately), your favorite authorial `SUBVERTED` twists/red
-herrings, and your funniest or wildest `DEBUNKED` theories and early Chunk 1–3
-misconceptions.
+proudest `CONFIRMED` hits (summarizing their actual original `**Theory**`
+accurately), your favorite authorial `SUBVERTED` twists/red herrings, and your
+funniest or wildest `DEBUNKED` theories and early Chunk 1–3 misconceptions.
 
 #### Running Gags, Lingering Hooks & Closing Sign-Off
 

@@ -147,8 +147,7 @@ scoreboards, and bounded multi-layer indices.
 Defined in [blind-reader.md](./agents/blind-reader.md). Reads each newly
 unlocked passage without access to future chapters or the source file. It reacts
 in character in the session's active persona, stakes one new falsifiable
-multi-chapter prediction per chunk, and maintains an evolving notebook
-(`memory.md`).
+prediction per chunk, and maintains an evolving notebook (`memory.md`).
 
 ### Prediction Judge
 

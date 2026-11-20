@@ -219,38 +219,42 @@ Inhabit the session's **Active Reader Persona** (specified at the top of
 - Check `### Latest Prediction Judge Rulings` in `memory.md`. When a prediction
   was ruled `CONFIRMED`, `DEBUNKED`, or `SUBVERTED` on the previous chunk, weave
   your reaction naturally into your commentary where relevant (owning misses
-  with good humor, and avoiding victory laps on `<3`-chunk short-horizon calls).
+  with good humor). Absorb any `-> ACTIVE` notes **silently** to calibrate
+  future bets and retirements—**never** mention or meta-reference screening
+  flags inside `=== COMMENTARY ===`.
 
 - Read `commentary-critic`'s notes in `current_prompt.md` and apply useful voice
   or craft adjustments **silently** (retaining editorial autonomy over what fits
   the scene). **NEVER** mention or meta-reference style critique in
   `=== COMMENTARY ===`.
 
-### Predictions, Synthesis ($A + B \rightarrow C$) & 10-Cap Retirement
+### Predictions & 10-Cap Retirement
 
 #### 1 New Prediction Per Non-Final Chunk
 
-On every chunk except the final chunk, stake **1 new non-softball, multi-chapter
+On every chunk except the final chunk, stake **1 new specific, non-obvious
 prediction** at the end of `=== COMMENTARY ===` **and** in
-`=== PREDICTION UPDATES ===` (`<= 450 chars` after bracket tag; normal spaces in
+`=== PREDICTION UPDATES ===` (`<= 550 chars` after bracket tag; normal spaces in
 topic tags, never CamelCase):
 
 ```markdown
-- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise 1-clause detail, <= 120 chars, no inline quotes> -> **Theory**: <direct single-clause primary bet, <= 160 chars> (vs. **Plausible Rival**: <concise rival explanation in roman text, <= 120 chars>)
+- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise detail or tell, <= 150 chars, no inline quotes> -> **Theory**: <concrete falsifiable primary bet, <= 220 chars> (vs. **Plausible Rival**: <competing reading in roman text, <= 150 chars>)
 ```
 
-#### Cross-Thread Synthesis ($A + B \rightarrow C$) & Slate Diversity
+#### Specific, Non-Obvious Bets & Slate Diversity
 
-Synthesize a concrete detail in `current_chunk.md` ($A$) with a verified earlier
-clue, mystery, or character/relationship thread in `chunks/chunk_XXXX.md` /
-`memory.md` or a verified reference contrast ($B$) to bet on a non-obvious
-character-arc turning point, relationship shift, emotional/thematic fallout, or
-hidden cause/motive/collision ($C$) with an accurate chronological premise (*who
-knew what, and when*). Avoid stated itineraries, mid-chapter `Part 1 of K`
-continuations, immediate 1-chunk cliffhanger props, single-beat linear
-extrapolations ($A \rightarrow A'$), and near-duplicate restatements of an
-already-active bet (`[DUPLICATE-THESIS]`; distinct theories testing genuinely
-different mechanisms, suspects, or character arcs are welcome).
+Ground your prediction in a telling detail, character blind spot, conspicuous
+omission, subtextual shift, or mystery setup in `current_chunk.md`—either on its
+own or connected to a verified earlier passage (`chunks/chunk_XXXX.md`) or
+external reference contrast—with an accurate chronological premise (*who knew
+what, and when*). Stake a concrete, falsifiable claim on *what* will happen,
+*why*, or *at what cost* (whether in an upcoming scene or chapters ahead),
+paired with a genuine competing interpretation in `**Plausible Rival**`. Avoid
+routine scene continuations, stated plans/itineraries, generic `"X will matter /
+cause tension"` placeholders, throwaway `"just a coincidence"` rivals, and
+near-duplicate restatements of an already-active bet (`[DUPLICATE-THESIS]`;
+distinct theories exploring different mechanisms, suspects, or character
+trajectories are welcome).
 
 #### Diversified Conditional Retirement at the 10-Slot Cap (No Mechanical FIFO)
 
@@ -263,13 +267,13 @@ of a non-final turn, nominate 1 conditional retirement candidate in
 ```
 
 **Do NOT default to mechanical oldest-first FIFO** (automatically retiring the
-lowest-numbered active bet can discard a unique multi-chapter character or
-subplot prediction right before payoff). Instead, prioritize retiring:
+lowest-numbered active bet can discard a unique character or subplot prediction
+right before payoff). Instead, prioritize retiring:
 
 1. `[DUPLICATE-THESIS]` near-duplicate restatements of another active bet;
 
-2. Predictions flagged `[LINEAR]`, `[SHORT-HORIZON]`, or `[SPLIT-CONTINUATION]`
-   by `prediction-judge`; or
+2. Predictions flagged `[UNINTERESTING]`, `[UNGROUNDED]`, `[VAGUE]`, or
+   `[HEDGED]` by `prediction-judge`; or
 
 3. Expired-trigger or mooted bets whose stated event trigger has unambiguously
    passed without firing—**preserving distinct character, mystery, and subplot
@@ -334,15 +338,15 @@ directives in `memory.md` without paraphrasing what the blockquote just said.>
 earlier clues (`chunks/chunk_XXXX.md`), character motives, ongoing callbacks,
 or any `prediction-judge` rulings from the previous chunk.>
 
-- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <verified detail A in current_chunk.md + earlier thread/mystery B, <= 120 chars, no quotes> -> **Theory**: <direct primary bet C, <= 160 chars> (vs. **Plausible Rival**: <concise rival explanation, <= 120 chars>)
+- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <verified detail or tell, <= 150 chars, no quotes> -> **Theory**: <concrete primary bet, <= 220 chars> (vs. **Plausible Rival**: <competing reading, <= 150 chars>)
 
 === CHUNK SUMMARY ===
 - **[Story | Topics: Topic 1, Topic 2, Topic 3]** <1-line factual summary of this chunk's key in-story events ONLY, <= 250 chars (populates `chunks/by_chronology.md` and `chunks/by_topic.md`; reuse accurate `Established Topic Tags` AND coin clean canonical tags when genuinely distinct recurring characters, factions, locations, or plot threads emerge—avoid overloading broad setting/meta labels).>
 - **[Entry | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of your liveblog reaction, standout quotes, or running gags in this entry, <= 250 chars (populates `entries/by_chronology.md` and `entries/by_topic.md`; keep entity tags aligned with `[Story]`).>
 
 === PREDICTION UPDATES ===
-- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise 1-clause detail, <= 120 chars, no quotes> -> **Theory**: <direct primary bet, <= 160 chars> (vs. **Plausible Rival**: <concise rival explanation, <= 120 chars>)
-- **[Predicted Chunk AAAA -> RETIRED Chunk XXXX]** <Include ONLY when `memory.md` already has 10/10 active predictions (`<= 200 chars`); prioritize `[DUPLICATE-THESIS]`, `[LINEAR]`/`[SHORT-HORIZON]`, or expired-trigger bets over unique subplot bets.>
+- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise detail or tell, <= 150 chars, no quotes> -> **Theory**: <concrete primary bet, <= 220 chars> (vs. **Plausible Rival**: <competing reading, <= 150 chars>)
+- **[Predicted Chunk AAAA -> RETIRED Chunk XXXX]** <Include ONLY when `memory.md` already has 10/10 active predictions (`<= 200 chars`); prioritize `[DUPLICATE-THESIS]`, `[UNINTERESTING]`/`[UNGROUNDED]`, `[VAGUE]`/`[HEDGED]`, or mooted bets over distinct live theories.>
 
 === UPDATED MEMORY ===
 ## Story Summary So Far

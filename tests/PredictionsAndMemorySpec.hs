@@ -80,16 +80,17 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
   putStrLn "== Rec #4: Sub-Clause Overflow Audit, Screening Flags & Diversified Retirement =="
   let clueOk = "Lin notices fresh salt stains on the locked boathouse latch"
       theoryOk = "Mara used the boathouse at high tide to hide the harbor master's ledger"
-      rival139 = "The salt stains are leftover spray from last week's gale, and the harbor master still has the ledger locked inside his upstairs office safe"
+      rivalOver =
+        "The salt stains are leftover spray from last week's equinoctial gale, and the harbor master still has the ledger locked inside his upstairs office wall safe behind the chart cabinet"
       predLineOverflow =
         "- **[Predicted Chunk 0004 | Topics: Detective Lin, Mara, Boathouse]** **Clue/Anomaly**: "
           <> clueOk
           <> " -> **Theory**: "
           <> theoryOk
           <> " (vs. **Plausible Rival**: "
-          <> rival139
+          <> rivalOver
           <> ")"
-  assertBool "Rival clause > 120 chars" (T.length rival139 > 120)
+  assertBool "Rival clause > 150 chars" (T.length rivalOver > 150)
   let (recs1, _, auditBlocks1, _) =
         auditAndApplyPredictionUpdates
           4
@@ -133,15 +134,48 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
           }
   jpPath <- writeCurrentJudgePromptFile tmp stMid
   jpTxt <- TIO.readFile jpPath
-  forM_ ["[SPLIT-CONTINUATION]", "[SHORT-HORIZON]", "[DUPLICATE-THESIS]", "[LINEAR]", "[HEDGED]", "[VAGUE]"] $ \flag ->
+  forM_ ["[UNINTERESTING]", "[UNGROUNDED]", "[DUPLICATE-THESIS]", "[HEDGED]", "[VAGUE]"] $ \flag ->
     assertBool ("Judge prompt includes screening flag " ++ T.unpack flag) (flag `T.isInfixOf` jpTxt)
+  assertBool
+    "Judge prompt marks memory.md as mandatory context read"
+    ("Reader Memory File (mandatory context read)" `T.isInfixOf` jpTxt)
+  assertBool
+    "Judge prompt drops old mechanical proxy flags [LINEAR] and [SHORT-HORIZON]"
+    (not ("[LINEAR]" `T.isInfixOf` jpTxt) && not ("[SHORT-HORIZON]" `T.isInfixOf` jpTxt))
   assertBool "Judge prompt highlights mid-chapter split context" ("Mid-Chapter Split Context" `T.isInfixOf` jpTxt)
   assertBool "Judge prompt includes Event-Trigger and Window Expiry guidance" ("Event-Trigger" `T.isInfixOf` jpTxt)
 
+  let (recsNextChunkHit, _, _) =
+        applyJudgeVerdicts
+          5
+          recs1
+          []
+          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0004 -> CONFIRMED Chunk 0005]** Mara reveals the ledger hidden in the boathouse.\n"
+  case recsNextChunkHit of
+    (pr5 : _) ->
+      assertEq
+        "1-chunk foresight confirmation receives full Confirmed Hit status (isSameChunk = False)"
+        (PredStatusConfirmed 5 False)
+        (prStatus pr5)
+    [] -> die "Expected 1 judged prediction record"
+  let (recsSameChunk, _, _) =
+        applyJudgeVerdicts
+          4
+          recs1
+          []
+          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0004 -> CONFIRMED Chunk 0004]** Already revealed in Chunk 4.\n"
+  case recsSameChunk of
+    (pr4 : _) ->
+      assertEq
+        "Same-chunk confirmation marks isSameChunk = True (0 chunks foresight)"
+        (PredStatusConfirmed 4 True)
+        (prStatus pr4)
+    [] -> die "Expected 1 same-chunk prediction record"
+
   let slate10 = normWs (renderPredictionSlateNote 8 12 10)
   assertBool
-    "10-cap slate note warns against mechanical oldest-first FIFO"
-    ("[DUPLICATE-THESIS]" `T.isInfixOf` slate10 && "oldest-first FIFO" `T.isInfixOf` slate10)
+    "10-cap slate note warns against mechanical oldest-first FIFO and prioritizes [UNINTERESTING]"
+    ("[DUPLICATE-THESIS]" `T.isInfixOf` slate10 && "[UNINTERESTING]" `T.isInfixOf` slate10 && "oldest-first FIFO" `T.isInfixOf` slate10)
 
 testRec5ArcRollupsFinalMysteriesAndHallOfFame :: IO ()
 testRec5ArcRollupsFinalMysteriesAndHallOfFame = do

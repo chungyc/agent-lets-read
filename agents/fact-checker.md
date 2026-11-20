@@ -137,11 +137,13 @@ skips and stale status descriptions in `memory.md`).
 
 #### Prediction Premises (`**Clue/Anomaly**`) & Information-State Chronology
 
-While the predicted future outcome (`**Theory**`) is protected speculation, its
-stated **factual premise (`**Clue/Anomaly**`) and chronological causality (*who
-knew what, and when*)** are testable facts. Verify that `blind-reader`'s premise
-does not misstate an earlier chunk or rely on reverse-chronology
-impossibilities.
+While the predicted future outcome (`**Theory**`) and any plausible reading of
+tone, subtext, omission, or motive in `**Clue/Anomaly**` are protected reader
+interpretation, any stated **concrete fact or chronological sequence (*who knew
+what, and when*)** in `**Clue/Anomaly**` is testable. Dispute `**Clue/Anomaly**`
+only if it misstates what the text explicitly said or relies on
+reverse-chronology impossibilities—never for a debatable psychological or
+subtextual reading of an accurate scene detail.
 
 ### Primary Source 3: External Reference / Canon (`search_web`, When Applicable)
 

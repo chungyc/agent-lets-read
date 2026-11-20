@@ -148,7 +148,7 @@ instance Binary EntryLogRecord
 
 data PredictionStatus
   = PredStatusActive
-  | PredStatusConfirmed !Int !Bool -- ^ resolvedChunk, isShortHorizon (< 3 chunks)
+  | PredStatusConfirmed !Int !Bool -- ^ resolvedChunk, isSameChunk (0 chunks foresight)
   | PredStatusDebunked !Int        -- ^ resolvedChunk
   | PredStatusSubverted !Int       -- ^ resolvedChunk
   | PredStatusRetired !Int         -- ^ retiredChunk

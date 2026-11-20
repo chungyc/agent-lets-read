@@ -174,7 +174,7 @@ lintReaderCommentary bannedJargon commText parsedSummaries mNewPred =
                         <> cPad
                         <> "]` exceeded the conciseness budget ("
                         <> T.intercalate "; " issues
-                        <> "). On your next turn, keep the prediction body `<= 450 chars` total (`**Clue/Anomaly** <= 120 chars` with no inline quotes, `**Theory** <= 160 chars` stating 1 direct outcome, `**Plausible Rival** <= 120 chars`)."
+                        <> "). On your next turn, keep the prediction body `<= 550 chars` total (`**Clue/Anomaly** <= 150 chars` with no inline quotes, `**Theory** <= 220 chars`, `**Plausible Rival** <= 150 chars`)."
                     ]
    in jargonWarn ++ headingWarn ++ emoteWarn ++ summaryWarn ++ predLenWarn
 
