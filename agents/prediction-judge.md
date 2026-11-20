@@ -178,11 +178,13 @@ flag(s)** whenever any defect below applies:
 3. `[DUPLICATE-THESIS]` — Near-duplicate restatement when `>= 3` active
    predictions (including `Predicted Chunk NNNN`) stake minor variations of the
    same mechanism and outcome. Do **not** flag distinct theories that explore
-   genuinely different mechanisms, suspects, or causes of a central mystery.
+   genuinely different mechanisms, suspects, causes, or character/relationship
+   trajectories.
 
 4. `[LINEAR]` — Extrapolates a single current-chunk beat ($A \rightarrow A'$)
-   rather than synthesizing `current_chunk.md` ($A$) with an earlier thread,
-   mystery, or reference contrast ($B$) into $C$.
+   rather than synthesizing `current_chunk.md` ($A$) with an earlier character,
+   relationship, mystery, or reference thread ($B$) into a multi-chapter payoff
+   ($C$).
 
 5. `[HEDGED]` or `[VAGUE]` — Uses two-way probability hedging or unfalsifiable
    Barnum-effect vagueness.

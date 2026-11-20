@@ -11,7 +11,8 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import LetsRead.Chunker (buildChunksFromSource)
 import LetsRead.Types
-  ( SessionState (..)
+  ( Chunk (..)
+  , SessionState (..)
   , chunkToMeta
   , loadState
   , loadVaultChunk
@@ -55,6 +56,25 @@ testVaultAndChunker = withTempDir "vault" $ \tmp -> do
   (title, chunks) <- buildChunksFromSource srcPath 900 (Just "The Harbor Lantern")
   assertEq "Title override preserved" "The Harbor Lantern" title
   assertBool "Front matter + 2 chapters chunked" (length chunks >= 3)
+
+  let draftScenePath = tmp </> "draft_scene.md"
+  TIO.writeFile
+    draftScenePath
+    ( T.unlines
+        [ "## I"
+        , ""
+        , "Mara gave the usual disclaimer, burned the initial draft of the letter, and sealed the final version in wax."
+        , ""
+        , "## II"
+        , ""
+        , "By dawn the courier had reached the lighthouse."
+        ]
+    )
+  (_, draftSceneChunks) <- buildChunksFromSource draftScenePath 900 Nothing
+  assertEq
+    "Short numeral-headed opening scene mentioning 'disclaimer' / 'initial draft' / 'final version' stays Chapter 1"
+    [1, 2]
+    (map chapterNumber draftSceneChunks)
 
   let vaultPath = tmp </> ".vault.bin"
   saveVault vaultPath chunks

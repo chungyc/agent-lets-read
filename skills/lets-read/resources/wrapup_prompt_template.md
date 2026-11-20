@@ -76,12 +76,12 @@ Trace how the premise evolved across the verified chronology from Chunk 1 to the
 finale, which characters (including original or supporting cast) stole the show,
 and how the central mysteries, themes, or plot threads locked together.
 
-#### The Corkboard Autopsy (`hall_of_fame.md`)
+#### Prediction Scoreboard Retrospective (`hall_of_fame.md`)
 
 Review your final prediction scoreboard with good humor—highlighting your
 proudest multi-chunk `CONFIRMED` hits (summarizing their actual original
 `**Theory**` accurately), your favorite authorial `SUBVERTED` twists/red
-herrings, and your funniest `DEBUNKED` conspiracy theories or early Chunk 1–3
+herrings, and your funniest or wildest `DEBUNKED` theories and early Chunk 1–3
 misconceptions.
 
 #### Running Gags, Lingering Hooks & Closing Sign-Off

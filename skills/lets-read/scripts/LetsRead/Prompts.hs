@@ -477,7 +477,7 @@ writeWrapupPromptFile sessionDir st = do
             , ""
             , "## Final Wrapup Instructions"
             , ""
-            , wrapMarkdownParagraph 78 "Read `memory.md` and `predictions/hall_of_fame.md` (verifying exact original `**Clue/Anomaly**` and `**Theory**` wording and full-story timeline progression rather than reconstructing from memory), write line 1 as `<!-- TOOLS: read_file(...) -->` followed by `=== COMMENTARY ===` covering finale verdicts, whole-story retrospective, corkboard autopsy, and closing sign-off to `{{READER_RESPONSE_FILE}}` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice ending with `[Tools: read_file(memory.md, predictions/hall_of_fame.md, ...)]` and no tool calls (do not call `send_message` or re-read files)."
+            , wrapMarkdownParagraph 78 "Read `memory.md` and `predictions/hall_of_fame.md` (verifying exact original `**Clue/Anomaly**` and `**Theory**` wording and full-story timeline progression rather than reconstructing from memory), write line 1 as `<!-- TOOLS: read_file(...) -->` followed by `=== COMMENTARY ===` covering finale verdicts, whole-story retrospective, prediction scoreboard retrospective, and closing sign-off to `{{READER_RESPONSE_FILE}}` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice ending with `[Tools: read_file(memory.md, predictions/hall_of_fame.md, ...)]` and no tool calls (do not call `send_message` or re-read files)."
             ]
   let substitutions =
         [ ("{{TOTAL_CHUNKS}}", jsonInt totalChunks)
@@ -636,7 +636,7 @@ writeCurrentJudgePromptFile sessionDir st = do
                    78
                    ( "On `Predicted Chunk "
                        <> curPad
-                       <> " -> ACTIVE` (`<= 200 chars`), audit synthesis and falsifiability honestly: explicitly tag `[SPLIT-CONTINUATION]` (mid-chapter `Part 1 of K` continuation), `[SHORT-HORIZON]` (immediate 1-chunk cliffhanger prop), `[DUPLICATE-THESIS]` (near-duplicate restatement of an already-active bet rather than a distinct mechanism), `[LINEAR]` (single-beat $A \\rightarrow A'$ extrapolation), or `[HEDGED]` / `[VAGUE]` when applicable, and never emit generic `\"Strong/Clean synthesis\"` praise when any flag applies."
+                       <> " -> ACTIVE` (`<= 200 chars`), audit synthesis and falsifiability honestly: explicitly tag `[SPLIT-CONTINUATION]` (mid-chapter `Part 1 of K` continuation), `[SHORT-HORIZON]` (immediate 1-chunk cliffhanger prop), `[DUPLICATE-THESIS]` (near-duplicate restatement of an already-active bet rather than a distinct mechanism, cause, or trajectory), `[LINEAR]` (single-beat $A \\rightarrow A'$ extrapolation), or `[HEDGED]` / `[VAGUE]` when applicable, and never emit generic `\"Strong/Clean synthesis\"` praise when any flag applies."
                    )
                , ""
                , "### Completion Notice"

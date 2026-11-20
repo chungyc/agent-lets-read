@@ -169,7 +169,7 @@ unresolved sequel/ambiguity hook).
 
 #### 2-Tier Character Ledger & Craft Persistence
 
-- In `## Characters & Relationships` (max 6–8 bullets total), keep **4–6
+- In `## Characters & Relationships` (max 8 bullets total), keep **up to 6
   persistent 1-line bullets for the Core Cast** plus **1 consolidated persistent
   bullet** `- **Supporting Cast & Key Fates (Persistent)**:` (`<= 350 chars`,
   semicolon-separated, updated in place) for off-screen/supporting characters
@@ -237,15 +237,15 @@ topic tags, never CamelCase):
 #### Cross-Thread Synthesis ($A + B \rightarrow C$) & Slate Diversity
 
 Synthesize a concrete detail in `current_chunk.md` ($A$) with a verified earlier
-clue/mystery/character thread in `chunks/chunk_XXXX.md` / `memory.md` or a
-verified reference contrast ($B$) to bet on a non-obvious hidden cause, motive,
-or collision ($C$) with an accurate chronological premise (*who knew what, and
-when*). Avoid stated itineraries, mid-chapter `Part 1 of K` continuations,
-immediate 1-chunk cliffhanger props, single-beat linear extrapolations
-($A \rightarrow A'$), and near-duplicate restatements of an already-active bet
-(`[DUPLICATE-THESIS]`; distinct theories testing genuinely different mechanisms
-or suspects of a central mystery are welcome alongside character and subplot
-bets).
+clue, mystery, or character/relationship thread in `chunks/chunk_XXXX.md` /
+`memory.md` or a verified reference contrast ($B$) to bet on a non-obvious
+character-arc turning point, relationship shift, emotional/thematic fallout, or
+hidden cause/motive/collision ($C$) with an accurate chronological premise (*who
+knew what, and when*). Avoid stated itineraries, mid-chapter `Part 1 of K`
+continuations, immediate 1-chunk cliffhanger props, single-beat linear
+extrapolations ($A \rightarrow A'$), and near-duplicate restatements of an
+already-active bet (`[DUPLICATE-THESIS]`; distinct theories testing genuinely
+different mechanisms, suspects, or character arcs are welcome).
 
 #### Diversified Conditional Retirement at the 10-Slot Cap (No Mechanical FIFO)
 
@@ -345,7 +345,7 @@ or any `prediction-judge` rulings from the previous chunk.>
 - **Arc 1 (Ch. A–B | Chunks XXXX–YYYY) / Current Arc Chapters**: <1 concise bullet per completed `L1_XXXX` arc listed under `### Completed L1 Story Arcs` in `memory.md` (matching exact `Arc K` numbering), plus at most 1–2 consolidated bullets total for completed chapters in the current unarchived arc.>
 
 ## Characters & Relationships
-- **<Core Cast Name> (Persistent)**: <Compact 1-line role, evolving psychology, key relationships, and current status (4–6 core cast bullets total; keep persistent across temporary camera cuts)>
+- **<Core Cast Name> (Persistent)**: <Compact 1-line role, evolving psychology, key relationships, and current status (up to 6 core cast bullets total; keep persistent across temporary camera cuts)>
 - **Supporting Cast & Key Fates (Persistent)**: <Consolidated 1-line semicolon-separated ledger (<= 350 chars) of off-screen/supporting characters and permanent fates; update in place>
 
 ## Active Mysteries & Unanswered Questions

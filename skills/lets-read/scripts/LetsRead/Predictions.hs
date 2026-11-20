@@ -1223,7 +1223,7 @@ renderHallOfFameMarkdown sessionDir st =
         , "- Total Predictions Logged: " <> jsonInt totalLogged
         , "- Major Confirmed Hits (>= 3 Chunks Foresight): **" <> jsonInt (length majorHits) <> "**"
         , "- Subverted Twists (Right Clue, Surprise Twist): **" <> jsonInt (length subvertedList) <> "**"
-        , "- Debunked Misses (Glorious Corkboard Wipeouts): **" <> jsonInt (length debunkedList) <> "**"
+        , "- Debunked Misses: **" <> jsonInt (length debunkedList) <> "**"
         , "- Short-Horizon Confirmations (< 3 Chunks — No Hit Credit): " <> jsonInt (length shortConfirmations)
         , "- Retired for 10-Prediction Cap: " <> jsonInt (length retiredList)
         , "- Unresolved / Open-Ended at Finale: " <> jsonInt (length unresolvedList)

@@ -90,13 +90,11 @@ hasFrontMatterMarkers body =
         , "author:"
         , "content warning"
         , "trigger warning"
-        , "disclaimer"
+        , "disclaimer:"
         , "copyright "
         , "all rights reserved"
         , "table of contents"
         , "fanfiction"
-        , "initial draft"
-        , "final version"
         , "originally published"
         ]
    in any (`T.isInfixOf` lower) markers

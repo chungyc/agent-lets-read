@@ -50,21 +50,20 @@ topic.
 #### Character, Faction & Location Aliases
 
 Merge informal or earlier labels that refer to the same entity as a named
-character, faction, or location (for example, `Secret Branch`, `Tokyo Office`
-$\rightarrow$ `Miyamoto Group`; `Alnus Berm`, `Alnus Checkpoint` $\rightarrow$
-`Alnus Hill`).
+character, faction, or location (for example, `Dock Patrol`, `Pier Office`
+$\rightarrow$ `Harbor Watch`; `North Jetty`, `Outer Pier` $\rightarrow$
+`North Pier`).
 
 #### One-Off `<Entity> <Scene Action>` Tags
 
 Merge singleton tags that attach a one-off scene action to a recurring character
-or entity instead of tagging the entity itself (for example, `Rory Confession`,
-`Rory Observation`, `Rory Investigation` $\rightarrow$ `Rory Mercury`).
+or entity instead of tagging the entity itself (for example, `Lin Confession`,
+`Lin Observation`, `Lin Investigation` $\rightarrow$ `Inspector Lin`).
 
 #### Synonymous Plot or Mechanic Phrases
 
 Merge tags that describe the exact same recurring mechanic or mystery thread
-(for example, `Microscopic Regeneration`, `Glacial Reconstruction`
-$\rightarrow$ `Apostle Regeneration`).
+(for example, `Rune Barrier`, `Sigil Shielding` $\rightarrow$ `Ward Network`).
 
 ### Prefer Established Recurring Topic Names
 
@@ -103,9 +102,9 @@ merge list into your final message:
 
 ```markdown
 === TOPIC MERGES ===
-- Rory Mercury <= Rory Confession, Rory Observation, Rory Investigation
-- Miyamoto Group <= Secret Branch, Tokyo Office
-- Apostle Regeneration <= Microscopic Regeneration, Glacial Reconstruction
+- Inspector Lin <= Lin Confession, Lin Observation, Lin Investigation
+- Harbor Watch <= Dock Patrol, Pier Office
+- Ward Network <= Rune Barrier, Sigil Shielding
 ```
 
 If all newly added topics are genuinely distinct and no merges are needed,
