@@ -31,10 +31,15 @@ topic.
 - If a tag's meaning is ambiguous from its name and `memory.md` alone, you may
   call `read_file` on `<session_dir>/chunks/by_topic.md`,
   `<session_dir>/entries/by_topic.md`, or
-  `<session_dir>/predictions/by_topic.md` to inspect the 1-line summary where
-  that tag was used.
+  `<session_dir>/predictions/by_topic.md`—following any linked shards under
+  `<domain>/archive/topics/` (`L1_XXXX.md`, `topic_XXXX_L1_YYYY.md`) for older
+  tags—to inspect the 1-line summary where that tag was used. The `Session File
+  & Index Reference` (`session-files.md` path in `current_topic_prompt.md`)
+  explains file-group roles and sharded index layout. Do not read
+  `lets_read_log.md`.
 
-- Never access files outside `<session_dir>` or inspect `.vault.bin`.
+- Never access files outside `<session_dir>` (aside from the `session-files.md`
+  reference path in your turn prompt) or inspect `.vault.bin`.
 
 ### Strict Write Boundary
 

@@ -24,6 +24,10 @@ All {{TOTAL_CHUNKS}} story chunks of *{{TITLE}}* have been read and
 - Curated Memory Archive (`archive/memory/`, on-demand `read_file`):
   {{ARCHIVE_DIR}}
 
+- Session File & Index Reference (optional on-demand `read_file` for file
+  groups & sharded index layout):
+  {{SESSION_FILES_REF}}
+
 - Output Response File (mandatory write via `write_file` with
   `Overwrite: true`): {{READER_RESPONSE_FILE}}
 

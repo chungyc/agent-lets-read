@@ -43,6 +43,11 @@ in a `[Tools: ...]` receipt.
 
 #### Allowed On-Demand via `read_file`
 
+- `Session File & Index Reference` (`session-files.md` path listed under
+  `## Session Files` in your turn prompt): explains what each session file group
+  is for and how `by_chronology.md`, `by_topic.md`, and `archive/` shards are
+  organized.
+
 - `<session_dir>/chunks/by_chronology.md`, `<session_dir>/chunks/by_topic.md`,
   `<session_dir>/chunks/archive/chronology/`,
   `<session_dir>/chunks/archive/topics/`, and
@@ -50,17 +55,19 @@ in a `[Tools: ...]` receipt.
   counts, titles, or chronology claims about earlier unlocked chunks)
 
 - `<session_dir>/entries/by_chronology.md`, `<session_dir>/entries/by_topic.md`,
-  and `<session_dir>/entries/chunk_XXXX.md` (to check earlier commentary entries
-  if needed)
+  `<session_dir>/entries/archive/`, and `<session_dir>/entries/chunk_XXXX.md`
+  (to check earlier commentary entries if needed; do not read
+  `lets_read_log.md`)
 
-- `<session_dir>/archive/memory/curated_XXXX.md` and
-  `<session_dir>/archive/memory/chunk_XXXX.md` (to check when a fact was
-  established)
+- `<session_dir>/predictions/` (`pred_XXXX.md`, `by_chronology.md`,
+  `by_topic.md`, `archive/`) and `<session_dir>/archive/memory/`
+  (`curated_XXXX.md`, `chunk_XXXX.md`)
 
 ### No Local File Exploration Outside `<session_dir>` & Strict Write Boundary
 
 - Never read `<session_dir>/.vault.bin`, explore local files outside
-  `<session_dir>`, or attempt to locate the original source story file.
+  `<session_dir>` (aside from the `session-files.md` reference path in your
+  turn prompt), or attempt to locate the original source story file.
 
 - Never call `run_command`, `edit_file`, or `send_message`.
 

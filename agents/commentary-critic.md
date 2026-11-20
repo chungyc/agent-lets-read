@@ -45,14 +45,21 @@ critique to `<session_dir>/current_critic_response.md` via `write_file`
 
 #### Allowed on-demand via `read_file`
 
+- `Session File & Index Reference` (`session-files.md` path listed under
+  `## Session Files` in your turn prompt): explains what each session file group
+  is for and how `by_chronology.md`, `by_topic.md`, and `archive/` shards are
+  organized.
+
 - `<session_dir>/entries/by_chronology.md`, `<session_dir>/entries/by_topic.md`,
-  and `<session_dir>/entries/chunk_XXXX.md` (if checking whether a structural
-  habit, running gag, or phrase is becoming repetitive across recent chunks)
+  `<session_dir>/entries/archive/`, and `<session_dir>/entries/chunk_XXXX.md`
+  (if checking whether a structural habit, running gag, or phrase is becoming
+  repetitive across recent chunks; do not read `lets_read_log.md`)
 
 ### No Local File Exploration Outside `<session_dir>` & Strict Write Boundary
 
 - You are **strictly forbidden** from reading `<session_dir>/.vault.bin`,
-  reading or searching local files outside `<session_dir>`, or attempting to
+  reading or searching local files outside `<session_dir>` (aside from the
+  `session-files.md` reference path in your turn prompt), or attempting to
   locate the original source story file.
 
 - Never use `search_web` to look up the specific story being read.

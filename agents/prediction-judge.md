@@ -34,15 +34,23 @@ newly unlocked story passage).
 
 #### Allowed On-Demand
 
-You may call `read_file` ONLY within `<session_dir>/memory.md`,
-`<session_dir>/entries/`, `<session_dir>/chunks/`, `<session_dir>/predictions/`,
-and `<session_dir>/archive/` if you need earlier unlocked story context or full
-prediction history.
+- `Session File & Index Reference` (`session-files.md` path listed under
+  `## Session Files` in your turn prompt): explains what each session file group
+  is for and how `by_chronology.md`, `by_topic.md`, and `archive/` shards are
+  organized.
+
+- Call `read_file` inside `<session_dir>/memory.md`,
+  `<session_dir>/predictions/` (`pred_XXXX.md`, `by_chronology.md`,
+  `by_topic.md`, `archive/`), `<session_dir>/chunks/` (`chunk_XXXX.md`,
+  `by_chronology.md`, `by_topic.md`, `archive/`), `<session_dir>/entries/`, and
+  `<session_dir>/archive/memory/` when checking earlier unlocked story context
+  or full prediction history. Do not read `lets_read_log.md`.
 
 ### No Local File Exploration Outside `<session_dir>` & Strict Write Boundary
 
 - Never read `<session_dir>/.vault.bin`, explore local files outside
-  `<session_dir>`, or attempt to locate or read the original source story file.
+  `<session_dir>` (aside from the `session-files.md` reference path in your
+  turn prompt), or attempt to locate or read the original source story file.
 
 - Never call `run_command`, `edit_file`, or `send_message`.
 

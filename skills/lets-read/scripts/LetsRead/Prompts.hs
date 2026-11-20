@@ -1,9 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module LetsRead.Prompts
   ( defaultPersonaText
   , expandPersonaPreset
   , resolvePersonaPresetIO
+  , fallbackSkillRefFromExePath
+  , resolveSessionFilesRefPathIO
   , renderPredictionSlateNote
   , writeCurrentChunkFile
   , writeCurrentPromptFile
@@ -16,6 +19,7 @@ module LetsRead.Prompts
   , writeUserDiscussionPromptFile
   ) where
 
+import Control.Exception (IOException, catch)
 import Data.Char (isDigit, isSpace)
 import Data.List (find)
 import Data.Maybe (fromMaybe, listToMaybe)
@@ -47,8 +51,9 @@ import LetsRead.Types
   , wrapMarkdownParagraph
   , wrapMarkdownQuote
   )
-import System.Directory (canonicalizePath, doesFileExist)
-import System.FilePath ((</>))
+import System.Directory (canonicalizePath, doesFileExist, makeAbsolute)
+import System.Environment (getExecutablePath)
+import System.FilePath (takeDirectory, takeFileName, (</>))
 
 defaultPersonaText :: Text
 defaultPersonaText =
@@ -147,6 +152,34 @@ resolvePersonaPresetIO (Just raw)
           case matchPersonaFromList presets raw of
             Just matched -> pure matched
             Nothing -> pure (expandPersonaPreset raw)
+
+fallbackSkillRefFromExePath :: FilePath -> FilePath -> Maybe FilePath
+fallbackSkillRefFromExePath relRef exePath =
+  let binDir = takeDirectory exePath
+      skillDir = takeDirectory binDir
+   in if takeFileName binDir == ".bin"
+        then Just (skillDir </> relRef)
+        else Nothing
+
+resolveSessionFilesRefPathIO :: IO FilePath
+resolveSessionFilesRefPathIO = do
+  let relRef = "references" </> "session-files.md"
+  rawPath <- resolveSkillResourcePath relRef
+  exists <- doesFileExist rawPath
+  if exists
+    then canonicalizePath rawPath `catch` (\(_ :: IOException) -> makeAbsolute rawPath)
+    else do
+      mBinCandidate <-
+        ( do
+            exePath <- getExecutablePath
+            case fallbackSkillRefFromExePath relRef exePath of
+              Just cand -> Just <$> makeAbsolute cand
+              Nothing -> pure Nothing
+        )
+          `catch` (\(_ :: IOException) -> pure Nothing)
+      case mBinCandidate of
+        Just p -> pure p
+        Nothing -> makeAbsolute rawPath
 
 renderPredictionSlateNote :: Int -> Int -> Int -> Text
 renderPredictionSlateNote curIdx totalChunks activeCount
@@ -269,6 +302,7 @@ extractInlineCriticSection fromChunkIdx rawFb =
 writeCurrentPromptFile :: FilePath -> SessionState -> Chunk -> Int -> IO FilePath
 writeCurrentPromptFile sessionDir st chunk activeCount = do
   absSession <- canonicalizePath sessionDir
+  sessionFilesRefPath <- resolveSessionFilesRefPathIO
   let criticFeedbackPath = absSession </> "critic_feedback.md"
   hasCriticFeedback <- doesFileExist criticFeedbackPath
   rawCriticFb <-
@@ -400,6 +434,7 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
             ++ prevContextLines
             ++ [ "- Story Chunks Directory (on-demand `read_file`): " <> T.pack (absSession </> "chunks")
                , "- Session Directory (on-demand `entries/` & `predictions/`): " <> T.pack absSession
+               , "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
                ]
             ++ continuitySection
             ++ [ ""
@@ -430,6 +465,7 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
 writeWrapupPromptFile :: FilePath -> SessionState -> IO FilePath
 writeWrapupPromptFile sessionDir st = do
   absSession <- canonicalizePath sessionDir
+  sessionFilesRefPath <- resolveSessionFilesRefPathIO
   let criticFeedbackPath = absSession </> "critic_feedback.md"
   hasCriticFeedback <- doesFileExist criticFeedbackPath
   rawCriticFb <-
@@ -467,6 +503,7 @@ writeWrapupPromptFile sessionDir st = do
             , ""
             , "- Reader Memory File (mandatory read): {{MEMORY_FILE}}"
             , "- Prediction Hall of Fame & Shame (mandatory read): {{HALL_OF_FAME_FILE}}"
+            , "- Session File & Index Reference (optional on-demand `read_file`): {{SESSION_FILES_REF}}"
             , "- Output Response File (mandatory `write_file`, `Overwrite: true`): {{READER_RESPONSE_FILE}}"
             , ""
             , "## Active Persona"
@@ -491,6 +528,7 @@ writeWrapupPromptFile sessionDir st = do
         , ("{{ENTRIES_DIR}}", T.pack (absSession </> "entries"))
         , ("{{PREDICTIONS_DIR}}", T.pack (absSession </> "predictions"))
         , ("{{ARCHIVE_DIR}}", T.pack (absSession </> "archive"))
+        , ("{{SESSION_FILES_REF}}", T.pack sessionFilesRefPath)
         , ("{{ACTIVE_PERSONA}}", wrapMarkdownParagraph 78 (expandPersonaPreset (stPersona st)))
         ]
       rendered = T.strip (collapseBlankLines (foldr (\(k, v) acc -> T.replace k v acc) rawTmpl substitutions)) <> "\n"
@@ -500,6 +538,7 @@ writeWrapupPromptFile sessionDir st = do
 writeCurrentJudgePromptFile :: FilePath -> SessionState -> IO FilePath
 writeCurrentJudgePromptFile sessionDir st = do
   absSession <- canonicalizePath sessionDir
+  sessionFilesRefPath <- resolveSessionFilesRefPathIO
   let curIdx = stCurrentIndex st
       curPad = T.pack (padChunkNumber curIdx)
       totalChunks = stTotalChunks st
@@ -596,6 +635,7 @@ writeCurrentJudgePromptFile sessionDir st = do
           , "- Current Story Chunk (mandatory read): " <> T.pack (absSession </> "current_chunk.md")
           , "- Reader Memory File (optional context read): " <> T.pack (absSession </> "memory.md")
           , "- Predictions Directory (optional on-demand `read_file`): " <> T.pack (absSession </> "predictions")
+          , "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
           , "- Output Response File (mandatory `write_file`, `Overwrite: true`): " <> T.pack judgeRespPath
           ]
             ++ midSplitSection
@@ -651,6 +691,7 @@ writeCurrentJudgePromptFile sessionDir st = do
 writeCurrentFactCheckPromptFile :: FilePath -> SessionState -> Text -> Text -> IO FilePath
 writeCurrentFactCheckPromptFile sessionDir st storySumTxt entrySumTxt = do
   absSession <- canonicalizePath sessionDir
+  sessionFilesRefPath <- resolveSessionFilesRefPathIO
   let curIdx = stCurrentIndex st
       curPad = padChunkNumber curIdx
       curPadTxt = T.pack curPad
@@ -723,6 +764,7 @@ writeCurrentFactCheckPromptFile sessionDir st storySumTxt entrySumTxt = do
           , "- Recorded Commentary Entry (mandatory read): " <> T.pack entryPath
           , "- Updated Reader Memory File (mandatory read): " <> T.pack (absSession </> "memory.md")
           , "- Story Chunks Directory (on-demand `read_file` verification): " <> T.pack (absSession </> "chunks")
+          , "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
           , "- Output Response File (mandatory `write_file`, `Overwrite: true`): " <> T.pack factRespPath
           , ""
           , "## Submitted Summaries and Prediction"
@@ -749,6 +791,7 @@ writeCurrentFactCheckPromptFile sessionDir st storySumTxt entrySumTxt = do
 writeCurrentCriticPromptFile :: FilePath -> SessionState -> IO FilePath
 writeCurrentCriticPromptFile sessionDir st = do
   absSession <- canonicalizePath sessionDir
+  sessionFilesRefPath <- resolveSessionFilesRefPathIO
   let curIdx = stCurrentIndex st
       curPad = padChunkNumber curIdx
       curPadTxt = T.pack curPad
@@ -779,6 +822,7 @@ writeCurrentCriticPromptFile sessionDir st = do
           , "- Current Story Chunk (`chunks/chunk_" <> curPadTxt <> ".md` — mandatory read): " <> T.pack (absSession </> "current_chunk.md")
           , "- Recorded Commentary Entry (mandatory read): " <> T.pack entryPath
           , "- Updated Reader Memory File (mandatory read): " <> T.pack (absSession </> "memory.md")
+          , "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
           , "- Output Response File (mandatory `write_file`, `Overwrite: true`): " <> T.pack criticRespPath
           , ""
           , "## Active Reader Persona"
@@ -806,6 +850,7 @@ writeCurrentCriticPromptFile sessionDir st = do
 writeCurrentTopicPromptFile :: FilePath -> SessionState -> IO FilePath
 writeCurrentTopicPromptFile sessionDir st = do
   absSession <- canonicalizePath sessionDir
+  sessionFilesRefPath <- resolveSessionFilesRefPathIO
   let curIdx = stCurrentIndex st
       totalChunks = stTotalChunks st
       topicPromptPath = sessionDir </> "current_topic_prompt.md"
@@ -841,6 +886,7 @@ writeCurrentTopicPromptFile sessionDir st = do
           , "- Story Topic Index (optional `read_file`): " <> T.pack (absSession </> "chunks" </> "by_topic.md")
           , "- Entries Topic Index (optional `read_file`): " <> T.pack (absSession </> "entries" </> "by_topic.md")
           , "- Predictions Topic Index (optional `read_file`): " <> T.pack (absSession </> "predictions" </> "by_topic.md")
+          , "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
           , "- Output Response File (mandatory `write_file`, `Overwrite: true`): " <> T.pack topicRespPath
           , ""
           , "## Established Topics (" <> jsonInt (length vetted) <> ")"
@@ -866,6 +912,7 @@ writeCurrentTopicPromptFile sessionDir st = do
 writeFactCheckDiscussionPromptFile :: FilePath -> SessionState -> [Text] -> IO (FilePath, FilePath)
 writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
   absSession <- canonicalizePath sessionDir
+  sessionFilesRefPath <- resolveSessionFilesRefPathIO
   let curIdx = stCurrentIndex st
       curPad = T.pack (padChunkNumber curIdx)
       totalChunks = stTotalChunks st
@@ -893,6 +940,7 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
           , "- Current Story Chunk (`chunks/chunk_" <> curPad <> ".md`): " <> T.pack (absSession </> "current_chunk.md")
           , "- Reader Memory File: " <> T.pack (absSession </> "memory.md")
           , "- Story Chunks Directory (on-demand `read_file` verification): " <> T.pack (absSession </> "chunks")
+          , "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
           , "- Output Response File (mandatory `write_file`, `Overwrite: true`): " <> T.pack discRespPath
           , ""
           , "## Active Persona"
@@ -929,6 +977,7 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
 writeUserDiscussionPromptFile :: FilePath -> SessionState -> Text -> IO (FilePath, FilePath)
 writeUserDiscussionPromptFile sessionDir st userMsg = do
   absSession <- canonicalizePath sessionDir
+  sessionFilesRefPath <- resolveSessionFilesRefPathIO
   let curIdx = stCurrentIndex st
       curPad = T.pack (padChunkNumber curIdx)
       totalChunks = stTotalChunks st
@@ -954,6 +1003,7 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
           , "- Current Story Chunk (`chunks/chunk_" <> curPad <> ".md`): " <> T.pack (absSession </> "current_chunk.md")
           , "- Reader Memory File: " <> T.pack (absSession </> "memory.md")
           , "- Story Chunks Directory (on-demand `read_file` verification): " <> T.pack (absSession </> "chunks")
+          , "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
           , "- Output Response File (mandatory `write_file`, `Overwrite: true`): " <> T.pack discRespPath
           , ""
           , "## Active Persona"

@@ -55,20 +55,25 @@ your commentary and prediction will reference, **stop and check before calling
 
 #### Allowed On-Demand
 
-You may call `read_file` ONLY within `<session_dir>/chunks/`
-(`by_chronology.md`, `by_topic.md`, `archive/chronology/`, `archive/topics/`,
-`chunk_XXXX.md`), `<session_dir>/entries/` (`by_chronology.md`, `by_topic.md`,
-`archive/chronology/`, `archive/topics/`, `chunk_XXXX.md`),
-`<session_dir>/predictions/` (`by_chronology.md`, `by_topic.md`,
-`archive/chronology/`, `archive/topics/`, `pred_XXXX.md`, `hall_of_fame.md`),
-and `<session_dir>/archive/memory/` (`curated_XXXX.md`, `chunk_XXXX.md`) to
-verify unlocked passages, prior commentary/discussions, indexed predictions, and
-historical memory snapshots.
+- `Session File & Index Reference` (`session-files.md` path listed under
+  `## Session Files` in your turn prompt): explains what each session file group
+  is for and how `by_chronology.md`, `by_topic.md`, and `archive/` shards are
+  organized.
+
+- Call `read_file` inside `<session_dir>/chunks/` (`by_chronology.md`,
+  `by_topic.md`, `archive/chronology/`, `archive/topics/`, `chunk_XXXX.md`),
+  `<session_dir>/entries/` (`by_chronology.md`, `by_topic.md`,
+  `archive/chronology/`, `archive/topics/`, `chunk_XXXX.md`),
+  `<session_dir>/predictions/` (`by_chronology.md`, `by_topic.md`,
+  `archive/chronology/`, `archive/topics/`, `pred_XXXX.md`, `hall_of_fame.md`),
+  and `<session_dir>/archive/memory/` (`curated_XXXX.md`, `chunk_XXXX.md`). Do
+  not read `lets_read_log.md`.
 
 ### No Local File Exploration Outside `<session_dir>` & Strict Write Boundary
 
 - Never read `<session_dir>/.vault.bin`, explore local files outside
-  `<session_dir>`, or attempt to locate or read the original source story file.
+  `<session_dir>` (aside from the `session-files.md` reference path in your
+  turn prompt), or attempt to locate or read the original source story file.
 
 - Never call `run_command`, `edit_file`, or `send_message`.
 

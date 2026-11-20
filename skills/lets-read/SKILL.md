@@ -91,11 +91,13 @@ asks for a custom chunk size.
 The five leaf subagents are defined in [agents/](../../agents/) with
 `subagent: true`, `mainAgent: false`, and explicit `tools` lists (`write_file`
 + `read_file`, plus `search_web` only for `blind-reader` and `fact-checker`).
-Leaf subagents read only inside `<session_dir>`, write only to their designated
-`<session_dir>/current_*_response.md` file via `write_file` (`Overwrite: true`),
-never call `run_command`, `edit_file`, or `send_message`, and use `search_web`
-solely for neutral background lore or reference checks (never for the story
-being read).
+Leaf subagents read only inside `<session_dir>` (plus the shared session-file
+and multi-layer index reference at
+[references/session-files.md](./references/session-files.md)), write only to
+their designated `<session_dir>/current_*_response.md` file via `write_file`
+(`Overwrite: true`), never call `run_command`, `edit_file`, or `send_message`,
+and use `search_web` solely for neutral background lore or reference checks
+(never for the story being read).
 
 #### Sandbox-Compatible Tool Receipts (`[Tools: ...]` & `<!-- TOOLS: ... -->`)
 
@@ -181,6 +183,7 @@ Let `<skill_dir>` denote the directory containing this `SKILL.md` file:
 - Wrapup: [wrapup_prompt_template.md](./resources/wrapup_prompt_template.md)
 - Banned jargon list: [banned_jargon.txt](./resources/banned_jargon.txt)
 - Persona presets: [personas.md](./references/personas.md)
+- Session files & index layout: [session-files.md](./references/session-files.md)
 
 ## Workflow
 

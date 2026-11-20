@@ -37,8 +37,11 @@ import LetsRead.Predictions
   , renderPredSummaryBullet
   )
 import LetsRead.Prompts
-  ( renderPredictionSlateNote
+  ( fallbackSkillRefFromExePath
+  , renderPredictionSlateNote
+  , resolveSessionFilesRefPathIO
   , writeCurrentJudgePromptFile
+  , writeCurrentTopicPromptFile
   , writeWrapupPromptFile
   )
 import LetsRead.Types
@@ -330,7 +333,27 @@ testRec6LeadingEmphasisAndMarkdownFormatting = do
     assertBool "Wrapup prompt without critic_feedback.md has no triple blank lines" (not ("\n\n\n" `T.isInfixOf` wrapNoCritic))
     assertBool
       "Wrapup prompt without critic_feedback.md wraps all non-path lines <= 80 cols"
-      (all (\l -> T.pack tmp `T.isInfixOf` l || T.length l <= 80) (T.lines wrapNoCritic))
+      (all (\l -> T.pack tmp `T.isInfixOf` l || "session-files.md" `T.isInfixOf` l || T.length l <= 80) (T.lines wrapNoCritic))
+    assertBool
+      "Wrapup prompt substitutes session-files.md reference path"
+      ("session-files.md" `T.isInfixOf` wrapNoCritic && not ("{{SESSION_FILES_REF}}" `T.isInfixOf` wrapNoCritic))
+
+    refPath <- resolveSessionFilesRefPathIO
+    hasRefFile <- doesFileExist refPath
+    assertBool "Resolved session-files.md skill reference exists on disk" hasRefFile
+    assertEq
+      "fallbackSkillRefFromExePath derives <skill_dir>/references/session-files.md from .bin/lets-read"
+      (Just "/opt/plugins/lets-read/skills/lets-read/references/session-files.md")
+      (fallbackSkillRefFromExePath ("references" </> "session-files.md") "/opt/plugins/lets-read/skills/lets-read/.bin/lets-read")
+    assertEq
+      "fallbackSkillRefFromExePath returns Nothing for non-.bin test executables"
+      Nothing
+      (fallbackSkillRefFromExePath ("references" </> "session-files.md") "/tmp/tmp.1234/Spec-bin")
+    topicPromptPath <- writeCurrentTopicPromptFile tmp stWrap
+    topicPromptTxt <- TIO.readFile topicPromptPath
+    assertBool
+      "Topic curator prompt includes session-files.md reference path"
+      (T.pack refPath `T.isInfixOf` topicPromptTxt)
 
     let criticDoc =
           renderCriticFeedbackMarkdown
@@ -350,7 +373,7 @@ testRec6LeadingEmphasisAndMarkdownFormatting = do
     assertBool "Wrapup prompt with critic_feedback.md has no triple blank lines" (not ("\n\n\n" `T.isInfixOf` wrapWithCritic))
     assertBool
       "Wrapup prompt with critic_feedback.md wraps all non-path lines <= 80 cols"
-      (all (\l -> T.pack tmp `T.isInfixOf` l || T.length l <= 80) (T.lines wrapWithCritic))
+      (all (\l -> T.pack tmp `T.isInfixOf` l || "session-files.md" `T.isInfixOf` l || T.length l <= 80) (T.lines wrapWithCritic))
 
 testRec7IndexByteBudgetsWrappingAndSummaryLint :: IO ()
 testRec7IndexByteBudgetsWrappingAndSummaryLint = do
