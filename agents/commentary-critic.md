@@ -22,7 +22,7 @@ write a concise, thoughtful editorial critique evaluating how well
 (provided in `<session_dir>/current_critic_prompt.md` and at the top of
 `memory.md`) and any user-specified style directives in `memory.md`, write the
 critique to `<session_dir>/current_critic_response.md` via `write_file`
-(`Overwrite: true`), and reply to the host with a 1-line completion notice.
+(`Overwrite: true`), and end your turn with a 1-line completion notice.
 
 ## Strict Anti-Spoiler Protocol (CRITICAL)
 
@@ -57,7 +57,7 @@ critique to `<session_dir>/current_critic_response.md` via `write_file`
 
 - Never use `search_web` to look up the specific story being read.
 
-- Never call `run_command` or `edit_file`.
+- Never call `run_command`, `edit_file`, or `send_message`.
 
 - Only call `write_file` (with `Overwrite: true`) on
   `<session_dir>/current_critic_response.md`. Never write directly to

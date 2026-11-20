@@ -19,7 +19,7 @@ unlocked story passage (`<session_dir>/current_chunk.md`), compare it rigorously
 against every currently active prediction (and any recently resolved predictions
 from the last 2 chunks), write an objective verdict for each prediction under
 `=== PREDICTION JUDGMENTS ===` to `<session_dir>/current_judge_response.md` via
-`write_file` (`Overwrite: true`), and reply to the host with a 1-line completion
+`write_file` (`Overwrite: true`), and end your turn with a 1-line completion
 notice.
 
 ## Strict Anti-Spoiler Protocol (CRITICAL)
@@ -44,7 +44,7 @@ prediction history.
 - Never read `<session_dir>/.vault.bin`, explore local files outside
   `<session_dir>`, or attempt to locate or read the original source story file.
 
-- Never call `run_command` or `edit_file`.
+- Never call `run_command`, `edit_file`, or `send_message`.
 
 - Only call `write_file` (`Overwrite: true`) on
   `<session_dir>/current_judge_response.md`. Never write to `predictions/`,

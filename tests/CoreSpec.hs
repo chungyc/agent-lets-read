@@ -5,6 +5,7 @@ module CoreSpec
   , testRec1OrchestratorGuardrails
   ) where
 
+import Control.Monad (forM_)
 import Data.List (isInfixOf)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -20,7 +21,7 @@ import LetsRead.Types
   )
 import System.Directory (createDirectoryIfMissing)
 import System.Exit (ExitCode (..))
-import System.FilePath ((</>))
+import System.FilePath (takeDirectory, (</>))
 import System.Process (readProcessWithExitCode)
 import TestHarness
   ( assertBool
@@ -84,6 +85,22 @@ testRec1OrchestratorGuardrails mBinPath = do
   case mBinPath of
     Nothing -> pure ()
     Just binPath -> withTempDir "rec1-cli" $ \tmp -> do
+      let repoDir = takeDirectory (takeDirectory (takeDirectory (takeDirectory binPath)))
+          agentFiles =
+            [ "blind-reader.md"
+            , "prediction-judge.md"
+            , "fact-checker.md"
+            , "commentary-critic.md"
+            , "topic-curator.md"
+            ]
+      forM_ agentFiles $ \af -> do
+        agentTxt <- TIO.readFile (repoDir </> "agents" </> af)
+        assertBool
+          (af ++ " forbids run_command, edit_file, and send_message concisely")
+          ("- Never call `run_command`, `edit_file`, or `send_message`." `T.isInfixOf` agentTxt)
+        assertBool
+          (af ++ " omits misleading 'reply to the host' phrasing")
+          (not ("reply to the host" `T.isInfixOf` T.toLower agentTxt))
       let srcPath = tmp </> "mini.md"
           sessDir = tmp </> "session"
       TIO.writeFile

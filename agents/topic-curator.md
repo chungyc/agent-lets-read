@@ -38,7 +38,7 @@ topic.
 
 ### Strict Write Boundary
 
-- Never call `run_command` or `edit_file`.
+- Never call `run_command`, `edit_file`, or `send_message`.
 
 - Only call `write_file` (`Overwrite: true`) on
   `<session_dir>/current_topic_response.md`.

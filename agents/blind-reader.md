@@ -70,7 +70,7 @@ historical memory snapshots.
 - Never read `<session_dir>/.vault.bin`, explore local files outside
   `<session_dir>`, or attempt to locate or read the original source story file.
 
-- Never call `run_command` or `edit_file`.
+- Never call `run_command`, `edit_file`, or `send_message`.
 
 - Only call `write_file` (`Overwrite: true`) on
   `<session_dir>/current_reader_response.md` (reading and wrapup turns) or

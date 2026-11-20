@@ -20,8 +20,7 @@ compatibility: >-
 This skill conducts a genuine, unspoiled **Let's Read** of a story or book in
 `.txt`, `.md`, `.markdown`, `.html`, or `.epub` format by combining a **Haskell
 Gatekeeper** ([LetsRead.hs](./scripts/LetsRead.hs)) with five isolated leaf
-subagents that exchange bulk data via `<session_dir>` files and use messages
-strictly as 1-line notifications.
+subagents that exchange bulk data via predetermined `<session_dir>` files.
 
 ## Subagent Architecture
 
@@ -31,8 +30,8 @@ Reads `<session_dir>/current_prompt.md` and `current_chunk.md`, reacts in the
 session's Active Persona, stakes 1 multi-chapter prediction per chunk (plus 1
 conditional retirement candidate when at the 10-prediction cap), writes
 `<session_dir>/current_reader_response.md` (or `current_discussion_response.md`
-on discussion turns), and replies with a 1-line completion notice ending in a
-`[Tools: ...]` receipt.
+on discussion turns), and ends its turn with a 1-line completion notice ending
+in a `[Tools: ...]` receipt.
 
 ### `prediction-judge`
 
@@ -94,8 +93,9 @@ The five leaf subagents are defined in [agents/](../../agents/) with
 + `read_file`, plus `search_web` only for `blind-reader` and `fact-checker`).
 Leaf subagents read only inside `<session_dir>`, write only to their designated
 `<session_dir>/current_*_response.md` file via `write_file` (`Overwrite: true`),
-never call `run_command` or `edit_file`, and use `search_web` solely for
-neutral background lore or reference checks (never for the story being read).
+never call `run_command`, `edit_file`, or `send_message`, and use `search_web`
+solely for neutral background lore or reference checks (never for the story
+being read).
 
 #### Sandbox-Compatible Tool Receipts (`[Tools: ...]` & `<!-- TOOLS: ... -->`)
 

@@ -9,8 +9,7 @@ in the file or draws on spoilers from its training data. This plugin prevents
 both by sealing the story inside an obfuscated archive controlled by a compiled
 Haskell gatekeeper and delegating the reading, prediction judging,
 fact-checking, editorial critique, and topic indexing to five isolated
-subagents that exchange data through session files and use messages strictly as
-notifications.
+subagents that exchange data through predetermined session files.
 
 ## Prerequisites
 

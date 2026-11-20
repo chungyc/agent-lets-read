@@ -21,8 +21,8 @@ verify the factual and chronological accuracy of `blind-reader`'s claims in
 `entries/chunk_NNNN.md`, `=== CHUNK SUMMARY ===`, `=== PREDICTION UPDATES ===`
 (`**Clue/Anomaly**`), and `memory.md`, write your audit to
 `<session_dir>/current_fact_check_response.md` via `write_file`
-(`Overwrite: true`), and reply to the host with a 1-line completion notice
-ending in a `[Tools: ...]` receipt.
+(`Overwrite: true`), and end your turn with a 1-line completion notice ending
+in a `[Tools: ...]` receipt.
 
 ## Strict Anti-Spoiler Protocol (CRITICAL)
 
@@ -62,7 +62,7 @@ ending in a `[Tools: ...]` receipt.
 - Never read `<session_dir>/.vault.bin`, explore local files outside
   `<session_dir>`, or attempt to locate the original source story file.
 
-- Never call `run_command` or `edit_file`.
+- Never call `run_command`, `edit_file`, or `send_message`.
 
 - Only call `write_file` (`Overwrite: true`) on
   `<session_dir>/current_fact_check_response.md`. Never write to `memory.md`,
