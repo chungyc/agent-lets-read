@@ -85,7 +85,7 @@ firstNonEmptyFile (p : ps) = do
 
 -- | Resolve an optional subagent response from an explicit @--*-response-file@,
 -- a list of default response file paths in the session directory, or a fallback
--- subagent transcript log (polling up to 10 seconds for async flush).
+-- subagent transcript log (polling up to 20 seconds for async flush).
 resolveOptionalResponse ::
   -- | Explicit response file path, if passed on the CLI.
   Maybe FilePath ->
@@ -103,7 +103,7 @@ resolveOptionalResponse mExplicit defaultFiles mLog label =
       unless exists $ die ("Error: " ++ label ++ " response file not found: " ++ respPath)
       raw <- readTextFileSafe respPath
       pure (Just raw)
-    Nothing -> poll 40
+    Nothing -> poll 80
   where
     tryOnce = do
       mDef <- firstNonEmptyFile defaultFiles

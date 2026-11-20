@@ -127,7 +127,7 @@ cmdRecord opts = do
       [sessionDir </> "current_reader_response.md"]
       (recSubagentLog opts)
       "Reader"
-      "Error: Provide --response-file, --subagent-log, --commentary-file, or write current_reader_response.md."
+      "Error: current_reader_response.md has not been written yet (blind-reader is still running). Do not re-message blind-reader; end your turn with ZERO tool calls and wait for its completion notice before running 'record'."
 
   when (T.null commText) $
     die "Error: Commentary content is empty."

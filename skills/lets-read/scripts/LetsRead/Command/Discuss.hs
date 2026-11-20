@@ -129,7 +129,7 @@ cmdDiscuss opts = do
       [sessionDir </> "current_discussion_response.md"]
       (discSubagentLog opts)
       "Discussion"
-      "Error: Provide --response-file, --subagent-log, --commentary-file, or write current_discussion_response.md."
+      "Error: current_discussion_response.md has not been written yet (blind-reader is still running). Do not re-message blind-reader; end your turn with ZERO tool calls and wait for its completion notice before running 'discuss'."
 
   when (T.null replyText) $
     die "Error: Discussion reply content is empty."

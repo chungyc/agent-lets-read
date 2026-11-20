@@ -127,7 +127,7 @@ cmdJudge opts = do
       [sessionDir </> "current_judge_response.md"]
       (jdgSubagentLog opts)
       "Judge"
-      "Error: Provide --response-file, --subagent-log, or write current_judge_response.md for 'judge'."
+      "Error: current_judge_response.md has not been written yet (prediction-judge is still running). Do not re-message working reviewers; end your turn with ZERO tool calls and wait for all completion notices before running 'judge'."
 
   rawFactCheck <-
     resolveRequiredResponse
@@ -135,7 +135,7 @@ cmdJudge opts = do
       [sessionDir </> "current_fact_check_response.md"]
       (jdgFactCheckLog opts)
       "Fact-check"
-      "Error: Provide --fact-check-response-file, --fact-check-log, or write current_fact_check_response.md for 'judge'."
+      "Error: current_fact_check_response.md has not been written yet (fact-checker is still running). Do not re-message working reviewers; end your turn with ZERO tool calls and wait for all completion notices before running 'judge'."
   factAudit <- resolveSubagentToolAudit (jdgFactCheckLog opts) (Just rawFactCheck)
 
   rawCritic <-
@@ -144,7 +144,7 @@ cmdJudge opts = do
       [sessionDir </> "current_critic_response.md"]
       (jdgCriticLog opts)
       "Critic"
-      "Error: Provide --critic-response-file, --critic-log, or write current_critic_response.md for 'judge'."
+      "Error: current_critic_response.md has not been written yet (commentary-critic is still running). Do not re-message working reviewers; end your turn with ZERO tool calls and wait for all completion notices before running 'judge'."
 
   let topicPromptPath = sessionDir </> "current_topic_prompt.md"
   hasTopicPrompt <- doesFileExist topicPromptPath
@@ -162,7 +162,7 @@ cmdJudge opts = do
           Just rawT -> pure (Just rawT)
           Nothing ->
             if hasTopicPrompt
-              then die "Error: Chunk triggered topic_curation_needed (current_topic_prompt.md exists). Provide --topic-log, --topic-response-file, or write current_topic_response.md for 'judge'."
+              then die "Error: current_topic_response.md has not been written yet (current_topic_prompt.md exists). If topic-curator is already dispatched, do not re-message it—end your turn with ZERO tool calls and wait for its completion notice; otherwise invoke topic-curator first."
               else pure Nothing
       else pure Nothing
 
