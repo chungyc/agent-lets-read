@@ -332,8 +332,8 @@ or any `prediction-judge` rulings from the previous chunk.>
 - **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <verified detail A in current_chunk.md + earlier thread/mystery B, <= 120 chars, no quotes> -> **Theory**: <direct primary bet C, <= 160 chars> (vs. **Plausible Rival**: <concise rival explanation, <= 120 chars>)
 
 === CHUNK SUMMARY ===
-- **[Story | Topics: Topic 1, Topic 2, Topic 3]** <1-line factual summary of this chunk's key in-story events ONLY (populates `chunks/by_chronology.md` and `chunks/by_topic.md`; reuse accurate `Established Topic Tags` AND coin clean canonical tags when genuinely distinct recurring characters, factions, locations, or plot threads emerge—avoid overloading broad setting/meta labels).>
-- **[Entry | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of your liveblog reaction, standout quotes, or running gags in this entry (populates `entries/by_chronology.md` and `entries/by_topic.md`; keep entity tags aligned with `[Story]`).>
+- **[Story | Topics: Topic 1, Topic 2, Topic 3]** <1-line factual summary of this chunk's key in-story events ONLY, <= 250 chars (populates `chunks/by_chronology.md` and `chunks/by_topic.md`; reuse accurate `Established Topic Tags` AND coin clean canonical tags when genuinely distinct recurring characters, factions, locations, or plot threads emerge—avoid overloading broad setting/meta labels).>
+- **[Entry | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of your liveblog reaction, standout quotes, or running gags in this entry, <= 250 chars (populates `entries/by_chronology.md` and `entries/by_topic.md`; keep entity tags aligned with `[Story]`).>
 
 === PREDICTION UPDATES ===
 - **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise 1-clause detail, <= 120 chars, no quotes> -> **Theory**: <direct primary bet, <= 160 chars> (vs. **Plausible Rival**: <concise rival explanation, <= 120 chars>)
@@ -388,7 +388,7 @@ Always include `=== CHUNK SUMMARY ===` with a `[Discussion]` bullet so the
 discussion exchange is indexed without overwriting your initial entry summary:
 
 ```markdown
-- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of the discussion question and takeaway>
+- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of the discussion question and takeaway, <= 250 chars>
 ```
 
 #### When Your Check Confirms a Material Misread

@@ -376,7 +376,7 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
           ( map
               (wrapMarkdownBullet 78)
               [ "   - `=== COMMENTARY ===` (react in your Active Persona with 3–5 tight `>` blockquotes, weave reactions to any `prediction-judge` verdicts in `memory.md`" <> commentaryPredictionSuffix <> ")"
-              , "   - `=== CHUNK SUMMARY ===` (`- **[Story | Topics: ...]** <1-line factual in-story summary>` and `- **[Entry | Topics: ...]** <1-line reaction/gag summary>`; reuse accurate `Established Topic Tags` and coin clean canonical tags only when genuinely distinct recurring characters, factions, locations, or plot threads emerge)"
+              , "   - `=== CHUNK SUMMARY ===` (`- **[Story | Topics: ...]** <1-line factual in-story summary, <= 250 chars>` and `- **[Entry | Topics: ...]** <1-line reaction/gag summary, <= 250 chars>`; reuse accurate `Established Topic Tags` and coin clean canonical tags only when genuinely distinct recurring characters, factions, locations, or plot threads emerge)"
               , "   - `=== PREDICTION UPDATES ===` (" <> predictionUpdatesBody <> ")"
               , "   - `=== UPDATED MEMORY ===` (" <> updatedMemoryBody <> ")"
               ]
@@ -616,7 +616,7 @@ writeCurrentJudgePromptFile sessionDir st = do
                        <> curPad
                        <> "`, or `SUBVERTED Chunk "
                        <> curPad
-                       <> "`) to `"
+                       <> "`; `<= 200 chars` per bullet) to `"
                        <> T.pack judgeRespPath
                        <> "` via `write_file` (`Overwrite: true`)."
                    )
@@ -911,7 +911,7 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
           , ""
           , wrapMarkdownBullet
               78
-              ( "2. Write line 1 as `<!-- TOOLS: read_file(...) -->` (adding `, search_web` only if invoked) followed by your in-character reply under `=== COMMENTARY ===` (conceding if your check confirms a misread, or holding your ground with primary-source quotes if your original reading/joke/baseline was right) and `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary>` (plus `=== UPDATED MEMORY ===` and/or `=== PREDICTION UPDATES ===` for `[Predicted Chunk "
+              ( "2. Write line 1 as `<!-- TOOLS: read_file(...) -->` (adding `, search_web` only if invoked) followed by your in-character reply under `=== COMMENTARY ===` (conceding if your check confirms a misread, or holding your ground with primary-source quotes if your original reading/joke/baseline was right) and `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary, <= 250 chars>` (plus `=== UPDATED MEMORY ===` and/or `=== PREDICTION UPDATES ===` for `[Predicted Chunk "
                   <> curPad
                   <> "]` if any records need correction) to `"
                   <> T.pack discRespPath
@@ -972,7 +972,7 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
           , ""
           , wrapMarkdownBullet
               78
-              ( "2. Write line 1 as `<!-- TOOLS: read_file(...) -->` (or `<!-- TOOLS: none -->` if no verification tool beyond reading this prompt was needed) followed by `=== COMMENTARY ===` (your full in-character reply) and `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of the discussion exchange>` (plus `=== UPDATED MEMORY ===` and/or `=== PREDICTION UPDATES ===` if the exchange updates a factual/timeline correction, craft/style directive, running gag, character status, or Chunk "
+              ( "2. Write line 1 as `<!-- TOOLS: read_file(...) -->` (or `<!-- TOOLS: none -->` if no verification tool beyond reading this prompt was needed) followed by `=== COMMENTARY ===` (your full in-character reply) and `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of the discussion exchange, <= 250 chars>` (plus `=== UPDATED MEMORY ===` and/or `=== PREDICTION UPDATES ===` if the exchange updates a factual/timeline correction, craft/style directive, running gag, character status, or Chunk "
                   <> curPad
                   <> "'s prediction) to `"
                   <> T.pack discRespPath

@@ -1092,24 +1092,27 @@ renderPredSummaryBullet pr =
         case prResolutionNote pr of
           Just n | prStatus pr /= PredStatusActive -> " -> *Outcome*: " <> n
           _ -> ""
-   in "- **[pred_"
-        <> T.pack origPad
-        <> "]("
-        <> predFile
-        <> ")** ("
-        <> chapStr
-        <> " | **"
-        <> predShortStatusTag pr
-        <> "**"
-        <> topicsStr
-        <> "): "
-        <> coreTheory
-        <> resSuffix
-        <> " ([story]("
-        <> storyPath
-        <> ") | [entry]("
-        <> entryPath
-        <> "))"
+   in wrapMarkdownBullet
+        78
+        ( "- **[pred_"
+            <> T.pack origPad
+            <> "]("
+            <> predFile
+            <> ")** ("
+            <> chapStr
+            <> " | **"
+            <> predShortStatusTag pr
+            <> "**"
+            <> topicsStr
+            <> "): "
+            <> coreTheory
+            <> resSuffix
+            <> " ([story]("
+            <> storyPath
+            <> ") | [entry]("
+            <> entryPath
+            <> "))"
+        )
 
 renderHallOfFameMarkdown :: FilePath -> SessionState -> Text
 renderHallOfFameMarkdown sessionDir st =

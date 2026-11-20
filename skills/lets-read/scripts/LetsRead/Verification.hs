@@ -137,6 +137,9 @@ lintReaderCommentary bannedJargon commText parsedSummaries mNewPred =
             Nothing -> ["missing `- **[Story | Topics: Topic 1, Topic 2, Topic 3]** <1-line factual story summary>`"]
             Just (ts, sBody) ->
               ["`[Story]` bullet had 0 `Topics:` tags" | null ts]
+                ++ [ "`[Story]` summary was " <> jsonInt (T.length sBody) <> " chars (cap: <= 250 chars)"
+                   | T.length sBody > 250
+                   ]
                 ++ [ "`[Story]` summary included reader-prediction/meta boilerplate (`\"leading me to predict\"`/`\"I predict\"`); keep `[Story]` strictly to in-story events and put reaction/gag highlights in `[Entry]`"
                    | let sl = T.toLower sBody
                    , "leading me to predict" `T.isInfixOf` sl || "i predict" `T.isInfixOf` sl
@@ -144,7 +147,11 @@ lintReaderCommentary bannedJargon commText parsedSummaries mNewPred =
         )
           ++ ( case pcsEntry parsedSummaries of
                  Nothing -> ["missing `- **[Entry | Topics: Topic 1, Topic 2, Topic 3]** <1-line liveblog reaction/gags summary>`"]
-                 Just (ts, _) -> ["`[Entry]` bullet had 0 `Topics:` tags" | null ts]
+                 Just (ts, eBody) ->
+                   ["`[Entry]` bullet had 0 `Topics:` tags" | null ts]
+                     ++ [ "`[Entry]` summary was " <> jsonInt (T.length eBody) <> " chars (cap: <= 250 chars)"
+                        | T.length eBody > 250
+                        ]
              )
       summaryWarn =
         if null summaryIssues
@@ -152,7 +159,7 @@ lintReaderCommentary bannedJargon commText parsedSummaries mNewPred =
           else
             [ "- **[Deterministic Style Linter (`LetsRead`)]** Your `=== CHUNK SUMMARY ===` section had formatting issues ("
                 <> T.intercalate "; " summaryIssues
-                <> "). Always include both `- **[Story | Topics: Topic 1, Topic 2, Topic 3]** <1-line factual summary of in-story events>` and `- **[Entry | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of your liveblog reaction, standout quotes, or running gags>`."
+                <> "). Always include both `- **[Story | Topics: Topic 1, Topic 2, Topic 3]** <1-line factual summary of in-story events, <= 250 chars>` and `- **[Entry | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of your liveblog reaction, standout quotes, or running gags, <= 250 chars>`."
             ]
       predLenWarn =
         case mNewPred of

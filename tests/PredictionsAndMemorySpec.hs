@@ -4,14 +4,23 @@ module PredictionsAndMemorySpec
   ( testRec4PredictionSubClausesAndScreening
   , testRec5ArcRollupsFinalMysteriesAndHallOfFame
   , testRec6LeadingEmphasisAndMarkdownFormatting
+  , testRec7IndexByteBudgetsWrappingAndSummaryLint
   ) where
 
 import Control.Monad (forM_, when)
+import qualified Data.ByteString as BS
+import Data.List (isPrefixOf, isSuffixOf)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import LetsRead.Index
-  ( checkStorySummaryStructure
+  ( IndexSpec (..)
+  , applyTopicCuratorResponse
+  , checkStorySummaryStructure
   , completedStoryArcRollups
+  , renderEntryBullet
+  , renderStoryBullet
+  , storyIndexSpec
+  , syncMultiLayerIndex
   )
 import LetsRead.Memory
   ( cleanChunkSummary
@@ -25,6 +34,7 @@ import LetsRead.Predictions
   , checkPredictionConcisenessIssues
   , parsePredictionLine
   , renderHallOfFameMarkdown
+  , renderPredSummaryBullet
   )
 import LetsRead.Prompts
   ( renderPredictionSlateNote
@@ -32,7 +42,9 @@ import LetsRead.Prompts
   , writeWrapupPromptFile
   )
 import LetsRead.Types
-  ( ParsedChunkSummaries (..)
+  ( EntryDiscussionRecord (..)
+  , EntryLogRecord (..)
+  , ParsedChunkSummaries (..)
   , ParsedPrediction (..)
   , PredictionRecord (..)
   , PredictionStatus (..)
@@ -44,9 +56,11 @@ import LetsRead.Types
   , wrapMarkdownParagraph
   )
 import LetsRead.Verification
-  ( lintStorySummaryBullets
+  ( lintReaderCommentary
+  , lintStorySummaryBullets
   , renderCriticFeedbackMarkdown
   )
+import System.Directory (doesFileExist, listDirectory)
 import System.Exit (die)
 import System.FilePath ((</>))
 import TestHarness
@@ -337,3 +351,175 @@ testRec6LeadingEmphasisAndMarkdownFormatting = do
     assertBool
       "Wrapup prompt with critic_feedback.md wraps all non-path lines <= 80 cols"
       (all (\l -> T.pack tmp `T.isInfixOf` l || T.length l <= 80) (T.lines wrapWithCritic))
+
+testRec7IndexByteBudgetsWrappingAndSummaryLint :: IO ()
+testRec7IndexByteBudgetsWrappingAndSummaryLint = do
+  putStrLn "== Rec #7: Index Byte Budgets, Wrapped Bullets & Summary Length Linter =="
+  let verboseSummary =
+        "Mara and Inspector Lin inspect the flooded North Pier boathouse, recover the wax-sealed harbor manifest from behind theLoose pilings, and spot a lantern signal from the outer breakwater."
+      sampleStoryRec =
+        StoryChunkRecord
+          { scrChunkIndex = 4
+          , scrChapterNumber = 2
+          , scrChapterTitle = "Fog Over the Outer Breakwater"
+          , scrPartInChapter = 1
+          , scrPartsInChapter = 2
+          , scrTopics = ["Inspector Lin", "Mara", "North Pier", "Harbor Manifest"]
+          , scrSummary = verboseSummary
+          }
+      renderedStoryB = renderStoryBullet "/tmp/sess" sampleStoryRec
+  assertBool
+    "renderStoryBullet wraps lines <= 78 cols"
+    (all (\l -> T.length l <= 78) (T.lines renderedStoryB))
+  assertBool
+    "renderStoryBullet preserves full summary text without truncation"
+    ("outer breakwater." `T.isInfixOf` T.unwords (T.words renderedStoryB))
+
+  let sampleEntryRec =
+        EntryLogRecord
+          { elrEntryIndex = 4
+          , elrIsWrapup = False
+          , elrChapterNumber = 2
+          , elrChapterTitle = "Fog Over the Outer Breakwater"
+          , elrPartInChapter = 1
+          , elrPartsInChapter = 2
+          , elrTopics = ["Inspector Lin", "Mara"]
+          , elrSummary = "Cheered when Lin noticed the wax seal and joked about the damp ledger."
+          , elrDiscussions =
+              [ EntryDiscussionRecord
+                  { edrIsFactCheck = True
+                  , edrTopics = ["North Pier"]
+                  , edrSummary = "Verified against chunk_0002.md that the boathouse key came from the harbor clerk."
+                  }
+              , EntryDiscussionRecord
+                  { edrIsFactCheck = False
+                  , edrTopics = ["Mara"]
+                  , edrSummary = "Discussed with user whether Mara suspects the lighthouse keeper yet."
+                  }
+              ]
+          }
+      renderedEntryB = renderEntryBullet "/tmp/sess" sampleEntryRec
+      entryLines = T.lines renderedEntryB
+  assertBool
+    "renderEntryBullet wraps all lines <= 78 cols"
+    (all (\l -> T.length l <= 78) entryLines)
+  assertEq
+    "renderEntryBullet keeps both discussion sub-bullets on separate indented lines"
+    2
+    (length [l | l <- entryLines, "  - **" `T.isPrefixOf` l])
+
+  let samplePredRec =
+        PredictionRecord
+          { prOriginChunk = 4
+          , prChapterNumber = 2
+          , prChapterTitle = "Fog Over the Outer Breakwater"
+          , prPartInChapter = 1
+          , prPartsInChapter = 2
+          , prTopics = ["Inspector Lin", "Harbor Manifest"]
+          , prClue = "Wax seal matches the customs house stamp"
+          , prTheory = "The deputy collector forged the manifest to divert contraband to the lighthouse"
+          , prRival = "A clerk reused old wax stock by mistake"
+          , prRawBody = "**Clue/Anomaly**: Wax seal matches the customs house stamp -> **Theory**: The deputy collector forged the manifest to divert contraband to the lighthouse (vs. **Plausible Rival**: A clerk reused old wax stock by mistake)"
+          , prStatus = PredStatusConfirmed 9 False
+          , prResolutionNote = Just "Chunk 0009 reveals the deputy collector's duplicate stamp and ledger in the lighthouse cellar."
+          }
+      renderedPredB = renderPredSummaryBullet samplePredRec
+  assertBool
+    "renderPredSummaryBullet wraps lines <= 78 cols"
+    (all (\l -> T.length l <= 78) (T.lines renderedPredB))
+
+  let manyLongChaps =
+        [ StoryChunkRecord i i ("The Very Long Light-Novel Style Chapter Title About Stormy Pier Investigation Part " <> T.pack (show i)) 1 1 ["Harbor"] "Summary."
+        | i <- [1 .. 10]
+        ]
+      arcSummary = isSummarizeArc storyIndexSpec manyLongChaps
+  assertBool "isSummarizeArc stays bounded <= 220 chars" (T.length arcSummary <= 220)
+  assertBool "isSummarizeArc keeps closing * italic delimiter intact" ("*" `T.isSuffixOf` arcSummary && "+8 more*" `T.isSuffixOf` arcSummary || "more*" `T.isSuffixOf` arcSummary)
+
+  let shortSummaryStory =
+        [ StoryChunkRecord i ((i + 1) `div` 2) ("Chap " <> T.pack (show ((i + 1) `div` 2))) (if odd i then 1 else 2) 2 ["Harbor Patrol"] "Short."
+        | i <- [1 .. 20]
+        ]
+      longSummaryStory =
+        [ r {scrSummary = T.replicate 5 "Detailed coastal investigation summary across the misty pier. "}
+        | r <- shortSummaryStory
+        ]
+      (stMergedAliases, _) =
+        applyTopicCuratorResponse
+          "=== TOPIC MERGES ===\n- Harbor Watch <= Harbor Patrol\n"
+          ((baseDummyState 25) {stStoryRecords = longSummaryStory})
+  assertEq
+    "completedStoryArcRollups boundaries are unaffected by summary length"
+    (completedStoryArcRollups shortSummaryStory)
+    (completedStoryArcRollups longSummaryStory)
+  assertEq
+    "completedStoryArcRollups boundaries are unaffected by topic alias merges"
+    (completedStoryArcRollups shortSummaryStory)
+    (completedStoryArcRollups (stStoryRecords stMergedAliases))
+
+  withTempDir "index-byte-budget" $ \tmp -> do
+    let bigSum = T.replicate 5 "Mara and Inspector Lin cross-check the harbor ledger, customs manifest, and signal timestamps along the pier. "
+        verboseRecords =
+          [ StoryChunkRecord
+              { scrChunkIndex = i
+              , scrChapterNumber = (i + 1) `div` 2
+              , scrChapterTitle = "Chapter " <> T.pack (show ((i + 1) `div` 2)) <> ": Harbor Signals and Sealed Manifests"
+              , scrPartInChapter = if odd i then 1 else 2
+              , scrPartsInChapter = 2
+              , scrTopics =
+                  [ "Inspector Lin"
+                  , "Topic Group " <> T.pack (show ((i `mod` 12) + 1))
+                  , "Thread " <> T.pack (show ((i `mod` 8) + 1))
+                  ]
+              , scrSummary = bigSum
+              }
+          | i <- [1 .. 20]
+          ]
+        stIdx =
+          (baseDummyState 25)
+            { stCurrentIndex = 20
+            , stStoryRecords = verboseRecords
+            }
+    syncMultiLayerIndex tmp stIdx storyIndexSpec verboseRecords
+    byTopicBytes <- BS.length <$> BS.readFile (tmp </> "chunks" </> "by_topic.md")
+    byTopicTxt <- TIO.readFile (tmp </> "chunks" </> "by_topic.md")
+    assertBool "Verbose by_topic.md triggers sharding when bytes exceed inline budget" ("## Topic Archive Shards" `T.isInfixOf` byTopicTxt)
+    assertBool "Sharded by_topic.md stays <= 20,000 bytes" (byTopicBytes <= 20000)
+
+    let topicArcDir = tmp </> "chunks" </> "archive" </> "topics"
+    arcFiles <- listDirectory topicArcDir
+    let shardFiles = [f | f <- arcFiles, "L1_" `isPrefixOf` f && ".md" `isSuffixOf` f]
+        perTopicFiles = [f | f <- arcFiles, "topic_" `isPrefixOf` f && ".md" `isSuffixOf` f]
+    assertBool "Multiple L1 topic shards created under byte budget" (length shardFiles >= 2)
+    assertBool "Verbose 20-item topic (>6KB, <=25 items) creates per-topic L1 archive" (not (null perTopicFiles))
+    forM_ arcFiles $ \f -> do
+      hasF <- doesFileExist (topicArcDir </> f)
+      when hasF $ do
+        sz <- BS.length <$> BS.readFile (topicArcDir </> f)
+        assertBool ("Topic archive file " ++ f ++ " stays <= 16,000 bytes") (sz <= 16000)
+
+  let okSummaries =
+        ParsedChunkSummaries
+          { pcsStory = Just (["Harbor"], "Mara finds the manifest in the boathouse.")
+          , pcsEntry = Just (["Harbor"], "Loved the banter on the pier.")
+          , pcsDiscussion = Nothing
+          }
+      overlongText = T.replicate 6 "This single-line summary runs way past the 250-character target budget. "
+      overlongSummaries =
+        ParsedChunkSummaries
+          { pcsStory = Just (["Harbor"], overlongText)
+          , pcsEntry = Just (["Harbor"], overlongText)
+          , pcsDiscussion = Nothing
+          }
+  assertEq
+    "Concise <= 250 char summaries produce 0 linter warnings"
+    []
+    (lintReaderCommentary [] "Normal liveblog reaction." okSummaries Nothing)
+  let overlongWarns = lintReaderCommentary [] "Normal liveblog reaction." overlongSummaries Nothing
+  assertEq "Overlong > 250 char summaries trigger 1 summary linter warning" 1 (length overlongWarns)
+  assertBool
+    "Summary linter warning flags both [Story] and [Entry] > 250 char caps"
+    ( case overlongWarns of
+        (w : _) -> "`[Story]` summary was " `T.isInfixOf` w && "`[Entry]` summary was " `T.isInfixOf` w && "<= 250 chars" `T.isInfixOf` w
+        [] -> False
+    )

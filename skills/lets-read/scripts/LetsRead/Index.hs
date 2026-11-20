@@ -23,12 +23,14 @@ module LetsRead.Index
 
 import Control.Exception (IOException, catch)
 import Control.Monad (forM, forM_, when)
+import qualified Data.ByteString as BS
 import Data.List (groupBy, isPrefixOf, isSuffixOf, nub, nubBy, partition, sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Ord (Down (..))
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as TIO
 import LetsRead.Predictions
   ( cleanTopicTag
@@ -48,6 +50,7 @@ import LetsRead.Types
   , padChunkNumber
   , readTextFileSafe
   , stripToolReceiptComments
+  , wrapMarkdownBullet
   , wrapMarkdownParagraph
   )
 import System.Directory
@@ -75,11 +78,66 @@ data IndexSpec a = IndexSpec
   , isArcExtraFooter :: !(FilePath -> [a] -> IO [Text])
   }
 
-groupsOfList :: Int -> [a] -> [[a]]
-groupsOfList _ [] = []
-groupsOfList n xs =
-  let (h, t) = splitAt n xs
-   in h : groupsOfList n t
+utf8Bytes :: Text -> Int
+utf8Bytes = BS.length . TE.encodeUtf8
+
+packByItemAndBytes :: Int -> Int -> (a -> Int) -> [a] -> [[a]]
+packByItemAndBytes maxItems maxBytes measure = go [] 0 0
+  where
+    go [] _ _ [] = []
+    go cur _ _ [] = [reverse cur]
+    go cur curCnt curBytes (x : xs) =
+      let b = measure x
+       in if not (null cur) && (curCnt >= maxItems || curBytes + b > maxBytes)
+            then reverse cur : go [x] 1 b xs
+            else go (x : cur) (curCnt + 1) (curBytes + b) xs
+
+formatBoundedList :: Int -> Text -> [Text] -> Text
+formatBoundedList _ _ [] = ""
+formatBoundedList maxChars sep rawItems =
+  let capItem x =
+        let s = T.strip x
+         in if T.length s > 90
+              then T.stripEnd (T.take 87 s) <> "..."
+              else s
+      items = map capItem rawItems
+      total = length items
+      go _ acc [] = acc
+      go idx acc (x : xs) =
+        let remAfter = total - (idx + 1)
+            suffixLen =
+              if remAfter > 0
+                then T.length sep + T.length ("+" <> jsonInt remAfter <> " more")
+                else 0
+            cand = if T.null acc then x else acc <> sep <> x
+         in if idx == 0 || T.length cand + suffixLen <= maxChars
+              then go (idx + 1) cand xs
+              else acc <> sep <> "+" <> jsonInt (total - idx) <> " more"
+   in go (0 :: Int) "" items
+
+takeRecentBounded :: Int -> Int -> [Text] -> [Text]
+takeRecentBounded maxCnt maxBytes = go 0 0
+  where
+    go _ _ [] = []
+    go cnt bytes (x : xs) =
+      let b = utf8Bytes x + 1
+       in if cnt > 0 && (cnt >= maxCnt || bytes + b > maxBytes)
+            then []
+            else x : go (cnt + 1) (bytes + b) xs
+
+renderArchiveNodeBullet :: (FilePath, Text, Text) -> Text
+renderArchiveNodeBullet (fp, lbl, summ) =
+  wrapMarkdownBullet
+    78
+    ( "- **"
+        <> lbl
+        <> "**: ["
+        <> T.pack (takeFileName fp)
+        <> "]("
+        <> T.pack fp
+        <> ") — "
+        <> summ
+    )
 
 groupItemsIntoArcs :: (a -> (Int, Text)) -> (a -> (Int, Int)) -> [a] -> [[a]]
 groupItemsIntoArcs getChap getPart = go [] [] (0 :: Int)
@@ -114,58 +172,52 @@ rollupIndexLevels sessionDir relArcDir =
 
 rollupIndexLevelsWithPrefix ::
   FilePath -> FilePath -> String -> Text -> Int -> [(FilePath, Text, Text)] -> IO [(FilePath, Text, Text)]
-rollupIndexLevelsWithPrefix sessionDir relArcDir filePrefix dirHeading level nodes
-  | length nodes <= 25 = pure nodes
-  | otherwise = do
-      let groups = groupsOfList 25 nodes
-      parents <- forM (zip [1 :: Int ..] groups) $ \(grpIdx, children) -> do
-        let fileName = filePrefix ++ show level ++ "_" ++ padChunkNumber grpIdx ++ ".md"
-            relPath = relArcDir </> fileName
-            fullPath = sessionDir </> relPath
-            firstLbl = case children of ((_, l, _) : _) -> l; [] -> ""
-            lastLbl = case reverse children of ((_, l, _) : _) -> l; [] -> ""
-            parentLabel =
-              dirHeading
-                <> " L"
-                <> jsonInt level
-                <> "."
-                <> jsonInt grpIdx
-                <> " ("
-                <> firstLbl
-                <> " .. "
-                <> lastLbl
-                <> ")"
-            parentSummary =
-              "Contains "
-                <> jsonInt (length children)
-                <> " archive nodes ("
-                <> firstLbl
-                <> " through "
-                <> lastLbl
-                <> ")"
-            doc =
-              T.unlines
-                ( [ "# " <> parentLabel
-                  , ""
-                  , "Session Directory: `" <> T.pack sessionDir <> "`"
-                  , ""
-                  , "Read the linked archive files below to inspect detailed entries:"
-                  , ""
-                  ]
-                    ++ [ "- **"
-                          <> lbl
-                          <> "**: ["
-                          <> T.pack (takeFileName fp)
-                          <> "]("
-                          <> T.pack fp
-                          <> ") — "
-                          <> summ
-                       | (fp, lbl, summ) <- children
-                       ]
-                )
-        TIO.writeFile fullPath doc
-        pure (relPath, parentLabel, parentSummary)
-      rollupIndexLevelsWithPrefix sessionDir relArcDir filePrefix dirHeading (level + 1) parents
+rollupIndexLevelsWithPrefix sessionDir relArcDir filePrefix dirHeading level nodes =
+  let measureNode n = utf8Bytes (renderArchiveNodeBullet n) + 1
+      totalNodeBytes = sum (map measureNode nodes)
+      groups = packByItemAndBytes 25 12000 measureNode nodes
+   in if length nodes <= 1 || (length nodes <= 25 && totalNodeBytes <= 12000) || length groups <= 1
+        then pure nodes
+        else do
+          parents <- forM (zip [1 :: Int ..] groups) $ \(grpIdx, children) -> do
+            let fileName = filePrefix ++ show level ++ "_" ++ padChunkNumber grpIdx ++ ".md"
+                relPath = relArcDir </> fileName
+                fullPath = sessionDir </> relPath
+                firstLbl = case children of ((_, l, _) : _) -> l; [] -> ""
+                lastLbl = case reverse children of ((_, l, _) : _) -> l; [] -> ""
+                parentLabel =
+                  dirHeading
+                    <> " L"
+                    <> jsonInt level
+                    <> "."
+                    <> jsonInt grpIdx
+                    <> " ("
+                    <> firstLbl
+                    <> " .. "
+                    <> lastLbl
+                    <> ")"
+                parentSummary =
+                  "Contains "
+                    <> jsonInt (length children)
+                    <> " archive nodes ("
+                    <> firstLbl
+                    <> " through "
+                    <> lastLbl
+                    <> ")"
+                doc =
+                  T.unlines
+                    ( [ "# " <> parentLabel
+                      , ""
+                      , "Session Directory: `" <> T.pack sessionDir <> "`"
+                      , ""
+                      , "Read the linked archive files below to inspect detailed entries:"
+                      , ""
+                      ]
+                        ++ map renderArchiveNodeBullet children
+                    )
+            TIO.writeFile fullPath doc
+            pure (relPath, parentLabel, parentSummary)
+          rollupIndexLevelsWithPrefix sessionDir relArcDir filePrefix dirHeading (level + 1) parents
 
 topicNormKey :: Text -> Text
 topicNormKey raw =
@@ -209,7 +261,7 @@ writeChronArcFile sessionDir spec grpIdx arcItems = do
           [ "# " <> label
           , ""
           , "- **Session Directory**: `" <> T.pack sessionDir <> "`"
-          , "- **Summary**: " <> summaryLine
+          , wrapMarkdownBullet 78 ("- **Summary**: " <> summaryLine)
           , ""
           , "## " <> isDomainTitle spec <> " by Chapter"
           , ""
@@ -259,19 +311,11 @@ syncChronologicalTree sessionDir st spec items = do
       arcLinksSection =
         if null topArcNodes
           then
-            [ "- *(All entries so far are listed inline below. Completed arc archive files will appear here as the story progresses.)*"
+            [ wrapMarkdownBullet
+                78
+                "- *(All entries so far are listed inline below. Completed arc archive files will appear here as the story progresses.)*"
             ]
-          else
-            [ "- **"
-                <> lbl
-                <> "**: ["
-                <> T.pack (takeFileName fp)
-                <> "]("
-                <> T.pack fp
-                <> ") — "
-                <> summ
-            | (fp, lbl, summ) <- topArcNodes
-            ]
+          else map renderArchiveNodeBullet topArcNodes
       chronologyDoc =
         T.unlines $
           [ "# " <> isDomainTitle spec <> " Index by Story Chronology: " <> stTitle st
@@ -293,16 +337,18 @@ syncChronologicalTree sessionDir st spec items = do
                ]
   TIO.writeFile (domainPath </> "by_chronology.md") chronologyDoc
 
-packTopicShards :: Int -> Int -> [(Text, [a], Text, Int)] -> [[(Text, [a], Text, Int)]]
-packTopicShards maxLines maxTopics = go [] 0 0
+packTopicShards ::
+  Int -> Int -> Int -> [(Text, [a], Text, Int, Int)] -> [[(Text, [a], Text, Int, Int)]]
+packTopicShards maxLines maxBytes maxTopics = go [] 0 0 0
   where
-    go [] _ _ [] = []
-    go cur _ _ [] = [reverse cur]
-    go cur curLines curCnt (t@(_, _, _, lCnt) : ts)
-      | not (null cur) && (curLines + lCnt > maxLines || curCnt >= maxTopics) =
-          reverse cur : go [t] lCnt 1 ts
+    go [] _ _ _ [] = []
+    go cur _ _ _ [] = [reverse cur]
+    go cur curLines curBytes curCnt (t@(_, _, _, lCnt, bCnt) : ts)
+      | not (null cur)
+          && (curLines + lCnt > maxLines || curBytes + bCnt > maxBytes || curCnt >= maxTopics) =
+          reverse cur : go [t] lCnt bCnt 1 ts
       | otherwise =
-          go (t : cur) (curLines + lCnt) (curCnt + 1) ts
+          go (t : cur) (curLines + lCnt) (curBytes + bCnt) (curCnt + 1) ts
 
 syncTopicTree :: FilePath -> SessionState -> IndexSpec a -> [a] -> IO ()
 syncTopicTree sessionDir st spec items = do
@@ -339,24 +385,39 @@ syncTopicTree sessionDir st spec items = do
       sortedTopics = sortOn (T.toLower . fst) (Map.elems topicMap)
       renderTopicSecIO (topicIdx, (dispTag, grpItems)) = do
         let ordered = sortOn (isItemIndex spec) grpItems
-        if length ordered <= 25
-          then do
-            let secTxt =
-                  "### "
-                    <> dispTag
-                    <> " ("
-                    <> jsonInt (length ordered)
-                    <> ")\n"
-                    <> T.unlines (map (isRenderTopicBullet spec sessionDir) ordered)
-            pure (dispTag, ordered, secTxt, length (T.lines secTxt) + 1)
+            renderedPairs = [(it, isRenderTopicBullet spec sessionDir it) | it <- ordered]
+            inlineSecTxt =
+              "### "
+                <> dispTag
+                <> " ("
+                <> jsonInt (length ordered)
+                <> ")\n"
+                <> T.unlines (map snd renderedPairs)
+            inlineSecBytes = utf8Bytes inlineSecTxt + 1
+        if length ordered <= 1 || (length ordered <= 25 && inlineSecBytes <= 6000)
+          then pure (dispTag, ordered, inlineSecTxt, length (T.lines inlineSecTxt) + 1, inlineSecBytes)
           else do
             let rawArcs = groupItemsIntoArcs (isItemChapter spec) (isItemPart spec) ordered
-                arcs = if length rawArcs <= 1 then groupsOfList 20 ordered else rawArcs
-                completedArcs = if length arcs <= 1 then [] else init arcs
-                inlineItems = case reverse arcs of (lastA : _) -> lastA; [] -> []
+                pairArcs =
+                  [ [(it, isRenderTopicBullet spec sessionDir it) | it <- arc]
+                  | arc <- rawArcs
+                  ]
+                splitSlice maxIt maxB =
+                  packByItemAndBytes maxIt maxB (\(_, bTxt) -> utf8Bytes bTxt + 1)
+                slices =
+                  case reverse pairArcs of
+                    [] -> []
+                    [onlyArc] -> splitSlice 15 4500 onlyArc
+                    (lastArc : revPrev) ->
+                      concatMap (splitSlice 20 10000) (reverse revPrev)
+                        ++ splitSlice 20 5000 lastArc
+                completedSlices = if length slices <= 1 then [] else init slices
+                inlineSlice = case reverse slices of (lastS : _) -> lastS; [] -> []
                 tPrefix = "topic_" ++ padChunkNumber topicIdx ++ "_L"
-            l1TopicNodes <- forM (zip [1 :: Int ..] completedArcs) $ \(arcIdx, arcItems) -> do
-              let startIdx = case arcItems of (x : _) -> isItemIndex spec x; [] -> 1
+            l1TopicNodes <- forM (zip [1 :: Int ..] completedSlices) $ \(arcIdx, slicePairs) -> do
+              let arcItems = map fst slicePairs
+                  arcBullets = map snd slicePairs
+                  startIdx = case arcItems of (x : _) -> isItemIndex spec x; [] -> 1
                   endIdx = case reverse arcItems of (x : _) -> isItemIndex spec x; [] -> 1
                   itemRange =
                     if startIdx == endIdx
@@ -372,11 +433,11 @@ syncTopicTree sessionDir st spec items = do
                       [ "# " <> lbl <> " — " <> isDomainTitle spec
                       , ""
                       , "- **Session Directory**: `" <> T.pack sessionDir <> "`"
-                      , "- **Summary**: " <> summ
+                      , wrapMarkdownBullet 78 ("- **Summary**: " <> summ)
                       , ""
                       , "## Archived Entries for " <> dispTag
                       , ""
-                      , T.unlines (map (isRenderTopicBullet spec sessionDir) arcItems)
+                      , T.unlines arcBullets
                       ]
               TIO.writeFile fPath doc
               pure (rPath, lbl, summ)
@@ -389,14 +450,17 @@ syncTopicTree sessionDir st spec items = do
                 2
                 l1TopicNodes
             let arcLinkLines =
-                  [ "- **Archived ("
-                      <> lbl
-                      <> ")**: ["
-                      <> T.pack (takeFileName fp)
-                      <> "]("
-                      <> T.pack fp
-                      <> ") — "
-                      <> summ
+                  [ wrapMarkdownBullet
+                      78
+                      ( "- **Archived ("
+                          <> lbl
+                          <> ")**: ["
+                          <> T.pack (takeFileName fp)
+                          <> "]("
+                          <> T.pack fp
+                          <> ") — "
+                          <> summ
+                      )
                   | (fp, lbl, summ) <- topTopicNodes
                   ]
                 secTxt =
@@ -405,25 +469,26 @@ syncTopicTree sessionDir st spec items = do
                     <> " ("
                     <> jsonInt (length ordered)
                     <> ")\n"
-                    <> T.unlines (arcLinkLines ++ map (isRenderTopicBullet spec sessionDir) inlineItems)
-            pure (dispTag, ordered, secTxt, length (T.lines secTxt) + 1)
+                    <> T.unlines (arcLinkLines ++ map snd inlineSlice)
+            pure (dispTag, ordered, secTxt, length (T.lines secTxt) + 1, utf8Bytes secTxt + 1)
 
   renderedTopics <- mapM renderTopicSecIO (zip [1 :: Int ..] sortedTopics)
-  let totalTopicLines = sum [lCnt | (_, _, _, lCnt) <- renderedTopics]
+  let totalTopicLines = sum [lCnt | (_, _, _, lCnt, _) <- renderedTopics]
+      totalTopicBytes = sum [bCnt | (_, _, _, _, bCnt) <- renderedTopics]
 
-  if totalTopicLines <= 100
+  if totalTopicLines <= 350 && totalTopicBytes <= 16000
     then do
       let tocLines =
             if null renderedTopics
               then ["- *(No topics indexed yet.)*"]
               else
                 [ "- **" <> dispTag <> "** (" <> jsonInt (length grpItems) <> ")"
-                | (dispTag, grpItems, _, _) <- renderedTopics
+                | (dispTag, grpItems, _, _, _) <- renderedTopics
                 ]
           topicSections =
             if null renderedTopics
               then ["*(No entries recorded yet.)*"]
-              else [secTxt | (_, _, secTxt, _) <- renderedTopics]
+              else [secTxt | (_, _, secTxt, _, _) <- renderedTopics]
           byTopicDoc =
             T.unlines $
               [ "# " <> isDomainTitle spec <> " Index by Semantic Topic & Entity: " <> stTitle st
@@ -443,17 +508,18 @@ syncTopicTree sessionDir st spec items = do
                    ]
       TIO.writeFile (domainPath </> "by_topic.md") byTopicDoc
     else do
-      let shards = packTopicShards 80 15 renderedTopics
+      let shards = packTopicShards 250 12000 15 renderedTopics
       shardDetails <- forM (zip [1 :: Int ..] shards) $ \(grpIdx, shardTopics) -> do
-        let firstT = case shardTopics of ((t, _, _, _) : _) -> t; [] -> ""
-            lastT = case reverse shardTopics of ((t, _, _, _) : _) -> t; [] -> ""
-            totalItemsInShard = sum [length g | (_, g, _, _) <- shardTopics]
+        let firstT = case shardTopics of ((t, _, _, _, _) : _) -> t; [] -> ""
+            lastT = case reverse shardTopics of ((t, _, _, _, _) : _) -> t; [] -> ""
+            totalItemsInShard = sum [length g | (_, g, _, _, _) <- shardTopics]
             label = "Topic Shard L1." <> jsonInt grpIdx <> " (" <> firstT <> " – " <> lastT <> ")"
             topicListStr =
-              T.intercalate
+              formatBoundedList
+                165
                 ", "
                 [ dispTag <> " (" <> jsonInt (length grpItems) <> ")"
-                | (dispTag, grpItems, _, _) <- shardTopics
+                | (dispTag, grpItems, _, _, _) <- shardTopics
                 ]
             summaryLine =
               jsonInt (length shardTopics)
@@ -469,14 +535,14 @@ syncTopicTree sessionDir st spec items = do
                 [ "# " <> label <> " — " <> isDomainTitle spec
                 , ""
                 , "- **Session Directory**: `" <> T.pack sessionDir <> "`"
-                , "- **Summary**: " <> summaryLine
+                , wrapMarkdownBullet 78 ("- **Summary**: " <> summaryLine)
                 , ""
                 , "## Topics in This Shard"
                 , ""
-                , T.intercalate "\n" [secTxt | (_, _, secTxt, _) <- shardTopics]
+                , T.intercalate "\n" [secTxt | (_, _, secTxt, _, _) <- shardTopics]
                 ]
         TIO.writeFile fullPath shardDoc
-        let tagLinks = [(dispTag, relPath) | (dispTag, _, _, _) <- shardTopics]
+        let tagLinks = [(dispTag, relPath) | (dispTag, _, _, _, _) <- shardTopics]
         pure ((relPath, label, summaryLine), tagLinks)
 
       let l1ShardNodes = map fst shardDetails
@@ -490,13 +556,16 @@ syncTopicTree sessionDir st spec items = do
                   case Map.lookup dispTag tagShardMap of
                     Just fp
                       | olderCount > 0 ->
-                          [ "- *(+"
-                              <> jsonInt olderCount
-                              <> " earlier entries in ["
-                              <> T.pack (takeFileName fp)
-                              <> "]("
-                              <> T.pack fp
-                              <> "))*"
+                          [ wrapMarkdownBullet
+                              78
+                              ( "- *(+"
+                                  <> jsonInt olderCount
+                                  <> " earlier entries in ["
+                                  <> T.pack (takeFileName fp)
+                                  <> "]("
+                                  <> T.pack fp
+                                  <> "))*"
+                              )
                           ]
                     _ -> []
              in "### "
@@ -506,23 +575,14 @@ syncTopicTree sessionDir st spec items = do
                   <> ")\n"
                   <> T.unlines (olderNote ++ map (isRenderTopicBullet spec sessionDir) recentItems)
           recentTopics =
-            take
+            takeRecentBounded
               15
+              8000
               [ renderRecentTopicSec (dispTag, grpItems)
-              | (dispTag, grpItems, _, _) <- renderedTopics
+              | (dispTag, grpItems, _, _, _) <- renderedTopics
               , any (\x -> isItemIndex spec x >= max 1 (curIdx - 2)) grpItems
               ]
-          shardLinksLines =
-            [ "- **"
-                <> lbl
-                <> "**: ["
-                <> T.pack (takeFileName fp)
-                <> "]("
-                <> T.pack fp
-                <> ") — "
-                <> summ
-            | (fp, lbl, summ) <- topShardNodes
-            ]
+          shardLinksLines = map renderArchiveNodeBullet topShardNodes
           byTopicDoc =
             T.unlines $
               [ "# " <> isDomainTitle spec <> " Index by Semantic Topic & Entity: " <> stTitle st
@@ -562,22 +622,25 @@ renderStoryBullet _ r =
       storyPath = T.pack ("chunks" </> ("chunk_" ++ padStr ++ ".md"))
       entryPath = T.pack ("entries" </> ("chunk_" ++ padStr ++ ".md"))
       memPath = T.pack ("archive" </> "memory" </> ("chunk_" ++ padStr ++ ".md"))
-   in "- **[chunk_"
-        <> idxStr
-        <> "]("
-        <> storyPath
-        <> ")** ("
-        <> chapStr
-        <> ", "
-        <> partStr
-        <> topicsStr
-        <> "): "
-        <> scrSummary r
-        <> " ([entry]("
-        <> entryPath
-        <> ") | [memory]("
-        <> memPath
-        <> "))"
+   in wrapMarkdownBullet
+        78
+        ( "- **[chunk_"
+            <> idxStr
+            <> "]("
+            <> storyPath
+            <> ")** ("
+            <> chapStr
+            <> ", "
+            <> partStr
+            <> topicsStr
+            <> "): "
+            <> scrSummary r
+            <> " ([entry]("
+            <> entryPath
+            <> ") | [memory]("
+            <> memPath
+            <> "))"
+        )
 
 storyIndexSpec :: IndexSpec StoryChunkRecord
 storyIndexSpec =
@@ -595,7 +658,7 @@ storyIndexSpec =
     , isRenderTopicBullet = renderStoryBullet
     , isSummarizeArc = \rs ->
         let distinctChaps = nub [(scrChapterNumber r, scrChapterTitle r) | r <- rs]
-         in "Chapters: *" <> T.intercalate "; " [formatChapLabel cn ct | (cn, ct) <- distinctChaps] <> "*"
+         in "Chapters: *" <> formatBoundedList 180 "; " [formatChapLabel cn ct | (cn, ct) <- distinctChaps] <> "*"
     , isArcExtraFooter = \sessionDir rs ->
         case reverse rs of
           [] -> pure []
@@ -634,12 +697,15 @@ renderEntryBullet _ r =
           then ""
           else " | *Topics*: " <> T.intercalate ", " topics
       discLines =
-        [ "  - **"
-            <> (if edrIsFactCheck d then "Fact-Check Discussion" else "User Discussion")
-            <> "**"
-            <> (if null (edrTopics d) then "" else " (*Topics*: " <> T.intercalate ", " (edrTopics d) <> ")")
-            <> ": "
-            <> edrSummary d
+        [ wrapMarkdownBullet
+            78
+            ( "  - **"
+                <> (if edrIsFactCheck d then "Fact-Check Discussion" else "User Discussion")
+                <> "**"
+                <> (if null (edrTopics d) then "" else " (*Topics*: " <> T.intercalate ", " (edrTopics d) <> ")")
+                <> ": "
+                <> edrSummary d
+            )
         | d <- elrDiscussions r
         ]
       baseLine =
@@ -669,7 +735,7 @@ renderEntryBullet _ r =
                   <> " ([story]("
                   <> storyPath
                   <> "))"
-   in T.intercalate "\n" (baseLine : discLines)
+   in T.intercalate "\n" (wrapMarkdownBullet 78 baseLine : discLines)
 
 entryIndexSpec :: IndexSpec EntryLogRecord
 entryIndexSpec =
@@ -692,7 +758,7 @@ entryIndexSpec =
               <> " entries, "
               <> jsonInt discCnt
               <> " discussions (Chapters: *"
-              <> T.intercalate "; " [formatChapLabel cn ct | (cn, ct) <- distinctChaps]
+              <> formatBoundedList 160 "; " [formatChapLabel cn ct | (cn, ct) <- distinctChaps]
               <> "*)"
     , isArcExtraFooter = \_ _ -> pure []
     }
