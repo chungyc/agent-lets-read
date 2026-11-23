@@ -52,8 +52,11 @@ critique to `<session_dir>/current_critic_response.md` via `write_file`
 
 - `<session_dir>/entries/by_chronology.md`, `<session_dir>/entries/by_topic.md`,
   `<session_dir>/entries/archive/`, and `<session_dir>/entries/chunk_XXXX.md`
-  (if checking whether a structural habit, running gag, or phrase is becoming
-  repetitive across recent chunks; do not read `lets_read_log.md`)
+  (do not read `lets_read_log.md`). To spot recurring structural habits,
+  opening tics, or running gags across recent chunks, scan
+  `entries/by_chronology.md`'s 1-line `[Entry]` summaries first instead of
+  opening multiple raw `entries/chunk_XXXX.md` files (following
+  `entries/archive/chronology/L1_XXXX.md` only if checking an earlier arc).
 
 ### No Local File Exploration Outside `<session_dir>` & Strict Write Boundary
 

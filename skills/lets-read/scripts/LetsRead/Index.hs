@@ -18,6 +18,7 @@ module LetsRead.Index
   , predictionIndexSpec
   , syncMultiLayerIndex
   , completedStoryArcRollups
+  , completedStoryArcSummaries
   , checkStorySummaryStructure
   ) where
 
@@ -954,11 +955,12 @@ applyTopicCuratorResponse rawResp st =
       stFinal = stWithAliases {stCuratedTopics = postTopics}
    in (stFinal, length validPairs)
 
--- | Compute the completed @L1@ story arc rollup labels and relative file paths
--- from the session's recorded story chunks, matching the exact @Arc K@ ranges
--- archived in @chunks/archive/chronology/L1_XXXX.md@.
-completedStoryArcRollups :: [StoryChunkRecord] -> [(Int, Text, FilePath)]
-completedStoryArcRollups records =
+-- | Compute the completed @L1@ story arc rollup labels, relative file paths,
+-- and bounded chapter-title summaries from the session's recorded story chunks,
+-- matching the exact @Arc K@ ranges archived in
+-- @chunks/archive/chronology/L1_XXXX.md@.
+completedStoryArcSummaries :: [StoryChunkRecord] -> [(Int, Text, FilePath, Text)]
+completedStoryArcSummaries records =
   let sorted = sortOn scrChunkIndex records
       arcs =
         groupItemsIntoArcs
@@ -985,8 +987,16 @@ completedStoryArcRollups records =
                 else "Chunks " <> T.pack (padChunkNumber startIdx) <> "–" <> T.pack (padChunkNumber endIdx)
             lbl = "Arc " <> jsonInt grpIdx <> " (" <> chapRange <> " | " <> itemRange <> ")"
             relPath = "chunks" </> "archive" </> "chronology" </> ("L1_" ++ padChunkNumber grpIdx ++ ".md")
-         in (grpIdx, lbl, relPath)
+            chapSummary = isSummarizeArc storyIndexSpec arcItems
+         in (grpIdx, lbl, relPath, chapSummary)
    in map mkArc (zip [1 :: Int ..] completedArcs)
+
+-- | Compute the completed @L1@ story arc rollup labels and relative file paths
+-- from the session's recorded story chunks, matching the exact @Arc K@ ranges
+-- archived in @chunks/archive/chronology/L1_XXXX.md@.
+completedStoryArcRollups :: [StoryChunkRecord] -> [(Int, Text, FilePath)]
+completedStoryArcRollups =
+  map (\(grpIdx, lbl, relPath, _) -> (grpIdx, lbl, relPath)) . completedStoryArcSummaries
 
 -- | Check whether @## Story Summary So Far@ has accumulated excessive
 -- uncollapsed chapter bullets beyond 1 bullet per completed @Arc K@ plus 2

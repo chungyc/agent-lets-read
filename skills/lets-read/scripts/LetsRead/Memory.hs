@@ -36,7 +36,7 @@ import qualified Data.Text.IO as TIO
 import LetsRead.Chunker (parseMarkdownHeading)
 import LetsRead.Index
   ( collectCanonicalSessionTopics
-  , completedStoryArcRollups
+  , completedStoryArcSummaries
   , entryIndexSpec
   , predictionIndexSpec
   , renderStoryBullet
@@ -429,7 +429,7 @@ renderMemoryMarkdown sessionDir st =
               "Reuse established tags where accurate, and coin clean canonical tags when genuinely distinct recurring characters, factions, locations, or plot threads emerge:"
               <> "\n\n"
               <> wrapMarkdownParagraph 78 ("`" <> T.intercalate "`, `" canonTopics <> "`")
-      completedArcs = completedStoryArcRollups orderedStory
+      completedArcs = completedStoryArcSummaries orderedStory
       completedArcsBlock
         | null completedArcs =
             wrapMarkdownParagraph
@@ -441,9 +441,19 @@ renderMemoryMarkdown sessionDir st =
               "Collapse each completed arc below to 1 bullet in `## Story Summary So Far`, and consolidate completed chapters in the current arc to 1–2 bullets max:"
               <> "\n\n"
               <> T.intercalate
-                   "\n"
-                   [ "- **" <> lbl <> "**: [" <> T.pack (takeFileName fp) <> "](" <> T.pack fp <> ")"
-                   | (_, lbl, fp) <- completedArcs
+                   "\n\n"
+                   [ wrapMarkdownBullet
+                       78
+                       ( "- **"
+                           <> lbl
+                           <> "**: ["
+                           <> T.pack (takeFileName fp)
+                           <> "]("
+                           <> T.pack fp
+                           <> ") — "
+                           <> summ
+                       )
+                   | (_, lbl, fp, summ) <- completedArcs
                    ]
       indexIntroPara =
         wrapMarkdownParagraph
@@ -457,9 +467,9 @@ renderMemoryMarkdown sessionDir st =
           , ""
           , "### Multi-Layer Domain Indexes"
           , ""
-          , "- Story Chunks: [Chronological Index](chunks/by_chronology.md) | [Semantic Topic Index](chunks/by_topic.md) | [Unlocked Chunks](chunks/)"
-          , "- Session Logs: [Chronological Index](entries/by_chronology.md) | [Semantic Topic Index](entries/by_topic.md) | [Entry Files](entries/)"
-          , "- Predictions: [Chronological Index](predictions/by_chronology.md) | [Semantic Topic Index](predictions/by_topic.md) | [Prediction Files](predictions/)"
+          , "- **Story Chunks** *(primary story text & quotes)*: [Chronological Index](chunks/by_chronology.md) | [Semantic Topic Index](chunks/by_topic.md) | [Unlocked Chunks](chunks/)"
+          , "- **Session Logs** *(past commentary, gags & discussions)*: [Chronological Index](entries/by_chronology.md) | [Semantic Topic Index](entries/by_topic.md) | [Entry Files](entries/)"
+          , "- **Predictions** *(original bets & judge verdicts)*: [Chronological Index](predictions/by_chronology.md) | [Semantic Topic Index](predictions/by_topic.md) | [Prediction Files](predictions/)"
           , ""
           , "### Established Topic Tags"
           , ""

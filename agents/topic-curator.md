@@ -28,15 +28,15 @@ topic.
   (mandatory) to understand the characters, factions, locations, and plot
   threads introduced so far.
 
-- If a tag's meaning is ambiguous from its name and `memory.md` alone, you may
-  call `read_file` on `<session_dir>/chunks/by_topic.md`,
-  `<session_dir>/entries/by_topic.md`, or
-  `<session_dir>/predictions/by_topic.md`—following any linked shards under
-  `<domain>/archive/topics/` (`L1_XXXX.md`, `topic_XXXX_L1_YYYY.md`) for older
-  tags—to inspect the 1-line summary where that tag was used. The `Session File
-  & Index Reference` (`session-files.md` path in `current_topic_prompt.md`)
-  explains file-group roles and sharded index layout. Do not read
-  `lets_read_log.md`.
+- If a tag's meaning is ambiguous from its name and `memory.md` alone, start
+  with `<session_dir>/chunks/by_topic.md` (the cleanest source for in-story
+  entity context), checking `<session_dir>/entries/by_topic.md` or
+  `<session_dir>/predictions/by_topic.md` only if the tag appears only there—
+  following any linked shards under `<domain>/archive/topics/` (`L1_XXXX.md`,
+  `topic_XXXX_L1_YYYY.md`; all relative links resolve under `<session_dir>/`)
+  for older tags. The `Session File & Index Reference` (`session-files.md` path
+  in `current_topic_prompt.md`) explains file-group roles and sharded index
+  layout. Do not read `lets_read_log.md`.
 
 - Never access files outside `<session_dir>` (aside from the `session-files.md`
   reference path in your turn prompt) or inspect `.vault.bin`.

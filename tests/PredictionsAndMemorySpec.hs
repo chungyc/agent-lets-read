@@ -17,6 +17,7 @@ import LetsRead.Index
   , applyTopicCuratorResponse
   , checkStorySummaryStructure
   , completedStoryArcRollups
+  , completedStoryArcSummaries
   , renderEntryBullet
   , renderStoryBullet
   , storyIndexSpec
@@ -42,6 +43,7 @@ import LetsRead.Prompts
   , resolveSessionFilesRefPathIO
   , writeCurrentJudgePromptFile
   , writeCurrentTopicPromptFile
+  , writeUserDiscussionPromptFile
   , writeWrapupPromptFile
   )
 import LetsRead.Types
@@ -243,6 +245,18 @@ testRec5ArcRollupsFinalMysteriesAndHallOfFame = do
   assertBool "memory.md renders ### Established Topic Tags heading" ("### Established Topic Tags" `T.isInfixOf` memMd)
   assertBool "memory.md has no *Session Directory*: pseudo-heading" (not ("*Session Directory*:" `T.isInfixOf` memMd))
   assertBool "memory.md renders inline Arc 1 range & L1_0001.md link" (arc1Label `T.isInfixOf` memMd && "L1_0001.md" `T.isInfixOf` memMd)
+  let arcSummaries = completedStoryArcSummaries arc1And2Story
+  assertEq "completedStoryArcSummaries matches completedStoryArcRollups count" 1 (length arcSummaries)
+  let memNorm = normWs memMd
+  assertBool
+    "memory.md includes chapter titles on Completed L1 Story Arcs bullets"
+    ("Chapters: *" `T.isInfixOf` memNorm && "Ch. 1: Chap 1" `T.isInfixOf` memNorm && "Ch. 9: Chap 9" `T.isInfixOf` memNorm)
+  assertBool
+    "memory.md includes purpose tags under Multi-Layer Domain Indexes"
+    ( "primary story text & quotes" `T.isInfixOf` memMd
+        && "past commentary, gags & discussions" `T.isInfixOf` memMd
+        && "original bets & judge verdicts" `T.isInfixOf` memMd
+    )
 
   let priorMemWithMystery =
         [ ("Story Summary So Far", "- **Core Premise, Timeline & Baseline Facts (Persistent)**: Harbor mystery.")
@@ -388,6 +402,22 @@ testRec6LeadingEmphasisAndMarkdownFormatting = do
     assertBool
       "Topic curator prompt includes session-files.md reference path"
       (T.pack refPath `T.isInfixOf` topicPromptTxt)
+
+    (_, userDiscPromptPath) <- writeUserDiscussionPromptFile tmp stWrap "How has Mara changed since Chapter 1?"
+    userDiscTxt <- TIO.readFile userDiscPromptPath
+    let userDiscNorm = normWs userDiscTxt
+    assertBool
+      "User discussion prompt lists entries/by_topic.md under Session Files"
+      (T.pack (tmp </> "entries" </> "by_topic.md") `T.isInfixOf` userDiscTxt)
+    assertBool
+      "User discussion prompt broadens Step 1 to retrospective/characterization verification across arcs"
+      ( "broad retrospective or characterization" `T.isInfixOf` userDiscNorm
+          && "chunks/archive/chronology/L1_*.md" `T.isInfixOf` userDiscNorm
+          && "entries/by_topic.md" `T.isInfixOf` userDiscNorm
+      )
+    assertBool
+      "User discussion prompt wraps non-path lines <= 80 cols"
+      (all (\l -> T.pack tmp `T.isInfixOf` l || "session-files.md" `T.isInfixOf` l || T.length l <= 80) (T.lines userDiscTxt))
 
     let criticDoc =
           renderCriticFeedbackMarkdown

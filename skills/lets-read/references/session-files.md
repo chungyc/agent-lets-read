@@ -213,15 +213,27 @@ topic are archived in `<domain>/archive/topics/topic_XXXX_L1_YYYY.md` (with
 `topic_XXXX_L2_ZZZZ.md` rollups if needed) and linked at the top of its
 `### <Topic>` section while recent entries remain inline.
 
+#### Topic Shard Freshness vs. Fixed Chronology Arcs
+
+Completed chronological arc paths (`archive/chronology/L1_XXXX.md`) stay fixed
+across turns, whereas topic shard numbers (`archive/topics/L1_XXXX.md` and
+`topic_XXXX_L1_YYYY.md`) can shift as topics grow or merge. Always start topic
+lookups from `<domain>/by_topic.md` on a fresh turn rather than reusing an
+older turn's topic shard path.
+
 ### Standard Lookup Sequence (`read_file` Without Directory Listing)
 
 1. Check `memory.md` first (`Recent Story Chunks` covers the last 5 chunks;
    `Active Prediction Slate` links active and recent `predictions/pred_XXXX.md`;
-   `Completed L1 Story Arcs` lists `Arc K` chunk ranges).
+   `Completed L1 Story Arcs` lists `Arc K` chapter titles and links directly to
+   `chunks/archive/chronology/L1_XXXX.md`).
 
-2. Read `<domain>/by_topic.md` (when searching by character, entity, tag, or
-   plot thread) or `<domain>/by_chronology.md` (when searching by chapter or
-   timeline position).
+2. Pick **one** index axis first rather than reading both unless the first
+   misses: jump straight to the `chunks/archive/chronology/L1_XXXX.md` link in
+   `memory.md` (or read `<domain>/by_chronology.md` for the current unarchived
+   arc) when you know the arc, chapter, or timeline position; read
+   `<domain>/by_topic.md` when searching by character, entity, tag, or plot
+   thread in an unknown chapter.
 
 3. If the target topic or chapter range points to an archive shard
    (`archive/topics/L1_XXXX.md`, `topic_XXXX_L1_YYYY.md`, or

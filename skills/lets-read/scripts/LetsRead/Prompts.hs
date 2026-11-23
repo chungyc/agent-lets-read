@@ -1003,6 +1003,7 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
           , "- Current Story Chunk (`chunks/chunk_" <> curPad <> ".md`): " <> T.pack (absSession </> "current_chunk.md")
           , "- Reader Memory File: " <> T.pack (absSession </> "memory.md")
           , "- Story Chunks Directory (on-demand `read_file` verification): " <> T.pack (absSession </> "chunks")
+          , "- Past Commentary & Discussions Index (on-demand `read_file`): " <> T.pack (absSession </> "entries" </> "by_topic.md")
           , "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
           , "- Output Response File (mandatory `write_file`, `Overwrite: true`): " <> T.pack discRespPath
           , ""
@@ -1018,7 +1019,7 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
           , ""
           , wrapMarkdownBullet
               78
-              "1. If the user's message references a specific detail from an earlier chunk or external reference material, verify it via `read_file` on `chunks/chunk_XXXX.md` or neutral `search_web` first."
+              "1. If the user's message references a specific earlier detail, asks a broad retrospective or characterization question across arcs, or brings up external reference material, verify before answering via `chunks/archive/chronology/L1_*.md` / `chunks/by_topic.md` and primary `chunks/chunk_XXXX.md` (or `entries/by_topic.md` for past commentary/discussions, and neutral `search_web` for external lore)."
           , ""
           , wrapMarkdownBullet
               78

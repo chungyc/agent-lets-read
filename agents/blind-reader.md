@@ -48,10 +48,10 @@ your commentary and prediction will reference, **stop and check before calling
 - Whenever you quote, count, verify elapsed time/sequence details from, call
   back to, or base a prediction premise (`**Clue/Anomaly**`) on an earlier chunk
   (`XXXX < N`) not verbatim in `current_chunk.md` (and not already read in this
-  conversation), locate it via `chunks/by_topic.md` or `chunks/by_chronology.md`
-  and call `read_file` on `<session_dir>/chunks/chunk_XXXX.md` before calling
-  `write_file` (`LetsRead` audits `read_file` receipts for rotation and callback
-  checks).
+  conversation), locate it via `memory.md`'s completed `L1` arc links,
+  `chunks/by_chronology.md`, or `chunks/by_topic.md` and call `read_file` on
+  `<session_dir>/chunks/chunk_XXXX.md` before calling `write_file` (`LetsRead`
+  audits `read_file` receipts for rotation and callback checks).
 
 #### Allowed On-Demand
 
@@ -68,6 +68,34 @@ your commentary and prediction will reference, **stop and check before calling
   `archive/chronology/`, `archive/topics/`, `pred_XXXX.md`, `hall_of_fame.md`),
   and `<session_dir>/archive/memory/` (`curated_XXXX.md`, `chunk_XXXX.md`). Do
   not read `lets_read_log.md`.
+
+#### Session File Map & Lookup Rules
+
+- **Domains**: `chunks/` holds primary unlocked story passages (only source of
+  truth for story text/quotes); `entries/` holds past commentary, running gags,
+  and `[Discussion]` logs (never read `lets_read_log.md`); `predictions/` holds
+  original bets (`pred_XXXX.md`) and verdicts; `archive/memory/chunk_XXXX.md`
+  holds point-in-time `memory.md` snapshots (`curated_XXXX.md` holds the 4
+  curated sections only).
+
+- **Pick one index axis (do not read both unless the first misses)**:
+
+  - **Known arc, chapter, timeline, or count**: jump directly to the
+    `chunks/archive/chronology/L1_XXXX.md` link listed under
+    `### Completed L1 Story Arcs` in `memory.md` (skipping `by_chronology.md`),
+    or read `<domain>/by_chronology.md` for the current unarchived arc.
+
+  - **Unknown chapter for a character, prop, location, or plot thread**: read
+    `<domain>/by_topic.md` -> follow its `archive/topics/L1_XXXX.md` shard ->
+    for high-frequency topics, follow `topic_XXXX_L1_YYYY.md` for older entries
+    -> open the leaf `chunk_XXXX.md` / `pred_XXXX.md`.
+
+- **Paths & freshness**: All relative links in `memory.md` and index files
+  resolve under `<session_dir>/`. Completed chronology `L1` arc paths stay
+  fixed, while topic shard numbers (`archive/topics/L1_XXXX.md`,
+  `topic_XXXX_L1_YYYY.md`) can shift as topics grow or merge—always start topic
+  lookups from `by_topic.md` on a fresh turn rather than reusing an older
+  turn's shard path.
 
 ### No Local File Exploration Outside `<session_dir>` & Strict Write Boundary
 

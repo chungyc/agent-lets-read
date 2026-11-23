@@ -28,6 +28,7 @@ import TestHarness
   ( assertBool
   , assertEq
   , baseDummyState
+  , normWs
   , withTempDir
   )
 
@@ -121,6 +122,30 @@ testRec1OrchestratorGuardrails mBinPath = do
         assertBool
           (af ++ " omits misleading 'reply to the host' phrasing")
           (not ("reply to the host" `T.isInfixOf` T.toLower agentTxt))
+      forM_ ["blind-reader.md", "fact-checker.md"] $ \af -> do
+        agentTxt <- TIO.readFile (repoDir </> "agents" </> af)
+        let normTxt = normWs agentTxt
+        assertBool
+          (af ++ " includes compact Session File Map & Lookup Rules section")
+          ("#### Session File Map & Lookup Rules" `T.isInfixOf` agentTxt)
+        assertBool
+          (af ++ " includes pick-one-axis and topic-shard freshness rules")
+          ( "Pick one index axis" `T.isInfixOf` normTxt
+              && "topic shard numbers" `T.isInfixOf` T.toLower normTxt
+              && "by_topic.md" `T.isInfixOf` normTxt
+          )
+      criticTxt <- normWs <$> TIO.readFile (repoDir </> "agents" </> "commentary-critic.md")
+      assertBool
+        "commentary-critic.md directs scanning entries/by_chronology.md summaries first"
+        ("entries/by_chronology.md" `T.isInfixOf` criticTxt && "[Entry]" `T.isInfixOf` criticTxt)
+      judgeTxt <- normWs <$> TIO.readFile (repoDir </> "agents" </> "prediction-judge.md")
+      assertBool
+        "prediction-judge.md directs jumping to L1_XXXX.md from memory.md and predictions/by_chronology.md for resolved history"
+        ("chunks/archive/chronology/L1_XXXX.md" `T.isInfixOf` judgeTxt && "predictions/by_chronology.md" `T.isInfixOf` judgeTxt)
+      curatorTxt <- normWs <$> TIO.readFile (repoDir </> "agents" </> "topic-curator.md")
+      assertBool
+        "topic-curator.md prioritizes chunks/by_topic.md for ambiguous story entities"
+        ("start with `<session_dir>/chunks/by_topic.md`" `T.isInfixOf` curatorTxt)
       let srcPath = tmp </> "mini.md"
           sessDir = tmp </> "session"
       TIO.writeFile
