@@ -9,8 +9,11 @@ module LetsRead.Types
   , StoryChunkRecord (..)
   , EntryDiscussionRecord (..)
   , EntryLogRecord (..)
+  , ResolutionMeta (..)
   , PredictionStatus (..)
   , PredictionRecord (..)
+  , predResolutionMeta
+  , predStoryResolutionMeta
   , SessionState (..)
   , ResolutionKind (..)
   , ParsedPrediction (..)
@@ -146,12 +149,24 @@ data EntryLogRecord = EntryLogRecord
 
 instance Binary EntryLogRecord
 
+data ResolutionMeta = ResolutionMeta
+  { rmChunk :: !Int
+  , rmChapterNumber :: !Int
+  , rmChapterTitle :: !Text
+  , rmPartInChapter :: !Int
+  , rmPartsInChapter :: !Int
+  , rmNote :: !Text
+  }
+  deriving (Show, Eq, Generic)
+
+instance Binary ResolutionMeta
+
 data PredictionStatus
   = PredStatusActive
-  | PredStatusConfirmed !Int !Bool -- ^ resolvedChunk, isSameChunk (0 chunks foresight)
-  | PredStatusDebunked !Int        -- ^ resolvedChunk
-  | PredStatusSubverted !Int       -- ^ resolvedChunk
-  | PredStatusRetired !Int         -- ^ retiredChunk
+  | PredStatusConfirmed !ResolutionMeta !Bool -- ^ meta, isSameChunk (0 chunks foresight)
+  | PredStatusDebunked !ResolutionMeta
+  | PredStatusSubverted !ResolutionMeta
+  | PredStatusRetired !ResolutionMeta
   deriving (Show, Eq, Generic)
 
 instance Binary PredictionStatus
@@ -168,11 +183,28 @@ data PredictionRecord = PredictionRecord
   , prRival :: !Text
   , prRawBody :: !Text
   , prStatus :: !PredictionStatus
-  , prResolutionNote :: !(Maybe Text)
   }
   deriving (Show, Eq, Generic)
 
 instance Binary PredictionRecord
+
+predResolutionMeta :: PredictionRecord -> Maybe ResolutionMeta
+predResolutionMeta pr =
+  case prStatus pr of
+    PredStatusActive -> Nothing
+    PredStatusConfirmed rm _ -> Just rm
+    PredStatusDebunked rm -> Just rm
+    PredStatusSubverted rm -> Just rm
+    PredStatusRetired rm -> Just rm
+
+predStoryResolutionMeta :: PredictionRecord -> Maybe ResolutionMeta
+predStoryResolutionMeta pr =
+  case prStatus pr of
+    PredStatusConfirmed rm _ -> Just rm
+    PredStatusDebunked rm -> Just rm
+    PredStatusSubverted rm -> Just rm
+    PredStatusRetired _ -> Nothing
+    PredStatusActive -> Nothing
 
 data SessionState = SessionState
   { stTitle :: !Text

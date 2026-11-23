@@ -36,6 +36,7 @@ import LetsRead.Predictions
   ( cleanTopicTag
   , coalesceBulletLines
   , isPlaceholderLine
+  , renderPredCrossArcResolutionBullet
   , renderPredSummaryBullet
   )
 import LetsRead.Types
@@ -43,11 +44,13 @@ import LetsRead.Types
   , EntryLogRecord (..)
   , PredictionRecord (..)
   , PredictionStatus (..)
+  , ResolutionMeta (..)
   , SessionState (..)
   , StoryChunkRecord (..)
   , formatChapLabel
   , jsonInt
   , padChunkNumber
+  , predStoryResolutionMeta
   , readTextFileSafe
   , stripToolReceiptComments
   , wrapMarkdownBullet
@@ -68,14 +71,16 @@ data IndexSpec a = IndexSpec
   , isChronIntro :: !Text
   , isTopicIntro :: !Text
   , isItemIndex :: !(a -> Int)
+  , isItemLastUpdated :: !(a -> Int)
   , isItemChapter :: !(a -> (Int, Text))
-  , isItemPart :: !(a -> (Int, Int))
   , isItemTopics :: !(a -> [Text])
   , isDefaultTopic :: !Text
   , isRenderChronBullet :: !(FilePath -> a -> Text)
   , isRenderTopicBullet :: !(FilePath -> a -> Text)
   , isSummarizeArc :: !([a] -> Text)
-  , isArcExtraFooter :: !(FilePath -> [a] -> IO [Text])
+  , isChronArcSummarySuffix :: !(Int -> Int -> [a] -> Text)
+  , isArcExtraFooter :: !(FilePath -> Int -> Int -> [a] -> [a] -> IO [Text])
+  , isExtraChronInline :: !(FilePath -> Int -> [a] -> [a] -> [Text])
   }
 
 utf8Bytes :: Text -> Int
@@ -139,15 +144,14 @@ renderArchiveNodeBullet (fp, lbl, summ) =
         <> summ
     )
 
-groupItemsIntoArcs :: (a -> (Int, Text)) -> (a -> (Int, Int)) -> [a] -> [[a]]
-groupItemsIntoArcs getChap getPart = go [] [] (0 :: Int)
+groupItemsIntoArcs :: (a -> (Int, Text)) -> [a] -> [[a]]
+groupItemsIntoArcs getChap = go [] [] (0 :: Int)
   where
     go [] _ _ [] = []
     go cur _ _ [] = [reverse cur]
     go cur chapsInCur countInCur (e : es) =
       let (chap, _) = getChap e
-          (partInC, _) = getPart e
-          isNewChap = partInC == 1 && chap `notElem` chapsInCur
+          isNewChap = chap `notElem` chapsInCur
           shouldSplit =
             countInCur >= 25
               || (isNewChap && (length chapsInCur >= 10 || countInCur >= 18))
@@ -223,8 +227,19 @@ topicNormKey :: Text -> Text
 topicNormKey raw =
   T.unwords (T.words (T.toLower (cleanTopicTag raw)))
 
-writeChronArcFile :: FilePath -> IndexSpec a -> Int -> [a] -> IO (FilePath, Text, Text)
-writeChronArcFile sessionDir spec grpIdx arcItems = do
+pairCompletedArcSpans :: (a -> Int) -> [[a]] -> [(Int, (Int, Int, [a]))]
+pairCompletedArcSpans getIdx = go 1 0
+  where
+    go _ _ [] = []
+    go grpIdx prevEnd (arc : rest) =
+      let curEnd =
+            case arc of
+              [] -> prevEnd
+              _ -> maximum (map getIdx arc)
+       in (grpIdx, (prevEnd, curEnd, arc)) : go (grpIdx + 1) curEnd rest
+
+writeChronArcFile :: FilePath -> IndexSpec a -> Int -> Int -> Int -> [a] -> [a] -> IO (FilePath, Text, Text)
+writeChronArcFile sessionDir spec grpIdx prevEnd curEnd allItems arcItems = do
   let (startIdx, startChap) =
         case arcItems of
           (firstE : _) -> (isItemIndex spec firstE, fst (isItemChapter spec firstE))
@@ -242,7 +257,7 @@ writeChronArcFile sessionDir spec grpIdx arcItems = do
           then "Chunk " <> T.pack (padChunkNumber startIdx)
           else "Chunks " <> T.pack (padChunkNumber startIdx) <> "–" <> T.pack (padChunkNumber endIdx)
       label = "Arc " <> jsonInt grpIdx <> " — " <> isDomainTitle spec <> " (" <> chapRange <> " | " <> itemRange <> ")"
-      summaryLine = isSummarizeArc spec arcItems
+      summaryLine = isSummarizeArc spec arcItems <> isChronArcSummarySuffix spec prevEnd curEnd allItems
       byChapter = groupBy (\a b -> fst (isItemChapter spec a) == fst (isItemChapter spec b)) arcItems
       renderChapGroup [] = ""
       renderChapGroup grp@(firstE : _) =
@@ -251,7 +266,7 @@ writeChronArcFile sessionDir spec grpIdx arcItems = do
               <> formatChapLabel cNum cTitle
               <> "\n"
               <> T.unlines (map (isRenderChronBullet spec sessionDir) grp)
-  extraFooter <- isArcExtraFooter spec sessionDir arcItems
+  extraFooter <- isArcExtraFooter spec sessionDir prevEnd curEnd allItems arcItems
   let relArcDir = isDomainDir spec </> "archive" </> "chronology"
       fileName = "L1_" ++ padChunkNumber grpIdx ++ ".md"
       relPath = relArcDir </> fileName
@@ -284,10 +299,15 @@ syncChronologicalTree sessionDir st spec items = do
   cleanArchiveDirectory fullArcDir
 
   let sortedItems = sortOn (isItemIndex spec) items
-      arcs = groupItemsIntoArcs (isItemChapter spec) (isItemPart spec) sortedItems
+      arcs = groupItemsIntoArcs (isItemChapter spec) sortedItems
       completedArcs = if length arcs <= 1 then [] else init arcs
-  l1Nodes <- forM (zip [1 :: Int ..] completedArcs) $ \(grpIdx, arcItems) ->
-    writeChronArcFile sessionDir spec grpIdx arcItems
+      spannedCompletedArcs = pairCompletedArcSpans (isItemIndex spec) completedArcs
+      lastCompletedEnd =
+        case reverse spannedCompletedArcs of
+          ((_, (_, endIdx, _)) : _) -> endIdx
+          [] -> 0
+  l1Nodes <- forM spannedCompletedArcs $ \(grpIdx, (prevEnd, curEnd, arcItems)) ->
+    writeChronArcFile sessionDir spec grpIdx prevEnd curEnd sortedItems arcItems
   topArcNodes <- rollupIndexLevels sessionDir relArcDir (isDomainTitle spec <> " Chronology Archive") 2 l1Nodes
 
   let inlineItems =
@@ -316,6 +336,7 @@ syncChronologicalTree sessionDir st spec items = do
                 "- *(All entries so far are listed inline below. Completed arc archive files will appear here as the story progresses.)*"
             ]
           else map renderArchiveNodeBullet topArcNodes
+      extraInlineSection = isExtraChronInline spec sessionDir lastCompletedEnd sortedItems inlineItems
       chronologyDoc =
         T.unlines $
           [ "# " <> isDomainTitle spec <> " Index by Story Chronology: " <> stTitle st
@@ -335,6 +356,7 @@ syncChronologicalTree sessionDir st spec items = do
                    then "- *(No entries recorded yet.)*"
                    else T.intercalate "\n" (map renderChapGroup byChap)
                ]
+            ++ extraInlineSection
   TIO.writeFile (domainPath </> "by_chronology.md") chronologyDoc
 
 packTopicShards ::
@@ -397,7 +419,7 @@ syncTopicTree sessionDir st spec items = do
         if length ordered <= 1 || (length ordered <= 25 && inlineSecBytes <= 6000)
           then pure (dispTag, ordered, inlineSecTxt, length (T.lines inlineSecTxt) + 1, inlineSecBytes)
           else do
-            let rawArcs = groupItemsIntoArcs (isItemChapter spec) (isItemPart spec) ordered
+            let rawArcs = groupItemsIntoArcs (isItemChapter spec) ordered
                 pairArcs =
                   [ [(it, isRenderTopicBullet spec sessionDir it) | it <- arc]
                   | arc <- rawArcs
@@ -550,7 +572,7 @@ syncTopicTree sessionDir st spec items = do
       topShardNodes <- rollupIndexLevels sessionDir relTopicArcDir (isDomainTitle spec <> " Topic Archive") 2 l1ShardNodes
       let curIdx = stCurrentIndex st
           renderRecentTopicSec (dispTag, ordered) =
-            let recentItems = [x | x <- ordered, isItemIndex spec x >= max 1 (curIdx - 2)]
+            let recentItems = [x | x <- ordered, isItemLastUpdated spec x >= max 1 (curIdx - 2)]
                 olderCount = length ordered - length recentItems
                 olderNote =
                   case Map.lookup dispTag tagShardMap of
@@ -560,7 +582,7 @@ syncTopicTree sessionDir st spec items = do
                               78
                               ( "- *(+"
                                   <> jsonInt olderCount
-                                  <> " earlier entries in ["
+                                  <> " other entries in ["
                                   <> T.pack (takeFileName fp)
                                   <> "]("
                                   <> T.pack fp
@@ -580,7 +602,7 @@ syncTopicTree sessionDir st spec items = do
               8000
               [ renderRecentTopicSec (dispTag, grpItems)
               | (dispTag, grpItems, _, _, _) <- renderedTopics
-              , any (\x -> isItemIndex spec x >= max 1 (curIdx - 2)) grpItems
+              , any (\x -> isItemLastUpdated spec x >= max 1 (curIdx - 2)) grpItems
               ]
           shardLinksLines = map renderArchiveNodeBullet topShardNodes
           byTopicDoc =
@@ -650,8 +672,8 @@ storyIndexSpec =
     , isChronIntro = "Use this index to browse unlocked in-story plot summaries in chronological order by Arc, Chapter, and Chunk."
     , isTopicIntro = "Use this inverted index to look up unlocked story chunks (`chunks/chunk_XXXX.md`) by character, location, faction, prop, or plot thread."
     , isItemIndex = scrChunkIndex
+    , isItemLastUpdated = scrChunkIndex
     , isItemChapter = \r -> (scrChapterNumber r, scrChapterTitle r)
-    , isItemPart = \r -> (scrPartInChapter r, scrPartsInChapter r)
     , isItemTopics = scrTopics
     , isDefaultTopic = "General Plot"
     , isRenderChronBullet = renderStoryBullet
@@ -659,7 +681,8 @@ storyIndexSpec =
     , isSummarizeArc = \rs ->
         let distinctChaps = nub [(scrChapterNumber r, scrChapterTitle r) | r <- rs]
          in "Chapters: *" <> formatBoundedList 180 "; " [formatChapLabel cn ct | (cn, ct) <- distinctChaps] <> "*"
-    , isArcExtraFooter = \sessionDir rs ->
+    , isChronArcSummarySuffix = \_ _ _ -> ""
+    , isArcExtraFooter = \sessionDir _ _ _ rs ->
         case reverse rs of
           [] -> pure []
           (lastR : _) -> do
@@ -674,6 +697,7 @@ storyIndexSpec =
               , ""
               , if T.null (T.strip snapContent) then "*(No snapshot recorded.)*" else T.strip snapContent
               ]
+    , isExtraChronInline = \_ _ _ _ -> []
     }
 
 allEntryTopics :: EntryLogRecord -> [Text]
@@ -745,8 +769,8 @@ entryIndexSpec =
     , isChronIntro = "Use this index to browse Let's Read commentary entries, running gags, and Reader Discussions in chronological order."
     , isTopicIntro = "Use this inverted index to look up Let's Read commentary entries (`entries/chunk_XXXX.md`), running gags, craft notes, Fact-Check verifications, and User Discussions by topic."
     , isItemIndex = elrEntryIndex
+    , isItemLastUpdated = elrEntryIndex
     , isItemChapter = \r -> (elrChapterNumber r, elrChapterTitle r)
-    , isItemPart = \r -> (elrPartInChapter r, elrPartsInChapter r)
     , isItemTopics = allEntryTopics
     , isDefaultTopic = "Liveblog Commentary"
     , isRenderChronBullet = renderEntryBullet
@@ -760,19 +784,45 @@ entryIndexSpec =
               <> " discussions (Chapters: *"
               <> formatBoundedList 160 "; " [formatChapLabel cn ct | (cn, ct) <- distinctChaps]
               <> "*)"
-    , isArcExtraFooter = \_ _ -> pure []
+    , isChronArcSummarySuffix = \_ _ _ -> ""
+    , isArcExtraFooter = \_ _ _ _ _ -> pure []
+    , isExtraChronInline = \_ _ _ _ -> []
     }
+
+crossArcResolutionsInSpan :: Int -> Int -> [PredictionRecord] -> [(ResolutionMeta, PredictionRecord)]
+crossArcResolutionsInSpan prevEnd curEnd allPreds =
+  sortOn
+    (\(rm, pr) -> (rmChapterNumber rm, rmChunk rm, prOriginChunk pr))
+    [ (rm, pr)
+    | pr <- allPreds
+    , prOriginChunk pr <= prevEnd
+    , Just rm <- [predStoryResolutionMeta pr]
+    , prevEnd < rmChunk rm && rmChunk rm <= curEnd
+    ]
+
+renderCrossArcResolutionBody :: [(ResolutionMeta, PredictionRecord)] -> Maybe Text
+renderCrossArcResolutionBody pairs
+  | null pairs = Nothing
+  | otherwise =
+      let byResChap = groupBy (\(rmA, _) (rmB, _) -> rmChapterNumber rmA == rmChapterNumber rmB) pairs
+          renderGrp [] = ""
+          renderGrp grp@((firstRm, _) : _) =
+            "### "
+              <> formatChapLabel (rmChapterNumber firstRm) (rmChapterTitle firstRm)
+              <> "\n"
+              <> T.unlines [renderPredCrossArcResolutionBullet pr | (_, pr) <- grp]
+       in Just (T.stripEnd (T.intercalate "\n" (map renderGrp byResChap)))
 
 predictionIndexSpec :: IndexSpec PredictionRecord
 predictionIndexSpec =
   IndexSpec
     { isDomainDir = "predictions"
     , isDomainTitle = "Predictions"
-    , isChronIntro = "Use this index to browse predictions in chronological order by Arc, Chapter, and Chunk."
+    , isChronIntro = "Use this index to browse predictions in chronological order by Arc, Chapter, and Chunk, including cross-arc resolutions of earlier predictions."
     , isTopicIntro = "Use this inverted index to look up all active and resolved predictions associated with a character, faction, artifact, location, or mystery theme."
     , isItemIndex = prOriginChunk
+    , isItemLastUpdated = \pr -> maybe (prOriginChunk pr) (max (prOriginChunk pr) . rmChunk) (predStoryResolutionMeta pr)
     , isItemChapter = \pr -> (prChapterNumber pr, prChapterTitle pr)
-    , isItemPart = \pr -> (prPartInChapter pr, prPartsInChapter pr)
     , isItemTopics = prTopics
     , isDefaultTopic = "General Plot"
     , isRenderChronBullet = \_ pr -> renderPredSummaryBullet pr
@@ -795,7 +845,42 @@ predictionIndexSpec =
               <> " Retired, "
               <> jsonInt activeCnt
               <> " Active)"
-    , isArcExtraFooter = \_ _ -> pure []
+    , isChronArcSummarySuffix = \prevEnd curEnd allPreds ->
+        let k = length (crossArcResolutionsInSpan prevEnd curEnd allPreds)
+         in if k <= 0 then "" else "; +" <> jsonInt k <> " earlier resolved here"
+    , isArcExtraFooter = \_ prevEnd curEnd allPreds _ ->
+        case renderCrossArcResolutionBody (crossArcResolutionsInSpan prevEnd curEnd allPreds) of
+          Nothing -> pure []
+          Just bodyTxt ->
+            pure
+              [ "---"
+              , ""
+              , "## Earlier-Arc Predictions Resolved in This Arc"
+              , ""
+              , bodyTxt
+              ]
+    , isExtraChronInline = \_ lastCompletedEnd allPreds inlinePreds ->
+        case inlinePreds of
+          [] -> []
+          _ ->
+            let firstInlineOrigin = minimum (map prOriginChunk inlinePreds)
+                inlineOriginFloor = min (lastCompletedEnd + 1) firstInlineOrigin
+                resolvedPairs =
+                  sortOn
+                    (\(rm, pr) -> (rmChapterNumber rm, rmChunk rm, prOriginChunk pr))
+                    [ (rm, pr)
+                    | pr <- allPreds
+                    , prOriginChunk pr < inlineOriginFloor
+                    , Just rm <- [predStoryResolutionMeta pr]
+                    , rmChunk rm >= inlineOriginFloor
+                    ]
+             in case renderCrossArcResolutionBody resolvedPairs of
+                  Nothing -> []
+                  Just bodyTxt ->
+                    [ "## Earlier-Arc Predictions Resolved Here"
+                    , ""
+                    , bodyTxt
+                    ]
     }
 
 collectSessionTopicCounts :: SessionState -> [(Text, Int)]
@@ -963,7 +1048,6 @@ completedStoryArcRollups records =
       arcs =
         groupItemsIntoArcs
           (\r -> (scrChapterNumber r, scrChapterTitle r))
-          (\r -> (scrPartInChapter r, scrPartsInChapter r))
           sorted
       completedArcs = if length arcs <= 1 then [] else init arcs
       mkArc (grpIdx, arcItems) =

@@ -5,6 +5,7 @@ module PredictionsAndMemorySpec
   , testRec5ArcRollupsFinalMysteriesAndHallOfFame
   , testRec6LeadingEmphasisAndMarkdownFormatting
   , testRec7IndexByteBudgetsWrappingAndSummaryLint
+  , testRec8CrossArcPredictionIndexesAndEchoGuard
   ) where
 
 import Control.Monad (forM_, when)
@@ -17,6 +18,7 @@ import LetsRead.Index
   , applyTopicCuratorResponse
   , checkStorySummaryStructure
   , completedStoryArcRollups
+  , predictionIndexSpec
   , renderEntryBullet
   , renderStoryBullet
   , storyIndexSpec
@@ -27,6 +29,7 @@ import LetsRead.Memory
   , mergeCuratedNarrativeMemoryForTurn
   , parseChunkSummaries
   , renderMemoryMarkdown
+  , syncPredictionsDirectory
   )
 import LetsRead.Predictions
   ( applyJudgeVerdicts
@@ -51,6 +54,7 @@ import LetsRead.Types
   , ParsedPrediction (..)
   , PredictionRecord (..)
   , PredictionStatus (..)
+  , ResolutionMeta (..)
   , SessionState (..)
   , StoryChunkRecord (..)
   , chunkToMeta
@@ -145,9 +149,11 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
   assertBool "Judge prompt highlights mid-chapter split context" ("Mid-Chapter Split Context" `T.isInfixOf` jpTxt)
   assertBool "Judge prompt includes Event-Trigger and Window Expiry guidance" ("Event-Trigger" `T.isInfixOf` jpTxt)
 
-  let (recsNextChunkHit, _, _) =
+  let chap3Meta = (3, "Boathouse Reveal", 1, 1)
+      (recsNextChunkHit, _, _) =
         applyJudgeVerdicts
           5
+          chap3Meta
           recs1
           []
           "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0004 -> CONFIRMED Chunk 0005]** Mara reveals the ledger hidden in the boathouse.\n"
@@ -155,12 +161,14 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
     (pr5 : _) ->
       assertEq
         "1-chunk foresight confirmation receives full Confirmed Hit status (isSameChunk = False)"
-        (PredStatusConfirmed 5 False)
+        (PredStatusConfirmed (ResolutionMeta 5 3 "Boathouse Reveal" 1 1 "Mara reveals the ledger hidden in the boathouse.") False)
         (prStatus pr5)
     [] -> die "Expected 1 judged prediction record"
-  let (recsSameChunk, _, _) =
+  let chap2Meta = (2, "Boathouse", 1, 2)
+      (recsSameChunk, _, _) =
         applyJudgeVerdicts
           4
+          chap2Meta
           recs1
           []
           "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0004 -> CONFIRMED Chunk 0004]** Already revealed in Chunk 4.\n"
@@ -168,7 +176,7 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
     (pr4 : _) ->
       assertEq
         "Same-chunk confirmation marks isSameChunk = True (0 chunks foresight)"
-        (PredStatusConfirmed 4 True)
+        (PredStatusConfirmed (ResolutionMeta 4 2 "Boathouse" 1 2 "Already revealed in Chunk 4.") True)
         (prStatus pr4)
     [] -> die "Expected 1 same-chunk prediction record"
 
@@ -281,11 +289,11 @@ testRec5ArcRollupsFinalMysteriesAndHallOfFame = do
           , prRival = "Mara tosses the key into the bay"
           , prRawBody = "**Clue/Anomaly**: Mara pockets the brass key -> **Theory**: Mara unlocks the lighthouse vault in Act 2 (vs. **Plausible Rival**: Mara tosses the key into the bay)"
           , prStatus = PredStatusActive
-          , prResolutionNote = Nothing
           }
       (judgedPreds, _, _) =
         applyJudgeVerdicts
           8
+          (4, "The Lighthouse Vault", 2, 2)
           [prHit]
           []
           "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0002 -> CONFIRMED Chunk 0008]** Mara opens the lighthouse vault using the brass key."
@@ -477,8 +485,18 @@ testRec7IndexByteBudgetsWrappingAndSummaryLint = do
           , prTheory = "The deputy collector forged the manifest to divert contraband to the lighthouse"
           , prRival = "A clerk reused old wax stock by mistake"
           , prRawBody = "**Clue/Anomaly**: Wax seal matches the customs house stamp -> **Theory**: The deputy collector forged the manifest to divert contraband to the lighthouse (vs. **Plausible Rival**: A clerk reused old wax stock by mistake)"
-          , prStatus = PredStatusConfirmed 9 False
-          , prResolutionNote = Just "Chunk 0009 reveals the deputy collector's duplicate stamp and ledger in the lighthouse cellar."
+          , prStatus =
+              PredStatusConfirmed
+                ( ResolutionMeta
+                    { rmChunk = 9
+                    , rmChapterNumber = 5
+                    , rmChapterTitle = "Lighthouse Cellar"
+                    , rmPartInChapter = 1
+                    , rmPartsInChapter = 1
+                    , rmNote = "Chunk 0009 reveals the deputy collector's duplicate stamp and ledger in the lighthouse cellar."
+                    }
+                )
+                False
           }
       renderedPredB = renderPredSummaryBullet samplePredRec
   assertBool
@@ -580,3 +598,219 @@ testRec7IndexByteBudgetsWrappingAndSummaryLint = do
         (w : _) -> "`[Story]` summary was " `T.isInfixOf` w && "`[Entry]` summary was " `T.isInfixOf` w && "<= 250 chars" `T.isInfixOf` w
         [] -> False
     )
+
+testRec8CrossArcPredictionIndexesAndEchoGuard :: IO ()
+testRec8CrossArcPredictionIndexesAndEchoGuard = withTempDir "rec8-cross-arc" $ \tmp -> do
+  putStrLn "== Rec #8: Cross-Arc Prediction Resolutions, Gap Spans, Echo Guard & Topic Recency =="
+  let stEmpty = baseDummyState 40
+  syncPredictionsDirectory tmp stEmpty
+  emptyChronTxt <- TIO.readFile (tmp </> "predictions" </> "by_chronology.md")
+  assertBool
+    "Empty prediction slate renders by_chronology.md without crashing"
+    ("No entries recorded yet" `T.isInfixOf` emptyChronTxt)
+
+  let mkActivePred idx chap topics theoryTxt =
+        PredictionRecord
+          { prOriginChunk = idx
+          , prChapterNumber = chap
+          , prChapterTitle = "Chapter " <> T.pack (show chap) <> ": Pier Thread " <> T.pack (show chap)
+          , prPartInChapter = if odd idx then 1 else 2
+          , prPartsInChapter = 2
+          , prTopics = topics
+          , prClue = "Clue on chunk " <> T.pack (show idx)
+          , prTheory = theoryTxt
+          , prRival = "Mundane coincidence on chunk " <> T.pack (show idx)
+          , prRawBody =
+              "**Clue/Anomaly**: Clue on chunk "
+                <> T.pack (show idx)
+                <> " -> **Theory**: "
+                <> theoryTxt
+                <> " (vs. **Plausible Rival**: Mundane coincidence on chunk "
+                <> T.pack (show idx)
+                <> ")"
+          , prStatus = PredStatusActive
+          }
+
+      pr2 = mkActivePred 2 1 ["Beacon Cipher", "Mara"] "Mara uses the Beacon Cipher to unlock the vault"
+      pr3 = mkActivePred 3 2 ["Customs Seal", "Inspector Lin"] "The Customs Seal was forged at North Pier"
+      pr4 = mkActivePred 4 2 ["Tide Bell"] "The Tide Bell rings only at low water"
+
+      (after18, _, summary18) =
+        applyJudgeVerdicts
+          18
+          (9, "Chapter 9: Harbor Gate", 2, 2)
+          [pr2, pr3, pr4]
+          []
+          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0003 -> DEBUNKED Chunk 0018]** Draft note.\n"
+      (after18ReRun, _, summary18ReRun) =
+        applyJudgeVerdicts
+          18
+          (9, "Chapter 9: Harbor Gate", 2, 2)
+          after18
+          []
+          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0003 -> DEBUNKED Chunk 0018]** Customs clerk proves the seal was authentic.\n"
+      (after19Echo, _, summary19Echo) =
+        applyJudgeVerdicts
+          19
+          (10, "Chapter 10: Outer Reef", 1, 2)
+          after18ReRun
+          []
+          ( T.unlines
+              [ "=== PREDICTION JUDGMENTS ==="
+              , "- **[Predicted Chunk 0003 -> DEBUNKED Chunk 0018]** Customs clerk proves the seal was authentic."
+              , "- **[Predicted Chunk 0002 -> CONFIRMED Chunk 0019]** Mara decodes the Beacon Cipher on the reef door."
+              ]
+          )
+  assertBool
+    "Chunk 18 summary records pred_0003 resolution"
+    (any ("Predicted Chunk 0003 -> DEBUNKED Chunk 0018" `T.isInfixOf`) summary18)
+  assertBool
+    "Same-chunk Judge re-run (rmChunk == curIdx) stays idempotent and keeps pred_0003 in Chunk 18 summary"
+    (any ("Predicted Chunk 0003 -> DEBUNKED Chunk 0018" `T.isInfixOf`) summary18ReRun)
+  assertBool
+    "Unchanged Recently Resolved echo of pred_0003 on Chunk 19 is not re-emitted in Chunk 19 summary"
+    (not (any ("Predicted Chunk 0003" `T.isInfixOf`) summary19Echo))
+  case [p | p <- after19Echo, prOriginChunk p == 3] of
+    (p3After : _) ->
+      assertEq
+        "Same-chunk re-run updates Chunk 18 note and Chunk 19 echo preserves Chunk 18 & Chapter 9 ResolutionMeta"
+        (PredStatusDebunked (ResolutionMeta 18 9 "Chapter 9: Harbor Gate" 2 2 "Customs clerk proves the seal was authentic."))
+        (prStatus p3After)
+    [] -> die "Expected pred_0003 in after19Echo"
+
+  let (after20Reversal, _, _) =
+        applyJudgeVerdicts
+          20
+          (10, "Chapter 10: Outer Reef", 2, 2)
+          after19Echo
+          []
+          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0003 -> SUBVERTED Chunk 0020]** The authentic seal was stamped onto a decoy manifest!\n"
+  p2Resolved <-
+    case [p | p <- after20Reversal, prOriginChunk p == 2] of
+      (p : _) -> pure p
+      [] -> die "Expected pred_0002 in after20Reversal"
+  p3Rev <-
+    case [p | p <- after20Reversal, prOriginChunk p == 3] of
+      (p : _) -> pure p
+      [] -> die "Expected pred_0003 in after20Reversal"
+  assertEq
+    "Genuine cliffhanger fake-out reversal updates ResolutionMeta to Chunk 20 & Chapter 10"
+    (PredStatusSubverted (ResolutionMeta 20 10 "Chapter 10: Outer Reef" 2 2 "The authentic seal was stamped onto a decoy manifest!"))
+    (prStatus p3Rev)
+
+  -- Build Arc 1 (Chunks 1..18, Ch. 1..9), skip Chunk 19 (gap!), and build Arc 2 (Chunks 20..25, Ch. 10..12)
+  let pr4Retired =
+        pr4
+          { prStatus =
+              PredStatusRetired
+                (ResolutionMeta 21 11 "Chapter 11: Fog Bell" 1 2 "Retired for 10-prediction cap.")
+          }
+      arc1Preds =
+        [ if i == 2
+            then p2Resolved
+            else
+              if i == 3
+                then p3Rev
+                else
+                  if i == 4
+                    then pr4Retired
+                    else mkActivePred i ((i + 1) `div` 2) ["Topic Group " <> T.pack (show i), "Harbor Thread " <> T.pack (show (i `mod` 7))] ("Long theory text for prediction " <> T.pack (show i) <> " across the misty breakwater and customs pier.")
+        | i <- [1 .. 18]
+        ]
+      arc2Preds =
+        [ mkActivePred i ((i + 1) `div` 2) ["Topic Group " <> T.pack (show i)] ("Arc 2 theory text for prediction " <> T.pack (show i) <> " in the upper lighthouse.")
+        | i <- [20 .. 25]
+        ]
+      stArc2 =
+        (baseDummyState 45)
+          { stCurrentIndex = 20
+          , stPredictions = arc1Preds ++ arc2Preds
+          }
+  syncPredictionsDirectory tmp stArc2
+  chronArc2 <- TIO.readFile (tmp </> "predictions" </> "by_chronology.md")
+  l1Arc1 <- TIO.readFile (tmp </> "predictions" </> "archive" </> "chronology" </> "L1_0001.md")
+  pred2Doc <- TIO.readFile (tmp </> "predictions" </> "pred_0002.md")
+  assertBool
+    "pred_0002.md includes resolution chapter metadata"
+    ("Chapter 10: Outer Reef, Part 1/2" `T.isInfixOf` pred2Doc)
+  assertBool
+    "L1_0001.md retains Arc 1 predictions 1..18 without an earlier-arc footer"
+    ("[pred_0002]" `T.isInfixOf` l1Arc1 && not ("Earlier-Arc Predictions Resolved in This Arc" `T.isInfixOf` l1Arc1))
+  assertBool
+    "by_chronology.md renders ## Earlier-Arc Predictions Resolved Here"
+    ("## Earlier-Arc Predictions Resolved Here" `T.isInfixOf` chronArc2)
+  assertBool
+    "Gap-chunk resolution (Chunk 19 between Arc 1 end 18 and Arc 2 start 20) appears inline in by_chronology.md"
+    ("[pred_0002]" `T.isInfixOf` chronArc2 && "CONFIRMED Chk 0019 (Hit)" `T.isInfixOf` chronArc2)
+  assertBool
+    "Chunk 20 reversal of pred_0003 also appears inline in by_chronology.md"
+    ("[pred_0003]" `T.isInfixOf` chronArc2 && "SUBVERTED Chk 0020" `T.isInfixOf` chronArc2)
+  assertBool
+    "Cap-retired pred_0004 is excluded from Earlier-Arc Predictions Resolved Here"
+    (not ("[pred_0004]" `T.isInfixOf` chronArc2))
+
+  -- Advance into Arc 3 (Chunks 39..43, Ch. 20..22) so Arc 2 (Chunks 20..38) archives into L1_0002.md
+  let arc2FullPreds =
+        [ mkActivePred i ((i + 1) `div` 2) ["Topic Group " <> T.pack (show i), "Extra Tag " <> T.pack (show (i + 20))] (T.replicate 2 "Detailed coastal mystery theory text to push by_topic.md past the inline threshold into sharded mode. ")
+        | i <- [20 .. 38]
+        ]
+      arc3Preds =
+        [ mkActivePred i ((i + 1) `div` 2) ["Arc Three Tag " <> T.pack (show i)] "Final act theory."
+        | i <- [39 .. 43]
+        ]
+      pr4LateRetired =
+        pr4
+          { prStatus =
+              PredStatusRetired
+                (ResolutionMeta 42 21 "Chapter 21: Bell Tower" 2 2 "Retired on Chunk 42 for 10-prediction cap.")
+          }
+      pr5LateHit =
+        (mkActivePred 5 3 ["Silent Bell", "North Breakwater"] "The Silent Bell hides the smuggler's cipher key")
+          { prStatus =
+              PredStatusConfirmed
+                (ResolutionMeta 41 21 "Chapter 21: Bell Tower" 1 2 "Mara finds the cipher key inside the Silent Bell.")
+                False
+          }
+      pr6SameChunkHit =
+        (mkActivePred 6 3 ["Silent Bell"] "A second secret compartment sits under the bell")
+          { prStatus =
+              PredStatusDebunked
+                (ResolutionMeta 41 21 "Chapter 21: Bell Tower" 1 2 "No second compartment existed under the bell.")
+          }
+      arc1WithLateHits =
+        [ if prOriginChunk p == 4
+            then pr4LateRetired
+            else
+              if prOriginChunk p == 5
+                then pr5LateHit
+                else if prOriginChunk p == 6 then pr6SameChunkHit else p
+        | p <- arc1Preds
+        ]
+      allPredsArc3 = arc1WithLateHits ++ arc2FullPreds ++ arc3Preds
+      stArc3 =
+        (baseDummyState 45)
+          { stCurrentIndex = 43
+          , stPredictions = allPredsArc3
+          }
+  syncMultiLayerIndex tmp stArc3 predictionIndexSpec allPredsArc3
+  l1Arc2 <- TIO.readFile (tmp </> "predictions" </> "archive" </> "chronology" </> "L1_0002.md")
+  chronArc3 <- TIO.readFile (tmp </> "predictions" </> "by_chronology.md")
+  byTopicArc3 <- TIO.readFile (tmp </> "predictions" </> "by_topic.md")
+  assertBool
+    "Completed L1_0002.md retains Chunk 19 & 20 cross-arc resolutions in its footer"
+    ("## Earlier-Arc Predictions Resolved in This Arc" `T.isInfixOf` l1Arc2 && "[pred_0002]" `T.isInfixOf` l1Arc2 && "[pred_0003]" `T.isInfixOf` l1Arc2)
+  assertBool
+    "Completed Arc 2 summary in by_chronology.md notes +2 earlier resolved here"
+    ("+2 earlier resolved here" `T.isInfixOf` normWs chronArc3)
+  assertBool
+    "Arc 3 by_chronology.md shows newly resolved pred_0005 and pred_0006 inline under Chapter 21"
+    ("### Chapter 21: Bell Tower" `T.isInfixOf` chronArc3 && "[pred_0005]" `T.isInfixOf` chronArc3 && "[pred_0006]" `T.isInfixOf` chronArc3)
+  assertBool
+    "predictions/by_topic.md is in Sharded Mode"
+    ("## Topic Archive Shards" `T.isInfixOf` byTopicArc3 && "## Recently Updated Topics" `T.isInfixOf` byTopicArc3)
+  assertBool
+    "Sharded predictions/by_topic.md surfaces Silent Bell inline with both same-chunk-resolved predictions (no deduplication collision)"
+    ("### Silent Bell" `T.isInfixOf` byTopicArc3 && "[pred_0005]" `T.isInfixOf` byTopicArc3 && "[pred_0006]" `T.isInfixOf` byTopicArc3)
+  assertBool
+    "Sharded predictions/by_topic.md excludes cap-retired Tide Bell from Recently Updated Topics"
+    (not ("### Tide Bell" `T.isInfixOf` byTopicArc3))

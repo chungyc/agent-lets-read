@@ -9,6 +9,7 @@ import PredictionsAndMemorySpec
   , testRec5ArcRollupsFinalMysteriesAndHallOfFame
   , testRec6LeadingEmphasisAndMarkdownFormatting
   , testRec7IndexByteBudgetsWrappingAndSummaryLint
+  , testRec8CrossArcPredictionIndexesAndEchoGuard
   )
 import System.Environment (getArgs)
 import VerificationSpec
@@ -28,4 +29,5 @@ main = do
   testRec5ArcRollupsFinalMysteriesAndHallOfFame
   testRec6LeadingEmphasisAndMarkdownFormatting
   testRec7IndexByteBudgetsWrappingAndSummaryLint
+  testRec8CrossArcPredictionIndexesAndEchoGuard
   putStrLn "\nAll lets-read gatekeeper tests passed!"

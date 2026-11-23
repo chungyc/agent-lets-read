@@ -21,7 +21,8 @@ import Data.Maybe (isJust)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import LetsRead.Command.Common
-  ( removeFileIfExists
+  ( currentChunkMetaTuple
+  , removeFileIfExists
   , resolveOptionalResponse
   , resolveRequiredResponse
   , usage
@@ -173,6 +174,7 @@ cmdJudge opts = do
       (preds', judgeAuditBlocks, judgeSummaryLines) =
         applyJudgeVerdicts
           curIdx
+          (currentChunkMetaTuple st)
           (stPredictions st)
           (stPendingRetirements st)
           judgeSec

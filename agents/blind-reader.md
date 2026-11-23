@@ -51,7 +51,9 @@ your commentary and prediction will reference, **stop and check before calling
   conversation), locate it via `chunks/by_topic.md` or `chunks/by_chronology.md`
   and call `read_file` on `<session_dir>/chunks/chunk_XXXX.md` before calling
   `write_file` (`LetsRead` audits `read_file` receipts for rotation and callback
-  checks).
+  checks). When referencing an earlier prediction/ruling no longer shown in
+  `memory.md` or revisiting a recurring mystery thread, check
+  `predictions/by_topic.md` or `predictions/by_chronology.md`.
 
 #### Allowed On-Demand
 

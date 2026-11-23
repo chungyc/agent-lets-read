@@ -41,10 +41,12 @@ import LetsRead.Types
   , ChunkMeta (..)
   , PredictionRecord (..)
   , PredictionStatus (..)
+  , ResolutionMeta (..)
   , SessionState (..)
   , StoryChunkRecord (..)
   , jsonInt
   , padChunkNumber
+  , predStoryResolutionMeta
   , readTextFileSafe
   , resolveSkillResourcePath
   , wrapMarkdownBullet
@@ -395,7 +397,7 @@ writeCurrentPromptFile sessionDir st chunk activeCount = do
           78
           ( "1. Read `current_chunk.md` and `memory.md` (applying any `## Persona & Style Critique` notes silently)."
               <> step1PrevNote
-              <> " Whenever quoting, counting, or building a prediction premise (`**Clue/Anomaly**`) on an earlier chunk not verbatim in `current_chunk.md`, call `read_file` on `chunks/chunk_XXXX.md` (never rely on `memory.md` alone). Connecting external canon, comparing adaptations, and predicting canon elements is welcomed—verify specific external lore via neutral `search_web` queries (never searching for spoilers of this specific story) and keep explicit in-story facts distinct when the story diverges from canon."
+              <> " Whenever quoting, counting, or building a prediction premise (`**Clue/Anomaly**`) on an earlier chunk not verbatim in `current_chunk.md`, call `read_file` on `chunks/chunk_XXXX.md` (never rely on `memory.md` alone); when referencing an earlier prediction/ruling no longer shown in `memory.md` or revisiting a recurring mystery thread, check `predictions/by_topic.md` or `predictions/by_chronology.md`. Connecting external canon, comparing adaptations, and predicting canon elements is welcomed—verify specific external lore via neutral `search_web` queries (never searching for spoilers of this specific story) and keep explicit in-story facts distinct when the story diverges from canon."
           )
       step2Line =
         wrapMarkdownBullet
@@ -548,12 +550,9 @@ writeCurrentJudgePromptFile sessionDir st = do
       recentResolved =
         [ pr
         | pr <- preds
-        , case prStatus pr of
-            PredStatusConfirmed resC _ -> resC < curIdx && resC >= max 1 (curIdx - 2)
-            PredStatusDebunked resC -> resC < curIdx && resC >= max 1 (curIdx - 2)
-            PredStatusSubverted resC -> resC < curIdx && resC >= max 1 (curIdx - 2)
-            PredStatusRetired _ -> False
-            PredStatusActive -> False
+        , Just rm <- [predStoryResolutionMeta pr]
+        , let resC = rmChunk rm
+        , resC < curIdx && resC >= max 1 (curIdx - 2)
         ]
       activeBlock =
         if null activePreds

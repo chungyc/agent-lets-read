@@ -171,14 +171,20 @@ Organizes items in story order by **Arc**, **Chapter**, and **Chunk**:
 ..., ~18–25 chunks aligned to chapter boundaries) to
 `<domain>/archive/chronology/L1_XXXX.md`. In `chunks/`, each `L1_XXXX.md` file
 also appends the historical `curated_XXXX.md` reader memory snapshot from the
-end of that arc. When completed arc links exceed 25 nodes or 12 KB,
-intermediate `L2_XXXX.md` directory files group the `L1` links.
+end of that arc; in `predictions/`, each `L1_XXXX.md` appends
+`## Earlier-Arc Predictions Resolved in This Arc` whenever predictions staked in
+earlier arcs were judged (`CONFIRMED`, `DEBUNKED`, or `SUBVERTED`) during that
+arc. When completed arc links exceed 25 nodes or 12 KB, intermediate
+`L2_XXXX.md` directory files group the `L1` links.
 
 #### Current & Recent Arc (Inline)
 
 `## Current & Recent Arc` lists every entry in the current unarchived arc inline
 by chapter (retaining at least the 5 most recent entries inline right after an
-arc boundary).
+arc boundary). In `predictions/by_chronology.md`, when predictions staked in an
+archived earlier arc are judged during the current arc window, they also appear
+inline under `## Earlier-Arc Predictions Resolved Here` grouped by resolution
+chapter.
 
 ### Semantic Topic Index Tree (`<domain>/by_topic.md`)
 
@@ -203,8 +209,9 @@ exceed 25 nodes or 12 KB) and listing the topics and entry counts in each shard.
 
 ##### `## Recently Updated Topics (Last 3 Turns Inline)`
 
-Shows entries from the last 3 chunks inline alongside a
-`*(+N earlier entries in [L1_XXXX.md](...))*` pointer to that topic's shard.
+Shows entries created—or, in `predictions/by_topic.md`, story-resolved by
+`prediction-judge`—within the last 3 chunks inline alongside a
+`*(+N other entries in [L1_XXXX.md](...))*` pointer to that topic's shard.
 
 #### High-Frequency Per-Topic Archives (`topic_XXXX_L1_YYYY.md`)
 

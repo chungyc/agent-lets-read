@@ -22,6 +22,7 @@ module LetsRead.Predictions
   , predShortStatusTag
   , renderSinglePredictionDoc
   , renderPredSummaryBullet
+  , renderPredCrossArcResolutionBullet
   , renderHallOfFameMarkdown
   , renderPredictionSlateSection
   , formatPredictionTrackerCallout
@@ -41,10 +42,13 @@ import LetsRead.Types
   , PredictionRecord (..)
   , PredictionStatus (..)
   , ResolutionKind (..)
+  , ResolutionMeta (..)
   , SessionState (..)
   , formatChapLabel
   , jsonInt
   , padChunkNumber
+  , predResolutionMeta
+  , predStoryResolutionMeta
   , stripAfterClosingBracket
   , stripToolReceiptComments
   , wrapMarkdownBullet
@@ -380,13 +384,13 @@ renderRecordActiveLine pr =
 renderRecordResolvedLine :: PredictionRecord -> Text
 renderRecordResolvedLine pr =
   let origC = prOriginChunk pr
-      noteTxt = fromMaybe (prRawBody pr) (prResolutionNote pr)
+      noteOrRaw rm = if T.null (T.strip (rmNote rm)) then prRawBody pr else rmNote rm
    in case prStatus pr of
         PredStatusActive -> renderRecordActiveLine pr
-        PredStatusConfirmed resC _ -> canonicalizeResolvedLine origC resC ResConfirmed noteTxt
-        PredStatusDebunked resC -> canonicalizeResolvedLine origC resC ResDebunked noteTxt
-        PredStatusSubverted resC -> canonicalizeResolvedLine origC resC ResSubverted noteTxt
-        PredStatusRetired resC -> canonicalizeResolvedLine origC resC ResRetired noteTxt
+        PredStatusConfirmed rm _ -> canonicalizeResolvedLine origC (rmChunk rm) ResConfirmed (noteOrRaw rm)
+        PredStatusDebunked rm -> canonicalizeResolvedLine origC (rmChunk rm) ResDebunked (noteOrRaw rm)
+        PredStatusSubverted rm -> canonicalizeResolvedLine origC (rmChunk rm) ResSubverted (noteOrRaw rm)
+        PredStatusRetired rm -> canonicalizeResolvedLine origC (rmChunk rm) ResRetired (noteOrRaw rm)
 
 renderOriginalPredictionSummary :: PredictionRecord -> Text
 renderOriginalPredictionSummary pr
@@ -626,7 +630,6 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
           , prRival = rival
           , prRawBody = bodyAfter
           , prStatus = PredStatusActive
-          , prResolutionNote = Nothing
           }
       toPredictionRecord _ =
         error "toPredictionRecord: expected PredValidActive"
@@ -774,11 +777,12 @@ extractJudgeSection raw =
 
 applyJudgeVerdicts
   :: Int
+  -> (Int, Text, Int, Int)
   -> [PredictionRecord]
   -> [(Int, Text)]
   -> Text
   -> ([PredictionRecord], [Text], [Text])
-applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
+applyJudgeVerdicts curIdx (chapNum, chapTitle, partNum, partsTotal) prevRecords pendingRetires rawJudgeTxt =
   let nextStr = T.pack (padChunkNumber (max 1 curIdx + 1))
       judgeBody = extractJudgeSection rawJudgeTxt
       parsedLines =
@@ -799,6 +803,21 @@ applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
         | k@(PredValidKeepActive {}) <- parsedLines
         ]
 
+      existingResKind :: PredictionStatus -> Maybe ResolutionKind
+      existingResKind stStatus =
+        case stStatus of
+          PredStatusActive -> Nothing
+          PredStatusConfirmed _ _ -> Just ResConfirmed
+          PredStatusDebunked _ -> Just ResDebunked
+          PredStatusSubverted _ -> Just ResSubverted
+          PredStatusRetired _ -> Just ResRetired
+
+      isUnchangedPriorEcho :: PredictionRecord -> ParsedPrediction -> Bool
+      isUnchangedPriorEcho targetPr r =
+        case (predResolutionMeta targetPr, existingResKind (prStatus targetPr)) of
+          (Just rmOld, Just oldKind) -> rmChunk rmOld < curIdx && oldKind == ppResKind r
+          _ -> False
+
       findJudgeTarget :: ParsedPrediction -> Maybe PredictionRecord
       findJudgeTarget (PredValidResolved origC _ _ _ _) =
         listToMaybe [pr | pr <- prevRecords, prOriginChunk pr == origC]
@@ -815,6 +834,7 @@ applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
           [ (prOriginChunk targetPr, r)
           | r <- resolvedVerdicts
           , Just targetPr <- [findJudgeTarget r]
+          , not (isUnchangedPriorEcho targetPr r)
           ]
 
       reopenedOrigins =
@@ -826,6 +846,17 @@ applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
         , prStatus pr /= PredStatusActive
         ]
 
+      mkResolutionMeta :: Text -> ResolutionMeta
+      mkResolutionMeta noteTxt =
+        ResolutionMeta
+          { rmChunk = curIdx
+          , rmChapterNumber = chapNum
+          , rmChapterTitle = chapTitle
+          , rmPartInChapter = partNum
+          , rmPartsInChapter = partsTotal
+          , rmNote = noteTxt
+          }
+
       applySingleJudgeVerdict :: PredictionRecord -> PredictionRecord
       applySingleJudgeVerdict pr =
         case [ r | (origC, r) <- matchedResolutions, origC == prOriginChunk pr ] of
@@ -835,16 +866,17 @@ applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
                   if T.null (T.strip (ppBodyAfterBracket r))
                     then prRawBody pr
                     else T.strip (ppBodyAfterBracket r)
+                rm = mkResolutionMeta noteTxt
                 newStatus =
                   case ppResKind r of
-                    ResConfirmed -> PredStatusConfirmed curIdx (curIdx <= origC)
-                    ResDebunked -> PredStatusDebunked curIdx
-                    ResSubverted -> PredStatusSubverted curIdx
-                    ResRetired -> PredStatusRetired curIdx
-             in pr {prStatus = newStatus, prResolutionNote = Just noteTxt}
+                    ResConfirmed -> PredStatusConfirmed rm (curIdx <= origC)
+                    ResDebunked -> PredStatusDebunked rm
+                    ResSubverted -> PredStatusSubverted rm
+                    ResRetired -> PredStatusRetired rm
+             in pr {prStatus = newStatus}
           []
             | prOriginChunk pr `elem` reopenedOrigins ->
-                pr {prStatus = PredStatusActive, prResolutionNote = Nothing}
+                pr {prStatus = PredStatusActive}
             | otherwise -> pr
 
       recordsAfterJudge = map applySingleJudgeVerdict prevRecords
@@ -872,7 +904,7 @@ applyJudgeVerdicts curIdx prevRecords pendingRetires rawJudgeTxt =
       applyConditionalRetire pr =
         case [ reason | (origC, reason, _) <- appliedRetires, origC == prOriginChunk pr ] of
           (reason : _) ->
-            pr {prStatus = PredStatusRetired curIdx, prResolutionNote = Just reason}
+            pr {prStatus = PredStatusRetired (mkResolutionMeta reason)}
           [] -> pr
 
       finalRecords = sortOn prOriginChunk (map applyConditionalRetire recordsAfterJudge)
@@ -980,13 +1012,14 @@ predStatusBadge :: PredictionRecord -> Text
 predStatusBadge pr =
   case prStatus pr of
     PredStatusActive -> "ACTIVE (Unresolved)"
-    PredStatusConfirmed resC isSameChunk
+    PredStatusConfirmed rm isSameChunk
       | isSameChunk ->
           "CONFIRMED in Chunk "
-            <> T.pack (padChunkNumber resC)
+            <> T.pack (padChunkNumber (rmChunk rm))
             <> " (Same-Chunk — No Foresight Credit)"
       | otherwise ->
-          let delta = resC - prOriginChunk pr
+          let resC = rmChunk rm
+              delta = resC - prOriginChunk pr
               unitTxt = if delta == 1 then " chunk" else " chunks"
            in "CONFIRMED in Chunk "
                 <> T.pack (padChunkNumber resC)
@@ -994,23 +1027,23 @@ predStatusBadge pr =
                 <> jsonInt delta
                 <> unitTxt
                 <> " foresight)"
-    PredStatusDebunked resC ->
-      "DEBUNKED in Chunk " <> T.pack (padChunkNumber resC)
-    PredStatusSubverted resC ->
-      "SUBVERTED in Chunk " <> T.pack (padChunkNumber resC)
-    PredStatusRetired resC ->
-      "RETIRED in Chunk " <> T.pack (padChunkNumber resC) <> " (10-Prediction Cap)"
+    PredStatusDebunked rm ->
+      "DEBUNKED in Chunk " <> T.pack (padChunkNumber (rmChunk rm))
+    PredStatusSubverted rm ->
+      "SUBVERTED in Chunk " <> T.pack (padChunkNumber (rmChunk rm))
+    PredStatusRetired rm ->
+      "RETIRED in Chunk " <> T.pack (padChunkNumber (rmChunk rm)) <> " (10-Prediction Cap)"
 
 predShortStatusTag :: PredictionRecord -> Text
 predShortStatusTag pr =
   case prStatus pr of
     PredStatusActive -> "ACTIVE"
-    PredStatusConfirmed resC isSameChunk
-      | isSameChunk -> "CONFIRMED Chk " <> T.pack (padChunkNumber resC) <> " (0 Chk)"
-      | otherwise -> "CONFIRMED Chk " <> T.pack (padChunkNumber resC) <> " (Hit)"
-    PredStatusDebunked resC -> "DEBUNKED Chk " <> T.pack (padChunkNumber resC)
-    PredStatusSubverted resC -> "SUBVERTED Chk " <> T.pack (padChunkNumber resC)
-    PredStatusRetired resC -> "RETIRED Chk " <> T.pack (padChunkNumber resC)
+    PredStatusConfirmed rm isSameChunk
+      | isSameChunk -> "CONFIRMED Chk " <> T.pack (padChunkNumber (rmChunk rm)) <> " (0 Chk)"
+      | otherwise -> "CONFIRMED Chk " <> T.pack (padChunkNumber (rmChunk rm)) <> " (Hit)"
+    PredStatusDebunked rm -> "DEBUNKED Chk " <> T.pack (padChunkNumber (rmChunk rm))
+    PredStatusSubverted rm -> "SUBVERTED Chk " <> T.pack (padChunkNumber (rmChunk rm))
+    PredStatusRetired rm -> "RETIRED Chk " <> T.pack (padChunkNumber (rmChunk rm))
 
 renderSinglePredictionDoc :: FilePath -> PredictionRecord -> Text
 renderSinglePredictionDoc sessionDir pr =
@@ -1026,31 +1059,30 @@ renderSinglePredictionDoc sessionDir pr =
           then "General Plot"
           else T.intercalate ", " (prTopics pr)
       resolutionSection =
-        let resolvedBlock resC =
-              let resPad = padChunkNumber resC
-                  resStoryPath = T.pack ("chunks" </> ("chunk_" ++ resPad ++ ".md"))
-                  resEntryPath = T.pack ("entries" </> ("chunk_" ++ resPad ++ ".md"))
-                  noteTxt = fromMaybe (prRawBody pr) (prResolutionNote pr)
-               in [ "## Resolution / Outcome"
-                  , ""
-                  , "- **Outcome**: " <> predStatusBadge pr
-                  , "- **Resolution Chunk Links**: [story]("
-                      <> resStoryPath
-                      <> ") | [entry]("
-                      <> resEntryPath
-                      <> ")"
-                  , "- **Explanation**: " <> noteTxt
-                  ]
-         in case prStatus pr of
-              PredStatusActive ->
-                [ "## Resolution / Outcome"
+        case predResolutionMeta pr of
+          Nothing ->
+            [ "## Resolution / Outcome"
+            , ""
+            , "- *Status*: Currently **ACTIVE** (unresolved)."
+            ]
+          Just rm ->
+            let resC = rmChunk rm
+                resPad = padChunkNumber resC
+                resChapStr = formatChapLabel (rmChapterNumber rm) (rmChapterTitle rm)
+                resPartStr = "Part " <> jsonInt (rmPartInChapter rm) <> "/" <> jsonInt (rmPartsInChapter rm)
+                resStoryPath = T.pack ("chunks" </> ("chunk_" ++ resPad ++ ".md"))
+                resEntryPath = T.pack ("entries" </> ("chunk_" ++ resPad ++ ".md"))
+                noteTxt = if T.null (T.strip (rmNote rm)) then prRawBody pr else rmNote rm
+             in [ "## Resolution / Outcome"
                 , ""
-                , "- *Status*: Currently **ACTIVE** (unresolved)."
+                , "- **Outcome**: " <> predStatusBadge pr <> " (" <> resChapStr <> ", " <> resPartStr <> ")"
+                , "- **Resolution Chunk Links**: [story]("
+                    <> resStoryPath
+                    <> ") | [entry]("
+                    <> resEntryPath
+                    <> ")"
+                , "- **Explanation**: " <> noteTxt
                 ]
-              PredStatusConfirmed c _ -> resolvedBlock c
-              PredStatusDebunked c -> resolvedBlock c
-              PredStatusSubverted c -> resolvedBlock c
-              PredStatusRetired c -> resolvedBlock c
    in T.unlines $
         [ "# Prediction " <> origStr <> " (" <> chapStr <> ")"
         , ""
@@ -1095,8 +1127,8 @@ renderPredSummaryBullet pr =
           then "**Theory**: " <> prTheory pr
           else prRawBody pr
       resSuffix =
-        case prResolutionNote pr of
-          Just n | prStatus pr /= PredStatusActive -> " -> *Outcome*: " <> n
+        case predResolutionMeta pr of
+          Just rm | not (T.null (T.strip (rmNote rm))) -> " -> *Outcome*: " <> rmNote rm
           _ -> ""
    in wrapMarkdownBullet
         78
@@ -1120,6 +1152,61 @@ renderPredSummaryBullet pr =
             <> "))"
         )
 
+renderPredCrossArcResolutionBullet :: PredictionRecord -> Text
+renderPredCrossArcResolutionBullet pr =
+  let origPad = padChunkNumber (prOriginChunk pr)
+      origStr = T.pack origPad
+      predFile = T.pack ("predictions" </> ("pred_" ++ origPad ++ ".md"))
+      origStoryPath = T.pack ("chunks" </> ("chunk_" ++ origPad ++ ".md"))
+      origChapStr = formatChapLabel (prChapterNumber pr) (prChapterTitle pr)
+      topicsStr =
+        if null (prTopics pr)
+          then ""
+          else " | *Topics*: " <> T.intercalate ", " (prTopics pr)
+      coreTheory =
+        if not (T.null (prTheory pr))
+          then "**Theory**: " <> prTheory pr
+          else prRawBody pr
+      (resLinksSuffix, resNoteSuffix) =
+        case predResolutionMeta pr of
+          Nothing ->
+            (" ([origin](" <> origStoryPath <> "))", "")
+          Just rm ->
+            let resPad = padChunkNumber (rmChunk rm)
+                resStoryPath = T.pack ("chunks" </> ("chunk_" ++ resPad ++ ".md"))
+                resEntryPath = T.pack ("entries" </> ("chunk_" ++ resPad ++ ".md"))
+                notePart =
+                  if T.null (T.strip (rmNote rm))
+                    then ""
+                    else " -> *Outcome*: " <> rmNote rm
+             in ( " ([origin]("
+                    <> origStoryPath
+                    <> ") | [resolution]("
+                    <> resStoryPath
+                    <> ") | [entry]("
+                    <> resEntryPath
+                    <> "))"
+                , notePart
+                )
+   in wrapMarkdownBullet
+        78
+        ( "- **[pred_"
+            <> origStr
+            <> "]("
+            <> predFile
+            <> ")** (**"
+            <> predShortStatusTag pr
+            <> "** | Staked: "
+            <> origChapStr
+            <> ", Chunk "
+            <> origStr
+            <> topicsStr
+            <> "): "
+            <> coreTheory
+            <> resNoteSuffix
+            <> resLinksSuffix
+        )
+
 renderHallOfFameMarkdown :: FilePath -> SessionState -> Text
 renderHallOfFameMarkdown sessionDir st =
   let preds = stPredictions st
@@ -1127,7 +1214,7 @@ renderHallOfFameMarkdown sessionDir st =
         sortOn
           ( \pr ->
               case prStatus pr of
-                PredStatusConfirmed resC _ -> Down (resC - prOriginChunk pr)
+                PredStatusConfirmed rm _ -> Down (rmChunk rm - prOriginChunk pr)
                 _ -> Down 0
           )
           [ pr
@@ -1342,11 +1429,8 @@ renderPredictionSlateSection st =
       recentResolved =
         [ pr
         | pr <- preds
-        , case prStatus pr of
-            PredStatusConfirmed resC _ -> resC >= max 1 (curIdx - 1)
-            PredStatusDebunked resC -> resC >= max 1 (curIdx - 1)
-            PredStatusSubverted resC -> resC >= max 1 (curIdx - 1)
-            _ -> False
+        , Just rm <- [predStoryResolutionMeta pr]
+        , rmChunk rm >= max 1 (curIdx - 1)
         ]
       chronPath = T.pack ("predictions" </> "by_chronology.md")
       topicPath = T.pack ("predictions" </> "by_topic.md")
