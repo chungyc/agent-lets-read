@@ -55,6 +55,7 @@ import LetsRead.Types
   , jsonInt
   , padChunkNumber
   , predActiveScreeningNote
+  , predResolutionMeta
   , predStoryResolutionMeta
   , readTextFileSafe
   , resolveSkillResourcePath
@@ -285,12 +286,14 @@ renderTurnPredictionSection isDraftTurn includeSyntaxWarnings curIdx totalChunks
           ((pr, sNote, statusArrow) : _) ->
             let topLine = wrapMarkdownBullet 78 ("- **[Predicted Chunk " <> prevPad <> statusArrow <> "]** " <> sNote)
                 origLine = wrapMarkdownBullet 78 ("  - Previous prediction — " <> renderOriginalPredictionSummary pr)
+                introNote =
+                  if statusArrow == " -> RETIRED (10-Cap)"
+                    then "Your previous prediction was retired at the 10-prediction cap. Apply this calibration silently when staking your new prediction on this turn—never mention screening flags in commentary:"
+                    else "Your previous prediction was not added to the active predictions ledger. Apply this calibration silently when staking your new prediction on this turn—never mention screening flags or rejected predictions in commentary:"
              in [ ""
                 , "### Prediction Quality Note from Chunk " <> jsonInt prevIdx
                 , ""
-                , wrapMarkdownParagraph
-                    78
-                    "Your previous prediction was not added to the active predictions ledger. Apply this calibration silently when staking your new prediction on this turn—never mention screening flags or rejected predictions in commentary:"
+                , wrapMarkdownParagraph 78 introNote
                 , ""
                 , topLine <> "\n" <> origLine
                 ]
@@ -998,18 +1001,28 @@ writeCurrentJudgePromptFile sessionDir st = do
              in T.intercalate sep (map renderOne activePreds)
       priorNonActive =
         let ledgerClosed =
-              [ (prOriginChunk pr, predShortStatusTag pr, if T.null (prTheory pr) then prRawBody pr else prTheory pr)
+              [ ( maybe (prOriginChunk pr) rmChunk (predResolutionMeta pr)
+                , prOriginChunk pr
+                , predShortStatusTag pr
+                , if T.null (prTheory pr) then prRawBody pr else prTheory pr
+                )
               | pr <- preds
               , not (isPredActive pr)
               , prOriginChunk pr < curIdx
               ]
             priorRejected =
-              [ (prOriginChunk pr, "NOT ADDED", if T.null (prTheory pr) then prRawBody pr else prTheory pr)
+              [ ( prOriginChunk pr
+                , prOriginChunk pr
+                , "NOT ADDED"
+                , if T.null (prTheory pr) then prRawBody pr else prTheory pr
+                )
               | (pr, _) <- stRejectedPredictions st
               , prOriginChunk pr < curIdx
               ]
-            combined = sortOn (\(o, _, _) -> o) (ledgerClosed ++ priorRejected)
-         in drop (max 0 (length combined - 12)) combined
+            combined = sortOn (\(closedIdx, origIdx, _, _) -> (closedIdx, origIdx)) (ledgerClosed ++ priorRejected)
+         in [ (origIdx, tagTxt, theoryTxt)
+            | (_, origIdx, tagTxt, theoryTxt) <- drop (max 0 (length combined - 12)) combined
+            ]
       priorThesesSection =
         if null priorNonActive
           then []
@@ -1405,8 +1418,9 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
       discRespPath = absSession </> "current_discussion_response.md"
       questionsContent = T.intercalate "\n\n" (map (wrapMarkdownBullet 78) peerQueries) <> "\n"
       peerBlock = T.intercalate "\n\n" (map (wrapMarkdownBullet 78) peerQueries)
+      mCurAcceptedPred = listToMaybe [pr | pr <- stPredictions st, prOriginChunk pr == curIdx]
       curPredSection =
-        case listToMaybe [pr | pr <- stPredictions st, prOriginChunk pr == curIdx] of
+        case mCurAcceptedPred of
           Nothing -> []
           Just pr ->
             [ ""
@@ -1414,6 +1428,14 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
             , ""
             , wrapMarkdownBullet 78 (renderRecordActiveLine pr)
             ]
+      fcPlusClause =
+        case mCurAcceptedPred of
+          Just _ ->
+            "(plus `=== UPDATED MEMORY ===` and/or `=== PREDICTION UPDATES ===` for `[Predicted Chunk "
+              <> curPad
+              <> "]` if any records need correction)"
+          Nothing ->
+            "(plus `=== UPDATED MEMORY ===` if any memory notes need correction)"
       discPromptText =
         T.unlines $
           [ "# Fact-Check Peer Discussion Prompt — Chunk " <> jsonInt curIdx <> " of " <> jsonInt totalChunks
@@ -1454,9 +1476,9 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
                , ""
                , wrapMarkdownBullet
                    78
-                   ( "2. Write line 1 as `<!-- TOOLS: read_file(...) -->` (adding `, search_web` only if invoked) followed by your in-character reply under `=== COMMENTARY ===` (conceding if your check confirms a misread, or holding your ground with primary-source quotes if your original reading/joke/baseline was right) and `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary, <= 250 chars>` (plus `=== UPDATED MEMORY ===` and/or `=== PREDICTION UPDATES ===` for `[Predicted Chunk "
-                       <> curPad
-                       <> "]` if any records need correction) to `"
+                   ( "2. Write line 1 as `<!-- TOOLS: read_file(...) -->` (adding `, search_web` only if invoked) followed by your in-character reply under `=== COMMENTARY ===` (conceding if your check confirms a misread, or holding your ground with primary-source quotes if your original reading/joke/baseline was right) and `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary, <= 250 chars>` "
+                       <> fcPlusClause
+                       <> " to `"
                        <> T.pack discRespPath
                        <> "` via `write_file` (`Overwrite: true`)."
                    )
@@ -1480,17 +1502,27 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
       discPromptPath = sessionDir </> "current_discussion_prompt.md"
       discRespPath = absSession </> "current_discussion_response.md"
       isPostWrapup = curIdx >= totalChunks && stCurrentRecorded st && stCurrentJudged st
-      curPredSection =
+      mUserCurPred =
         if isPostWrapup
-          then []
-          else case listToMaybe [pr | pr <- stPredictions st, prOriginChunk pr == curIdx] of
-            Nothing -> []
-            Just pr ->
-              [ ""
-              , "## Prediction Logged on Chunk " <> curPad
-              , ""
-              , wrapMarkdownBullet 78 (renderRecordActiveLine pr)
-              ]
+          then Nothing
+          else listToMaybe [pr | pr <- stPredictions st, prOriginChunk pr == curIdx]
+      curPredSection =
+        case mUserCurPred of
+          Nothing -> []
+          Just pr ->
+            [ ""
+            , "## Prediction Logged on Chunk " <> curPad
+            , ""
+            , wrapMarkdownBullet 78 (renderRecordActiveLine pr)
+            ]
+      userPlusClause =
+        case mUserCurPred of
+          Just _ ->
+            "(plus `=== UPDATED MEMORY ===` and/or `=== PREDICTION UPDATES ===` if the exchange updates a factual/timeline correction, craft/style directive, running gag, character status, or Chunk "
+              <> curPad
+              <> "'s prediction)"
+          Nothing ->
+            "(plus `=== UPDATED MEMORY ===` if the exchange updates a factual/timeline correction, craft/style directive, running gag, or character status)"
       discPromptText =
         T.unlines $
           [ "# User Discussion Prompt — Chunk " <> jsonInt curIdx <> " of " <> jsonInt totalChunks
@@ -1531,9 +1563,9 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
                , ""
                , wrapMarkdownBullet
                    78
-                   ( "2. Write line 1 as `<!-- TOOLS: read_file(...) -->` (or `<!-- TOOLS: none -->` if no verification tool beyond reading this prompt was needed) followed by `=== COMMENTARY ===` (your full in-character reply) and `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of the discussion exchange, <= 250 chars>` (plus `=== UPDATED MEMORY ===` and/or `=== PREDICTION UPDATES ===` if the exchange updates a factual/timeline correction, craft/style directive, running gag, character status, or Chunk "
-                       <> curPad
-                       <> "'s prediction) to `"
+                   ( "2. Write line 1 as `<!-- TOOLS: read_file(...) -->` (or `<!-- TOOLS: none -->` if no verification tool beyond reading this prompt was needed) followed by `=== COMMENTARY ===` (your full in-character reply) and `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of the discussion exchange, <= 250 chars>` "
+                       <> userPlusClause
+                       <> " to `"
                        <> T.pack discRespPath
                        <> "` via `write_file` (`Overwrite: true`)."
                    )

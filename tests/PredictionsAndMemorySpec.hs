@@ -14,6 +14,7 @@ import qualified Data.ByteString as BS
 import Data.List (isPrefixOf, isSuffixOf)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import LetsRead.Command.Discuss (DiscussOptions (..), cmdDiscuss)
 import LetsRead.Command.Judge (JudgeOptions (..), cmdJudge)
 import LetsRead.Index
   ( IndexSpec (..)
@@ -66,6 +67,7 @@ import LetsRead.Types
   , StoryChunkRecord (..)
   , chunkToMeta
   , loadState
+  , ledgerPredictions
   , predActiveScreeningNote
   , saveState
   , stripAfterClosingBracket
@@ -1224,3 +1226,124 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
     0
     (length auditWarns5)
   assertEq "Records new Chunk 5 prediction cleanly alongside existing bets" 3 (length recs5)
+
+  -- Regression checks for review findings #1, #2, #3, and #4
+  let (_, rejsNotAdmitted, _, _) =
+        applyJudgeVerdictsWithFeedback
+          2
+          (2, "Chapter 2: Harbor", 1, 1)
+          [bet2]
+          []
+          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0002 -> NOT ADMITTED]** [UNINTERESTING] Paraphrased rejection tag.\n"
+      (_, rejsNotActive, _, _) =
+        applyJudgeVerdictsWithFeedback
+          2
+          (2, "Chapter 2: Harbor", 1, 1)
+          [bet2]
+          []
+          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0002 -> NOT ACTIVE]** Plain rejection without bracket flag.\n"
+      (_, rejsNoArrowFlagged, _, _) =
+        applyJudgeVerdictsWithFeedback
+          2
+          (2, "Chapter 2: Harbor", 1, 1)
+          [bet2]
+          []
+          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0002]** [HEDGED] Menu bet across three distinct suspects.\n"
+  assertEq "-> NOT ADMITTED parses as rejected (not fail-open ACTIVE)" 1 (length rejsNotAdmitted)
+  assertEq "-> NOT ACTIVE without bracket flag parses as rejected with normalized flag" 1 (length rejsNotActive)
+  assertEq "Arrowless bullet starting with [HEDGED] parses as rejected" 1 (length rejsNoArrowFlagged)
+
+  -- Finding #3: priorNonActive sorts by closure chunk so a Ch. 1 bet retired on Chunk 19 stays visible on Chunk 20
+  let earlyBetRetiredLate =
+        (mkBet 1 1 ["Harbor"] "Early Chapter 1 conspiracy thesis retired on Chunk 19")
+          { prStatus = PredStatusRetired (ResolutionMeta 19 10 "Chap 10" 1 1 "Retired on Chunk 19.")
+          }
+      manyMidRejects =
+        [ (mkBet idx idx ["Harbor"] ("Rejected mid-story bet " <> T.pack (show idx)), "[UNINTERESTING] Routine.")
+        | idx <- [2 .. 15]
+        ]
+      stManyClosed =
+        (baseDummyState 25)
+          { stCurrentIndex = 20
+          , stPredictions = [earlyBetRetiredLate]
+          , stRejectedPredictions = manyMidRejects
+          }
+  jpManyPath <- writeCurrentJudgePromptFile tmp stManyClosed
+  jpManyNorm <- normWs <$> TIO.readFile jpManyPath
+  assertBool
+    "Prior Non-Active Theses retains Chunk 0001 retired on Chunk 19 ahead of older rejections"
+    ("Chunk 0001 (RETIRED Chk 0019): Early Chapter 1 conspiracy thesis retired on Chunk 19" `T.isInfixOf` jpManyNorm)
+
+  -- Finding #4: ledgerPredictions hides unjudged current-chunk proposal until judged
+  let stUnjudged =
+        (baseDummyState 10)
+          { stCurrentIndex = 2
+          , stCurrentRecorded = True
+          , stCurrentJudged = False
+          , stPredictions = [bet1, bet2]
+          }
+  assertEq "ledgerPredictions excludes unjudged Chunk 2 proposal" [1] (map prOriginChunk (ledgerPredictions stUnjudged))
+
+  -- Finding #2: cmdJudge with NOT ADDED + fact-check dispute omits Prediction Logged section, and cmdDiscuss suppresses phantom tracker callout
+  withTempDir "cmd-judge-discuss-rejected" $ \discTmp -> do
+    createDirectoryIfMissing True (discTmp </> "entries")
+    createDirectoryIfMissing True (discTmp </> "chunks")
+    TIO.writeFile (discTmp </> "current_chunk.md") "Lin walked along North Pier.\n"
+    TIO.writeFile (discTmp </> "chunks" </> "chunk_0002.md") "Lin walked along North Pier.\n"
+    TIO.writeFile (discTmp </> "entries" </> "chunk_0002.md") "## Chunk 2/10\n\nCommentary.\n\n---\n\n"
+    saveState
+      discTmp
+      ( (baseDummyState 10)
+          { stCurrentIndex = 2
+          , stCurrentRecorded = True
+          , stCurrentJudged = False
+          , stCurrentMeta = Just (chunkToMeta (dummyChunk 2 2 1 1))
+          , stPredictions = [bet1, bet2]
+          }
+      )
+    TIO.writeFile
+      (discTmp </> "current_judge_response.md")
+      "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0001 -> ACTIVE]** Still open.\n- **[Predicted Chunk 0002 -> NOT ADDED]** [UNINTERESTING] Routine dock walk.\n"
+    TIO.writeFile
+      (discTmp </> "current_fact_check_response.md")
+      ( T.unlines
+          [ "<!-- TOOLS: read_file(current_chunk.md, entries/chunk_0002.md, memory.md) -->"
+          , "=== VERIFIED CLAIMS LOG ==="
+          , "- [DISPUTED | Source: current_chunk.md] Check pier name."
+          , ""
+          , "=== DISPUTED FACTS & MEMORY CHECKS ==="
+          , "- **[In-Story Fact | Source: current_chunk.md | Quote: \"Lin walked along North Pier.\"]** Was it North Pier or South Pier?"
+          ]
+      )
+    TIO.writeFile
+      (discTmp </> "current_critic_response.md")
+      "=== PERSONA & STYLE CRITIQUE ===\n- **[Persona & Lens]** Good.\n- **[What Worked Well]** Good.\n- **[Where the Voice Drifted or Felt Formulaic]** None.\n"
+    cmdJudge (JudgeOptions discTmp Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing)
+    fcPromptAfterRej <- TIO.readFile (discTmp </> "current_discussion_prompt.md")
+    assertBool
+      "Fact-check discussion prompt after NOT ADDED omits ## Prediction Logged on Chunk 0002 and === PREDICTION UPDATES ==="
+      ( not ("## Prediction Logged on Chunk 0002" `T.isInfixOf` fcPromptAfterRej)
+          && not ("=== PREDICTION UPDATES ===" `T.isInfixOf` fcPromptAfterRej)
+      )
+    TIO.writeFile
+      (discTmp </> "current_discussion_response.md")
+      ( T.unlines
+          [ "<!-- TOOLS: read_file(current_discussion_prompt.md, current_chunk.md) -->"
+          , "=== COMMENTARY ==="
+          , "Right, it was North Pier!"
+          , ""
+          , "=== CHUNK SUMMARY ==="
+          , "- **[Discussion | Topics: Harbor]** Confirmed North Pier."
+          , ""
+          , "=== PREDICTION UPDATES ==="
+          , "- **[Predicted Chunk 0002 | Topics: Inspector Lin, Harbor]** **Clue/Anomaly**: North Pier walk -> **Theory**: Lin arrives after breakfast (vs. **Plausible Rival**: Routine patrol)"
+          ]
+      )
+    cmdDiscuss (DiscussOptions discTmp Nothing Nothing Nothing Nothing Nothing Nothing)
+    stAfterRejDisc <- loadState discTmp
+    entry2AfterDisc <- TIO.readFile (discTmp </> "entries" </> "chunk_0002.md")
+    assertBool
+      "cmdDiscuss keeps NOT ADDED Chunk 0002 out of stPredictions and suppresses phantom Prediction Tracker Update callout"
+      ( all (\p -> prOriginChunk p /= 2) (stPredictions stAfterRejDisc)
+          && not ("Prediction Tracker Update" `T.isInfixOf` entry2AfterDisc)
+      )

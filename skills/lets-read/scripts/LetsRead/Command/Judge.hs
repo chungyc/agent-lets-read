@@ -169,9 +169,6 @@ cmdJudge opts = do
               else pure Nothing
       else pure Nothing
 
-  (criticFeedbackWritten, criticNotesCount, factCheckPending, factQueriesCount, rejectedCriticQuotesCount, factCheckAuditWarningsCount) <-
-    processCriticFeedbackWithAudit sessionDir st curIdx factAudit (stPendingLinterWarnings st) (Just rawFactCheck) (Just rawCritic)
-
   let restoredFromRej =
         [ pr {prStatus = PredStatusActive Nothing}
         | (pr, _) <- stRejectedPredictions st
@@ -190,8 +187,22 @@ cmdJudge opts = do
         sortOn
           (prOriginChunk . fst)
           ([ (pr, n) | (pr, n) <- stRejectedPredictions st, prOriginChunk pr /= curIdx ] ++ newRejs)
+      combinedAuditBlocks = stPredictionAuditWarnings st ++ judgeAuditBlocks
+      stPreTopics =
+        st
+          { stCurrentJudged = True
+          , stPredictions = preds'
+          , stRejectedPredictions = rejected'
+          , stPendingRetirements = []
+          , stPendingLinterWarnings = []
+          , stLastJudgeSummary = judgeSummaryLines
+          , stPredictionAuditWarnings = combinedAuditBlocks
+          }
       entriesDir = sessionDir </> "entries"
       entryFile = entriesDir </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")
+
+  (criticFeedbackWritten, criticNotesCount, factCheckPending, factQueriesCount, rejectedCriticQuotesCount, factCheckAuditWarningsCount) <-
+    processCriticFeedbackWithAudit sessionDir stPreTopics curIdx factAudit (stPendingLinterWarnings st) (Just rawFactCheck) (Just rawCritic)
 
   entryExists <- doesFileExist entryFile
   unless entryExists $
@@ -204,18 +215,7 @@ cmdJudge opts = do
       updatedEntry = baseEntry <> judgeCallout <> judgeAuditCallout <> "\n\n---\n\n"
   TIO.writeFile entryFile updatedEntry
 
-  let combinedAuditBlocks = stPredictionAuditWarnings st ++ judgeAuditBlocks
-      stPreTopics =
-        st
-          { stCurrentJudged = True
-          , stPredictions = preds'
-          , stRejectedPredictions = rejected'
-          , stPendingRetirements = []
-          , stPendingLinterWarnings = []
-          , stLastJudgeSummary = judgeSummaryLines
-          , stPredictionAuditWarnings = combinedAuditBlocks
-          }
-      (st', topicMergesApplied) =
+  let (st', topicMergesApplied) =
         case mRawTopic of
           Just rawT -> applyTopicCuratorResponse rawT stPreTopics
           Nothing -> (applyTopicAliases stPreTopics, 0)

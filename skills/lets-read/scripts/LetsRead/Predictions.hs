@@ -357,19 +357,34 @@ parsePredictionLine rawLine =
                           PredInvalidNotation l afterBracket
                 else
                   let hasArrow = "->" `T.isInfixOf` inside || "→" `T.isInfixOf` inside
+                      bodyFlagged = startsWithScreeningFlag afterBracket
                       isRejected =
-                        hasArrow
-                          && any
-                            (`T.isInfixOf` inside)
-                            [ "not added"
-                            , "not-added"
-                            , "reject"
-                            , "screened"
-                            , "skip"
-                            , "drop"
-                            , "disqualif"
-                            , "feedback"
-                            ]
+                        bodyFlagged
+                          || ( hasArrow
+                                 && any
+                                   (`T.isInfixOf` inside)
+                                   [ "not added"
+                                   , "not-added"
+                                   , "not admitted"
+                                   , "not-admitted"
+                                   , "unadmitted"
+                                   , "not active"
+                                   , "not-active"
+                                   , "inactive"
+                                   , "not accepted"
+                                   , "unaccepted"
+                                   , "reject"
+                                   , "screened"
+                                   , "skip"
+                                   , "drop"
+                                   , "disqualif"
+                                   , "feedback"
+                                   , "exclud"
+                                   , "declin"
+                                   , "deni"
+                                   , "filter"
+                                   ]
+                             )
                       isKeepActive =
                         hasArrow
                           && not isRejected
@@ -949,7 +964,7 @@ applyJudgeVerdictsWithFeedback curIdx (chapNum, chapTitle, partNum, partsTotal) 
                         updatedNote =
                           case mIncoming of
                             Just note
-                              | origC == curIdx || startsWithScreeningFlag note -> Just note
+                              | origC == curIdx -> Just note
                             _ -> mExisting
                      in pr {prStatus = PredStatusActive updatedNote}
                   _ -> pr

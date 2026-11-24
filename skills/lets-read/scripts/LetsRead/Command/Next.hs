@@ -33,6 +33,7 @@ import LetsRead.Types
   , jsonInt
   , jsonObject
   , jsonStr
+  , ledgerPredictions
   , loadState
   , loadVaultChunk
   , orchestratorRuleText
@@ -160,8 +161,9 @@ cmdNext rawSessionDir forceFlag = do
       hasWrapup <- doesFileExist wrapupPath
       if not hasWrapup || forceFlag
         then do
-          scriptPromptFile <- writeWrapupScriptPromptFile sessionDir st
-          saveState sessionDir st
+          let stClean = st {stPredictions = ledgerPredictions st}
+          scriptPromptFile <- writeWrapupScriptPromptFile sessionDir stClean
+          saveState sessionDir stClean
           TIO.putStrLn $
             jsonObject
               [ ("status", jsonStr "awaiting_script")
@@ -191,7 +193,8 @@ cmdNext rawSessionDir forceFlag = do
               ]
     else do
       let nextIdx = curIdx + 1
-          activeCount = countActivePredictions (stPredictions st)
+          cleanPreds = ledgerPredictions st
+          activeCount = countActivePredictions cleanPreds
       chunk <- loadVaultChunk (sessionDir </> ".vault.bin") nextIdx
       let chunkFile = sessionDir </> "current_chunk.md"
           chunksDir = sessionDir </> "chunks"
@@ -199,7 +202,7 @@ cmdNext rawSessionDir forceFlag = do
       createDirectoryIfMissing True chunksDir
       writeCurrentChunkFile chunkFile chunk totalChunks (stTotalChapters st)
       writeCurrentChunkFile archiveChunkFile chunk totalChunks (stTotalChapters st)
-      scriptPromptFile <- writeCurrentScriptPromptFile sessionDir st chunk
+      scriptPromptFile <- writeCurrentScriptPromptFile sessionDir (st {stPredictions = cleanPreds}) chunk
 
       let meta = chunkToMeta chunk
           st' =
@@ -208,6 +211,7 @@ cmdNext rawSessionDir forceFlag = do
               , stCurrentRecorded = False
               , stCurrentJudged = False
               , stCurrentMeta = Just meta
+              , stPredictions = cleanPreds
               , stPendingRetirements = []
               , stPendingLinterWarnings = []
               }

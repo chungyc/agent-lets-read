@@ -197,7 +197,7 @@ cmdDiscuss opts = do
   unless entryExists $
     die ("Error: Recorded entry file not found: " ++ entryFile)
 
-  let (curated', rawPreds', _, auditBlocks, trackerUpdates) =
+  let (curated', rawPreds', _, auditBlocks, rawTrackerUpdates) =
         resolveAndAuditTurn
           curIdx
           (stTotalChunks st)
@@ -220,6 +220,10 @@ cmdDiscuss opts = do
         if curWasRejected
           then [pr | pr <- rawPreds', prOriginChunk pr /= curIdx]
           else rawPreds'
+      trackerUpdates =
+        if curWasRejected
+          then []
+          else rawTrackerUpdates
       rejected' =
         if curWasRejected
           then
@@ -309,6 +313,7 @@ cmdDiscuss opts = do
           || (parsedSummaries /= emptyParsedChunkSummaries)
           || (curated' /= stCuratedMemory st)
           || (preds' /= stPredictions st)
+          || (rejected' /= stRejectedPredictions st)
           || (storyRecords' /= stStoryRecords st)
           || (entryRecords' /= stEntryRecords st)
           || (auditBlocks /= stPredictionAuditWarnings st)
