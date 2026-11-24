@@ -3,6 +3,7 @@
 module VerificationSpec
   ( testRec2SandboxToolTelemetry
   , testRec3CallbackAndFactCheckAudits
+  , testRec10HiddenScriptAndResearchVerification
   ) where
 
 import qualified Data.Text as T
@@ -13,6 +14,9 @@ import LetsRead.Prompts
   ( writeCurrentChunkFile
   , writeCurrentFactCheckPromptFile
   , writeCurrentPromptFile
+  , writeCurrentResearchPromptFile
+  , writeCurrentScriptPromptFile
+  , writeWrapupScriptPromptFile
   )
 import LetsRead.Types
   ( SessionState (..)
@@ -23,12 +27,17 @@ import LetsRead.Verification
   ( SubagentToolAudit (..)
   , auditFactCheckerClaims
   , auditReaderToolUsage
+  , auditReaderToolUsageWithResearch
   , checkSubagentLogUsedSearchWeb
   , checkSubagentLogUsedVerificationTools
   , extractSubagentLogResponse
+  , extractVerifiedResearchChunkRefs
+  , parseResearchNotesSection
   , parseToolReceiptTag
+  , renderCurrentResearchMarkdown
   , resolveSubagentToolAudit
   , verifyAndFilterCriticFactBullets
+  , verifyAndFilterResearchBullets
   )
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
@@ -154,7 +163,7 @@ testRec3CallbackAndFactCheckAudits = withTempDir "rec3-callbacks" $ \tmp -> do
       stRot = (baseDummyState 12) {stCurrentIndex = 7, stStoryRecords = priorRecs}
       chk7 = dummyChunk 7 7 1 1
   assertBool "Chunk 7 triggers computeShouldRotate" (computeShouldRotate priorRecs chk7)
-  promptPath <- writeCurrentPromptFile tmp stRot chk7 3
+  promptPath <- writeCurrentPromptFile tmp stRot chk7
   promptTxt <- TIO.readFile promptPath
   let promptNorm = normWs promptTxt
   assertBool
@@ -200,7 +209,7 @@ testRec3CallbackAndFactCheckAudits = withTempDir "rec3-callbacks" $ \tmp -> do
   assertEq "entries/chunk_0005.md is not miscounted as story chunk read" 1 cbCnt2
   assertEq "Zero warnings when chunk_0006.md was read" 0 (length warns2)
 
-  writeCurrentChunkFile (tmp </> "current_chunk.md") chk7 12 12 3
+  writeCurrentChunkFile (tmp </> "current_chunk.md") chk7 12 12
   let fcAuditNoPrior =
         SubagentToolAudit
           { staSource = "response_header"
@@ -233,3 +242,145 @@ testRec3CallbackAndFactCheckAudits = withTempDir "rec3-callbacks" $ \tmp -> do
       False
       ["- **[External Canon | Source: search_web(\"harbor lore\") | Work: Harbor Tales]** Uninvoked search."]
   assertEq "Rejects External Canon dispute when search_web was not invoked" 1 rejCnt
+
+testRec10HiddenScriptAndResearchVerification :: IO ()
+testRec10HiddenScriptAndResearchVerification = withTempDir "rec10-research" $ \tmp -> do
+  putStrLn "== Rec #10: Hidden-Script Prompts, Research Receipt Filtering & Quarantine Guardrails =="
+  let st1 = (baseDummyState 6) {stCurrentIndex = 1}
+      chk1 = dummyChunk 1 1 1 1
+  sp1Path <- writeCurrentScriptPromptFile tmp st1 chk1
+  sp1Txt <- TIO.readFile sp1Path
+  assertBool
+    "Chunk 1 script prompt omits prior chunk_0000.md and by_chronology.md"
+    (not ("chunk_0000.md" `T.isInfixOf` sp1Txt) && not ("by_chronology.md" `T.isInfixOf` sp1Txt))
+
+  let st3 = (baseDummyState 6) {stCurrentIndex = 3}
+      chk3 = dummyChunk 3 2 1 2
+  sp3Path <- writeCurrentScriptPromptFile tmp st3 chk3
+  sp3Txt <- TIO.readFile sp3Path
+  assertBool
+    "Chunk 3 script prompt includes chunks/chunk_0002.md, chunks/by_chronology.md, and entries/by_chronology.md"
+    ( "chunk_0002.md" `T.isInfixOf` sp3Txt
+        && "chunks/by_chronology.md" `T.isInfixOf` sp3Txt
+        && "entries/by_chronology.md" `T.isInfixOf` sp3Txt
+    )
+
+  wspPath <- writeWrapupScriptPromptFile tmp ((baseDummyState 6) {stCurrentIndex = 6, stCurrentRecorded = True, stCurrentJudged = True})
+  wspTxt <- TIO.readFile wspPath
+  assertBool
+    "Wrapup script prompt includes hall_of_fame.md and both by_chronology.md indexes"
+    ( "hall_of_fame.md" `T.isInfixOf` wspTxt
+        && "chunks/by_chronology.md" `T.isInfixOf` wspTxt
+        && "entries/by_chronology.md" `T.isInfixOf` wspTxt
+    )
+
+  rpPath <- writeCurrentResearchPromptFile tmp st3 False "=== DRAFT COMMENTARY ===\nWait, didn't Mara drop the brass key at Pier 2?"
+  rpTxt <- TIO.readFile rpPath
+  assertBool
+    "Research prompt embeds stripped draft and enforces quarantine silence"
+    ("Mara drop the brass key" `T.isInfixOf` rpTxt && "completely blind to this draft" `T.isInfixOf` normWs rpTxt)
+  assertBool
+    "Research prompt states explicit story text takes precedence over external sources and canon"
+    ("takes precedence over external sources and canon" `T.isInfixOf` normWs rpTxt)
+
+  createDirectoryIfMissing True (tmp </> "chunks")
+  createDirectoryIfMissing True (tmp </> "entries")
+  createDirectoryIfMissing True (tmp </> "predictions")
+  createDirectoryIfMissing True (tmp </> "archive" </> "memory")
+  TIO.writeFile (tmp </> "chunks" </> "chunk_0001.md") "Inspector Lin found the silver whistle beside Pier 2."
+  TIO.writeFile (tmp </> "chunks" </> "chunk_0004.md") "Future spoiler chunk that must never be accepted on Chunk 3."
+  TIO.writeFile (tmp </> "entries" </> "chunk_0002.md") "I joked that the harbor seagulls are running the smuggling ring."
+  TIO.writeFile (tmp </> "entries" </> "chunk_0003.md") "Same-chunk entry not yet valid before Chunk 3 is recorded."
+  TIO.writeFile (tmp </> "predictions" </> "pred_0001.md") "**Clue/Anomaly**: Silver whistle on Pier 2 -> **Theory**: The bosun signaled the cutter."
+  TIO.writeFile (tmp </> "predictions" </> "hall_of_fame.md") "Confirmed Hit: Chunk 0001 bosun whistle bet."
+  TIO.writeFile (tmp </> "archive" </> "memory" </> "curated_0002.md") "Early theory noted: harbor clerk might be covering for the cutter."
+
+  assertEq
+    "parseResearchNotesSection returns empty list on - NONE"
+    []
+    (parseResearchNotesSection "<!-- TOOLS: read_file(current_chunk.md, memory.md) -->\n=== RESEARCH NOTES ===\n- NONE\n")
+
+  let rawResearchMix =
+        T.unlines
+          [ "=== RESEARCH NOTES ==="
+          , "- **[Earlier Story Passage | Source: chunks/chunk_0001.md | Quote: \"Inspector Lin found the silver whistle beside Pier 2.\"]** Chapter 1 established a silver whistle on Pier 2, not a brass key."
+          , "- **[Prior Session Entry | Source: entries/chunk_0002.md | Quote: \"harbor seagulls are running the smuggling ring\"]** Running gag from Chunk 0002."
+          , "- **[Prior Session Entry | Source: archive/memory/curated_0002.md | Quote: \"harbor clerk might be covering for the cutter\"]** Earlier reader notebook belief after Chunk 0002."
+          , "- **[Prior Prediction | Source: predictions/pred_0001.md | Quote: \"Silver whistle on Pier 2\"]** Active Chunk 0001 bet."
+          , "- **[External Canon / Reference | Source: search_web(\"maritime bosun whistle signal\") | Work: Naval Tradition]** Bosun pipes signal deck crews."
+          , "- **[Earlier Story Passage | Source: chunks/chunk_0001.md | Quote: \"Fabricated quote nowhere in chunk 1\"]** Should be dropped."
+          , "- **[Earlier Story Passage | Source: chunks/chunk_0004.md | Quote: \"Future spoiler chunk\"]** Out-of-bounds chunk > curIdx."
+          , "- **[Prior Session Entry | Source: entries/chunk_0003.md | Quote: \"Same-chunk entry\"]** Out-of-bounds entry == curIdx on non-wrapup."
+          , "- **[Earlier Story Passage | Source: chunks/chunk_0001.md | Quote: \"Inspector Lin found the silver whistle\"]** As script-writer noted in the draft commentary, this was Pier 2."
+          ]
+      parsedMix = parseResearchNotesSection rawResearchMix
+      auditWithSearch =
+        SubagentToolAudit
+          { staSource = "response_header"
+          , staUsedSearchWeb = Just True
+          , staUsedVerificationTools = Just True
+          , staReadFiles =
+              [ "current_chunk.md"
+              , "memory.md"
+              , "chunks/chunk_0001.md"
+              , "chunks/chunk_0004.md"
+              , "entries/chunk_0002.md"
+              , "entries/chunk_0003.md"
+              , "archive/memory/curated_0002.md"
+              , "predictions/pred_0001.md"
+              , "predictions/hall_of_fame.md"
+              ]
+          , staPriorTranscriptReadFiles = []
+          , staIsFirstTurnInTranscript = Nothing
+          }
+  (verifiedMix, rejMix) <- verifyAndFilterResearchBullets tmp 3 False auditWithSearch parsedMix
+  assertEq "Keeps all 5 valid receipt-backed research bullets (chunk, entry, memory snapshot, pred, search_web)" 5 (length verifiedMix)
+  assertEq "Rejects fabricated quote, future chunk, current-chunk entry, and quarantine meta-leak" 4 rejMix
+
+  (verifiedWrapHof, rejWrapHof) <-
+    verifyAndFilterResearchBullets
+      tmp
+      3
+      True
+      auditWithSearch
+      ["- **[Prior Prediction | Source: predictions/hall_of_fame.md | Quote: \"Confirmed Hit: Chunk 0001 bosun whistle bet.\"]** Scoreboard entry on Wrapup."]
+  assertEq "Allows predictions/hall_of_fame.md citation on Wrapup round" (1, 0) (length verifiedWrapHof, rejWrapHof)
+
+  let auditNoSearchNoRead =
+        auditWithSearch
+          { staUsedSearchWeb = Just False
+          , staReadFiles = ["current_chunk.md", "memory.md"]
+          }
+  (verifiedNone, rejAll) <- verifyAndFilterResearchBullets tmp 3 False auditNoSearchNoRead (take 5 parsedMix)
+  assertEq "Drops unread file citations and uninvoked search_web bullets" 0 (length verifiedNone)
+  assertEq "All 5 un-receipted bullets counted as rejected" 5 rejAll
+
+  let renderedPacket = renderCurrentResearchMarkdown tmp 3 False verifiedMix
+      extractedRefs = extractVerifiedResearchChunkRefs renderedPacket
+  assertEq "extractVerifiedResearchChunkRefs extracts [1] from rendered current_research.md" [1] extractedRefs
+  assertBool
+    "Rendered current_research.md explains the 3-level Story-Factual Hierarchy clearly"
+    ( "## Story-Factual Hierarchy" `T.isInfixOf` renderedPacket
+        && "### 1. Explicit Story Text" `T.isInfixOf` renderedPacket
+        && "### 2. External Canon and Reference Material" `T.isInfixOf` renderedPacket
+        && "### 3. Prior Predictions, Session Entries, and Memory Snapshots" `T.isInfixOf` renderedPacket
+    )
+
+  let readerAuditUsingPacket =
+        SubagentToolAudit
+          { staSource = "response_header"
+          , staUsedSearchWeb = Just False
+          , staUsedVerificationTools = Just True
+          , staReadFiles = ["current_chunk.md", "memory.md", "current_research.md", "chunks/chunk_0006.md"]
+          , staPriorTranscriptReadFiles = []
+          , staIsFirstTurnInTranscript = Just True
+          }
+      (mPrevRot, _, warnsCredited) =
+        auditReaderToolUsageWithResearch
+          7
+          True
+          [1]
+          "Calling back to the whistle in `chunks/chunk_0001.md`!"
+          readerAuditUsingPacket
+  assertEq "Rotated reader reading chunk_0006.md + current_research.md satisfies rotation check" (Just True) mPrevRot
+  assertEq "Citation of chunks/chunk_0001.md covered by current_research.md emits 0 warnings" 0 (length warnsCredited)

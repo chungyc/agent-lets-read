@@ -25,6 +25,8 @@ module LetsRead.Types
   , CriticSection (..)
   , saveVault
   , loadVaultChunk
+  , SessionFileStatus (..)
+  , readSessionFileStatus
   , saveState
   , loadState
   , escapeJson
@@ -35,6 +37,7 @@ module LetsRead.Types
   , renderMetaJson
   , orchestratorRuleText
   , renderStateJson
+  , renderStateJsonWithFiles
   , padChunkNumber
   , formatChapLabel
   , countWords
@@ -328,13 +331,51 @@ loadVaultChunk path idx = do
     then die $ "Error: Chunk index " ++ show idx ++ " out of bounds (1.." ++ show (length chunks) ++ ")"
     else pure (chunks !! (idx - 1))
 
-saveState :: FilePath -> SessionState -> IO ()
-saveState sessionDir st = do
-  BS.writeFile (sessionDir </> ".state.bin") (BSL.toStrict (encode st))
+data SessionFileStatus = SessionFileStatus
+  { sfsHasWrapup :: !Bool
+  , sfsHasFactCheckPending :: !Bool
+  , sfsHasTopicPrompt :: !Bool
+  , sfsHasScriptPrompt :: !Bool
+  , sfsHasResearchPrompt :: !Bool
+  , sfsHasReaderPrompt :: !Bool
+  , sfsHasWrapupReaderPrompt :: !Bool
+  , sfsHasResearchFile :: !Bool
+  }
+  deriving (Show, Eq)
+
+readSessionFileStatus :: FilePath -> IO SessionFileStatus
+readSessionFileStatus sessionDir = do
   hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
   hasFactCheckPending <- doesFileExist (sessionDir </> "current_fact_check_questions.md")
   hasTopicPrompt <- doesFileExist (sessionDir </> "current_topic_prompt.md")
-  TIO.writeFile (sessionDir </> "state.json") (renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt st)
+  hasScriptPrompt <- doesFileExist (sessionDir </> "current_script_prompt.md")
+  hasResearchPrompt <- doesFileExist (sessionDir </> "current_research_prompt.md")
+  let readerPromptPath = sessionDir </> "current_prompt.md"
+  hasReaderPrompt <- doesFileExist readerPromptPath
+  hasWrapupReaderPrompt <-
+    if not hasReaderPrompt
+      then pure False
+      else do
+        txt <- readTextFileSafe readerPromptPath
+        pure ("# Final Wrapup" `T.isPrefixOf` T.stripStart txt)
+  hasResearchFile <- doesFileExist (sessionDir </> "current_research.md")
+  pure
+    SessionFileStatus
+      { sfsHasWrapup = hasWrapup
+      , sfsHasFactCheckPending = hasFactCheckPending
+      , sfsHasTopicPrompt = hasTopicPrompt
+      , sfsHasScriptPrompt = hasScriptPrompt
+      , sfsHasResearchPrompt = hasResearchPrompt
+      , sfsHasReaderPrompt = hasReaderPrompt
+      , sfsHasWrapupReaderPrompt = hasWrapupReaderPrompt
+      , sfsHasResearchFile = hasResearchFile
+      }
+
+saveState :: FilePath -> SessionState -> IO ()
+saveState sessionDir st = do
+  BS.writeFile (sessionDir </> ".state.bin") (BSL.toStrict (encode st))
+  sfs <- readSessionFileStatus sessionDir
+  TIO.writeFile (sessionDir </> "state.json") (renderStateJsonWithFiles sessionDir sfs st)
 
 loadState :: FilePath -> IO SessionState
 loadState sessionDir = do
@@ -396,12 +437,41 @@ renderMetaJson (Just m) =
 
 orchestratorRuleText :: Text
 orchestratorRuleText =
-  "Use messages ONLY as 1-line notifications pointing subagents to read <session_dir>/current_*_prompt.md and write <session_dir>/current_*_response.md; wait for lets-read CLI commands to exit 0 before messaging subagents, never send duplicate notifications or poll, NEVER call 'record', 'judge', or 'discuss' while ANY dispatched subagent has not yet sent its idle completion notice (never emit 'Waiting...' text alongside a CLI tool call—if fewer than all dispatched subagents have reported idle, end your turn with ZERO tool calls), use 'lets-read status --session <dir>' (never ls/cat) to check state, and never read/paste prompt/chunk files into messages, run python/ad-hoc scripts, impersonate subagents, or edit memory.md directly."
+  "Use messages ONLY as 1-line notifications pointing subagents to read <session_dir>/current_*_prompt.md and write <session_dir>/current_*_response.md; wait for lets-read CLI commands to exit 0 before messaging subagents, never send duplicate notifications or poll, NEVER call 'record', 'judge', or 'discuss' (or 'script' / 'research') while ANY dispatched subagent has not yet sent its idle completion notice (never emit 'Waiting...' text alongside a CLI tool call—if fewer than all dispatched subagents have reported idle, end your turn with ZERO tool calls), use 'lets-read status --session <dir>' (never ls/cat) to check state, and never read/paste prompt/chunk files into messages, run python/ad-hoc scripts, impersonate subagents, or edit memory.md directly."
 
 renderStateJson :: FilePath -> Bool -> Bool -> Bool -> SessionState -> Text
-renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt st =
-  let storyChunksDone = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st && not hasFactCheckPending
+renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt =
+  renderStateJsonWithFiles
+    sessionDir
+    SessionFileStatus
+      { sfsHasWrapup = hasWrapup
+      , sfsHasFactCheckPending = hasFactCheckPending
+      , sfsHasTopicPrompt = hasTopicPrompt
+      , sfsHasScriptPrompt = False
+      , sfsHasResearchPrompt = False
+      , sfsHasReaderPrompt = False
+      , sfsHasWrapupReaderPrompt = False
+      , sfsHasResearchFile = False
+      }
+
+renderStateJsonWithFiles :: FilePath -> SessionFileStatus -> SessionState -> Text
+renderStateJsonWithFiles sessionDir sfs st =
+  let hasWrapup = sfsHasWrapup sfs
+      hasFactCheckPending = sfsHasFactCheckPending sfs
+      hasTopicPrompt = sfsHasTopicPrompt sfs
+      hasScriptPrompt = sfsHasScriptPrompt sfs
+      hasResearchPrompt = sfsHasResearchPrompt sfs
+      hasReaderPrompt = sfsHasReaderPrompt sfs
+      hasWrapupReaderPrompt = sfsHasWrapupReaderPrompt sfs
+      hasResearchFile = sfsHasResearchFile sfs
+      storyChunksDone = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st && not hasFactCheckPending
       isFin = storyChunksDone && hasWrapup
+      awaitingReader =
+        not hasScriptPrompt
+          && not hasResearchPrompt
+          && ( (stCurrentIndex st > 0 && not (stCurrentRecorded st) && hasReaderPrompt)
+                 || (storyChunksDone && not hasWrapup && hasWrapupReaderPrompt)
+             )
       activeCnt = length [pr | pr <- stPredictions st, isPredActive pr]
       totalPreds = length (stPredictions st)
    in jsonObject
@@ -412,6 +482,9 @@ renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt st =
         , ("total_chunks", jsonInt (stTotalChunks st))
         , ("total_chapters", jsonInt (stTotalChapters st))
         , ("total_words", jsonInt (stTotalWords st))
+        , ("awaiting_script", jsonBool hasScriptPrompt)
+        , ("awaiting_research", jsonBool hasResearchPrompt)
+        , ("awaiting_reader", jsonBool awaitingReader)
         , ("current_recorded", jsonBool (stCurrentRecorded st))
         , ("current_judged", jsonBool (stCurrentJudged st))
         , ("fact_check_discussion_pending", jsonBool hasFactCheckPending)
@@ -425,6 +498,11 @@ renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt st =
         , ("pending_linter_warnings_count", jsonInt (length (stPendingLinterWarnings st)))
         , ("current_chunk_meta", renderMetaJson (stCurrentMeta st))
         , ("current_chunk_file", jsonStr (T.pack (sessionDir </> "current_chunk.md")))
+        , ("script_prompt_file", if hasScriptPrompt then jsonStr (T.pack (sessionDir </> "current_script_prompt.md")) else "null")
+        , ("script_response_file", if hasScriptPrompt then jsonStr (T.pack (sessionDir </> "current_script_response.md")) else "null")
+        , ("research_prompt_file", if hasResearchPrompt then jsonStr (T.pack (sessionDir </> "current_research_prompt.md")) else "null")
+        , ("research_response_file", if hasResearchPrompt then jsonStr (T.pack (sessionDir </> "current_research_response.md")) else "null")
+        , ("research_file", if hasResearchFile then jsonStr (T.pack (sessionDir </> "current_research.md")) else "null")
         , ("subagent_prompt_file", jsonStr (T.pack (sessionDir </> "current_prompt.md")))
         , ("reader_response_file", jsonStr (T.pack (sessionDir </> "current_reader_response.md")))
         , ("judge_prompt_file", jsonStr (T.pack (sessionDir </> "current_judge_prompt.md")))

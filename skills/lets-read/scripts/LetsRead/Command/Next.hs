@@ -21,11 +21,12 @@ import LetsRead.Command.Common (removeFileIfExists, usage)
 import LetsRead.Predictions (countActivePredictions)
 import LetsRead.Prompts
   ( writeCurrentChunkFile
-  , writeCurrentPromptFile
-  , writeWrapupPromptFile
+  , writeCurrentScriptPromptFile
+  , writeWrapupScriptPromptFile
   )
 import LetsRead.Types
   ( Chunk (..)
+  , SessionFileStatus (..)
   , SessionState (..)
   , chunkToMeta
   , jsonBool
@@ -36,6 +37,7 @@ import LetsRead.Types
   , loadVaultChunk
   , orchestratorRuleText
   , padChunkNumber
+  , readSessionFileStatus
   , saveState
   )
 import System.Directory
@@ -74,13 +76,40 @@ cmdNext rawSessionDir forceFlag = do
       questionsPath = sessionDir </> "current_fact_check_questions.md"
       discPromptPath = sessionDir </> "current_discussion_prompt.md"
       topicPromptPath = sessionDir </> "current_topic_prompt.md"
+      scriptPromptPath = sessionDir </> "current_script_prompt.md"
+      scriptRespPath = sessionDir </> "current_script_response.md"
+      researchPromptPath = sessionDir </> "current_research_prompt.md"
+      researchRespPath = sessionDir </> "current_research_response.md"
+      researchFilePath = sessionDir </> "current_research.md"
+      readerPromptPath = sessionDir </> "current_prompt.md"
+
+  sfs <- readSessionFileStatus sessionDir
+  let hasScriptPrompt = sfsHasScriptPrompt sfs
+      hasResearchPrompt = sfsHasResearchPrompt sfs
+      hasWrapupReaderPrompt = sfsHasWrapupReaderPrompt sfs
 
   when (curIdx > 0 && not (stCurrentRecorded st) && not forceFlag) $
-    die $
-      "Error: Chunk "
-        ++ show curIdx
-        ++ " is already unlocked, but its commentary has not been recorded yet. "
-        ++ "Run 'record' and 'judge' first (or pass --force to override)."
+    if hasScriptPrompt
+      then
+        die $
+          "Error: Chunk "
+            ++ show curIdx
+            ++ " is already unlocked and awaiting script-writer. "
+            ++ "Run 'script', 'research', 'record', and 'judge' first (or pass --force to override)."
+      else
+        if hasResearchPrompt
+          then
+            die $
+              "Error: Chunk "
+                ++ show curIdx
+                ++ " is awaiting researcher. "
+                ++ "Run 'research', 'record', and 'judge' first (or pass --force to override)."
+          else
+            die $
+              "Error: Chunk "
+                ++ show curIdx
+                ++ " is already unlocked, but its commentary has not been recorded yet. "
+                ++ "Run 'record' and 'judge' first (or pass --force to override)."
 
   when (curIdx > 0 && stCurrentRecorded st && not (stCurrentJudged st) && not forceFlag) $
     die $
@@ -98,6 +127,16 @@ cmdNext rawSessionDir forceFlag = do
         ++ discPromptPath
         ++ ". Notify blind-reader via send_message to read current_discussion_prompt.md and write current_discussion_response.md, then record the response with 'lets-read discuss --session <dir> --subagent-log <reader_log>' before running 'next' (or pass --force to override)."
 
+  when (curIdx >= totalChunks && stCurrentRecorded st && stCurrentJudged st && not forceFlag) $ do
+    hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
+    when (not hasWrapup) $ do
+      when hasScriptPrompt $
+        die "Error: Final Wrapup is already unlocked and awaiting script-writer. Run 'script', 'research', and 'record' first (or pass --force to override)."
+      when hasResearchPrompt $
+        die "Error: Final Wrapup is awaiting researcher. Run 'research' and 'record' first (or pass --force to override)."
+      when hasWrapupReaderPrompt $
+        die "Error: Final Wrapup is already unlocked and awaiting blind-reader. Run 'record' first (or pass --force to override)."
+
   when forceFlag $ do
     when hasFactCheckPending $ do
       removeFileIfExists questionsPath
@@ -106,6 +145,12 @@ cmdNext rawSessionDir forceFlag = do
 
   let readerRespPath = sessionDir </> "current_reader_response.md"
       discRespPath = sessionDir </> "current_discussion_response.md"
+  removeFileIfExists scriptPromptPath
+  removeFileIfExists scriptRespPath
+  removeFileIfExists researchPromptPath
+  removeFileIfExists researchRespPath
+  removeFileIfExists researchFilePath
+  removeFileIfExists readerPromptPath
   removeFileIfExists readerRespPath
   removeFileIfExists discRespPath
 
@@ -115,21 +160,23 @@ cmdNext rawSessionDir forceFlag = do
       hasWrapup <- doesFileExist wrapupPath
       if not hasWrapup || forceFlag
         then do
-          promptFile <- writeWrapupPromptFile sessionDir st
+          scriptPromptFile <- writeWrapupScriptPromptFile sessionDir st
+          saveState sessionDir st
           TIO.putStrLn $
             jsonObject
-              [ ("status", jsonStr "wrapup_unlocked")
+              [ ("status", jsonStr "awaiting_script")
+              , ("is_wrapup", jsonBool True)
               , ("current_index", jsonInt curIdx)
               , ("total_chunks", jsonInt totalChunks)
-              , ("subagent_prompt_file", jsonStr (T.pack promptFile))
-              , ("reader_response_file", jsonStr (T.pack readerRespPath))
+              , ("script_prompt_file", jsonStr (T.pack scriptPromptFile))
+              , ("script_response_file", jsonStr (T.pack scriptRespPath))
               , ("hall_of_fame_file", jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")))
               , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
               , ("entries_dir", jsonStr (T.pack (sessionDir </> "entries")))
               , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
               , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
               , ("orchestrator_rule", jsonStr orchestratorRuleText)
-              , ("next_step_hint", jsonStr "Send a 1-line notification to blind-reader (via send_message, or invoke_subagent if no blind-reader is active) to read subagent_prompt_file and write reader_response_file for the Final Wrapup & Retrospective, then STOP and end your turn with ZERO tool calls until blind-reader sends its idle completion notice (never emit 'Waiting...' text alongside 'record'); only after its idle notice arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'.")
+              , ("next_step_hint", jsonStr "Invoke a fresh one-shot script-writer subagent with a 1-line notification to read script_prompt_file and write script_response_file for the Final Wrapup draft, then STOP and end your turn with ZERO tool calls until script-writer sends its idle completion notice (never emit 'Waiting...' text alongside 'script'); only after its idle notice arrives, run 'lets-read script --session <dir> --subagent-log <script_log>'.")
               ]
         else
           TIO.putStrLn $
@@ -150,9 +197,9 @@ cmdNext rawSessionDir forceFlag = do
           chunksDir = sessionDir </> "chunks"
           archiveChunkFile = chunksDir </> ("chunk_" ++ padChunkNumber nextIdx ++ ".md")
       createDirectoryIfMissing True chunksDir
-      writeCurrentChunkFile chunkFile chunk totalChunks (stTotalChapters st) activeCount
-      writeCurrentChunkFile archiveChunkFile chunk totalChunks (stTotalChapters st) activeCount
-      promptFile <- writeCurrentPromptFile sessionDir st chunk activeCount
+      writeCurrentChunkFile chunkFile chunk totalChunks (stTotalChapters st)
+      writeCurrentChunkFile archiveChunkFile chunk totalChunks (stTotalChapters st)
+      scriptPromptFile <- writeCurrentScriptPromptFile sessionDir st chunk
 
       let meta = chunkToMeta chunk
           st' =
@@ -168,12 +215,11 @@ cmdNext rawSessionDir forceFlag = do
 
       let shouldRotate = computeShouldRotate (stStoryRecords st) chunk
           unlockHint =
-            if shouldRotate
-              then "rotate_reader_recommended is true: kill the previous blind-reader via manage_subagents(Action: \"kill\") and invoke a fresh blind-reader with a 1-line notification to read subagent_prompt_file and write reader_response_file, then STOP and end your turn with ZERO tool calls until blind-reader sends its idle completion notice (never emit 'Waiting...' alongside 'record'); only after its idle notice arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'."
-              else "Send a 1-line notification to blind-reader to read subagent_prompt_file and write reader_response_file, then STOP and end your turn with ZERO tool calls until blind-reader sends its idle completion notice (never emit 'Waiting...' alongside 'record'); only after its idle notice arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'."
+            "Invoke a fresh one-shot script-writer subagent with a 1-line notification to read script_prompt_file and write script_response_file, then STOP and end your turn with ZERO tool calls until script-writer sends its idle completion notice (never emit 'Waiting...' alongside 'script'); only after its idle notice arrives, run 'lets-read script --session <dir> --subagent-log <script_log>'."
       TIO.putStrLn $
         jsonObject
-          [ ("status", jsonStr "unlocked")
+          [ ("status", jsonStr "awaiting_script")
+          , ("is_wrapup", jsonBool False)
           , ("chunk_index", jsonInt (chunkIndex chunk))
           , ("total_chunks", jsonInt totalChunks)
           , ("chapter_number", jsonInt (chapterNumber chunk))
@@ -186,7 +232,9 @@ cmdNext rawSessionDir forceFlag = do
           , ("word_count", jsonInt (wordCount chunk))
           , ("active_predictions_count", jsonInt activeCount)
           , ("current_chunk_file", jsonStr (T.pack chunkFile))
-          , ("subagent_prompt_file", jsonStr (T.pack promptFile))
+          , ("script_prompt_file", jsonStr (T.pack scriptPromptFile))
+          , ("script_response_file", jsonStr (T.pack scriptRespPath))
+          , ("subagent_prompt_file", jsonStr (T.pack readerPromptPath))
           , ("reader_response_file", jsonStr (T.pack readerRespPath))
           , ("chunk_archive_file", jsonStr (T.pack archiveChunkFile))
           , ("chunks_dir", jsonStr (T.pack chunksDir))

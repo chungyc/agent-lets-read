@@ -49,7 +49,6 @@ import LetsRead.Predictions
   , parseTopicsFromBracket
   , placeholderSubstrings
   , renderHallOfFameMarkdown
-  , renderPredictionSlateSection
   , renderSinglePredictionDoc
   )
 import LetsRead.Prompts (expandPersonaPreset)
@@ -445,6 +444,11 @@ renderMemoryMarkdown sessionDir st =
                    [ "- **" <> lbl <> "**: [" <> T.pack (takeFileName fp) <> "](" <> T.pack fp <> ")"
                    | (_, lbl, fp) <- completedArcs
                    ]
+      isFinished = curIdx >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
+      hofIndexSuffix =
+        if isFinished
+          then " | [Hall of Fame & Shame](predictions/hall_of_fame.md)"
+          else ""
       indexIntroPara =
         wrapMarkdownParagraph
           78
@@ -459,7 +463,7 @@ renderMemoryMarkdown sessionDir st =
           , ""
           , "- Story Chunks: [Chronological Index](chunks/by_chronology.md) | [Semantic Topic Index](chunks/by_topic.md) | [Unlocked Chunks](chunks/)"
           , "- Session Logs: [Chronological Index](entries/by_chronology.md) | [Semantic Topic Index](entries/by_topic.md) | [Entry Files](entries/)"
-          , "- Predictions: [Chronological Index](predictions/by_chronology.md) | [Semantic Topic Index](predictions/by_topic.md) | [Prediction Files](predictions/)"
+          , "- Predictions: [Chronological Index](predictions/by_chronology.md) | [Semantic Topic Index](predictions/by_topic.md) | [Prediction Files](predictions/)" <> hofIndexSuffix
           , ""
           , "### Established Topic Tags"
           , ""
@@ -473,7 +477,6 @@ renderMemoryMarkdown sessionDir st =
           , ""
           , recentStoryBlock
           ]
-      predictionSlateSection = renderPredictionSlateSection st
       personaPara = wrapMarkdownParagraph 78 (expandPersonaPreset (stPersona st))
    in T.unlines $
         [ "# Reader Memory & Notes: " <> stTitle st
@@ -502,8 +505,6 @@ renderMemoryMarkdown sessionDir st =
              , "## Active Mysteries & Unanswered Questions"
              , ""
              , T.strip (lookupSec "Active Mysteries & Unanswered Questions")
-             , ""
-             , T.strip predictionSlateSection
              , ""
              , "## Notable Quotes, Themes & Running Jokes"
              , ""

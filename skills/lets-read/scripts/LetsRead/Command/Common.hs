@@ -47,6 +47,8 @@ usage =
     , "Commands:"
     , "  init <source> --session <dir> [--max-words <n>] [--title <str>] [--persona <str>] [--overwrite]"
     , "  next --session <dir> [--force]"
+    , "  script --session <dir> [--response-file <path>] [--subagent-log <path>]"
+    , "  research --session <dir> [--response-file <path>] [--subagent-log <path>]"
     , "  record --session <dir> [--response-file <path>] [--subagent-log <path>] [--commentary-file <path>] [--memory-file <path>]"
     , "  judge --session <dir> [--response-file <path>] [--subagent-log <path>] [--fact-check-response-file <path>] [--fact-check-log <path>] [--critic-response-file <path>] [--critic-log <path>] [--topic-response-file <path>] [--topic-log <path>]"
     , "  discuss-prompt --session <dir> [--user-message <str>] [--user-file <path>]"

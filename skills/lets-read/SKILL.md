@@ -3,7 +3,8 @@ name: lets-read
 description: >-
   Conducts a spoiler-free, chapter-by-chapter or chunk-by-chunk "Let's Read"
   liveblog of a story (.txt, .md, .html, .epub) using a Haskell gatekeeper
-  script, an isolated blind-reader subagent, an impartial prediction-judge
+  script, a stateless script-writer subagent, a continuity/canon researcher
+  subagent, an isolated blind-reader subagent, an impartial prediction-judge
   subagent, a dedicated fact-checker subagent, a persona-driven
   commentary-critic subagent, and an on-demand topic-curator subagent. Use this
   skill whenever the user asks for a Let's Read, liveblog reaction, unspoiled
@@ -17,53 +18,70 @@ compatibility: >-
 
 # Let's Read Skill (Spoiler-Free Architecture)
 
-This skill conducts a genuine, unspoiled **Let's Read** of a story or book in
-`.txt`, `.md`, `.markdown`, `.html`, or `.epub` format by combining a **Haskell
-Gatekeeper** ([LetsRead.hs](./scripts/LetsRead.hs)) with five isolated leaf
-subagents that exchange bulk data via predetermined `<session_dir>` files.
+This skill conducts an unspoiled **Let's Read** of a story or book in `.txt`,
+`.md`, `.markdown`, `.html`, or `.epub` format by combining a **Haskell
+Gatekeeper** ([LetsRead.hs](./scripts/LetsRead.hs)) with seven isolated leaf
+subagents that exchange data via `<session_dir>` files.
 
 ## Subagent Architecture
 
+### `script-writer`
+
+Stateless one-shot subagent dispatched after `lets-read next` (on every chunk
+`1..N` and on the Final Wrapup Round). Reads `current_script_prompt.md` and its
+listed turn inputs, writes an unresearched in-persona draft to
+`current_script_response.md`, and ends with a 1-line `[Tools: ...]` notice.
+`lets-read script` embeds the draft into `current_research_prompt.md` and
+deletes all script files immediately so `blind-reader` stays completely blind to
+it.
+
+### `researcher`
+
+Reads `current_research_prompt.md`, pulls verbatim excerpts from
+`chunks/chunk_XXXX.md`, `entries/chunk_XXXX.md`, and `predictions/pred_XXXX.md`
+plus verified external canon notes via neutral `search_web` queries relevant to
+the draft (never mentioning the draft), and writes
+`current_research_response.md` (with a `[Tools: ...]` receipt) for
+`lets-read research` to verify into `current_research.md`.
+
 ### `blind-reader`
 
-Reads `<session_dir>/current_prompt.md` and `current_chunk.md`, reacts in the
-session's Active Persona, stakes 1 specific, non-obvious prediction per chunk
-(plus 1 conditional retirement candidate when at the 10-prediction cap), writes
-`<session_dir>/current_reader_response.md` (or `current_discussion_response.md`
-on discussion turns), and ends its turn with a 1-line completion notice ending
-in a `[Tools: ...]` receipt.
+Reads `current_prompt.md`, `current_chunk.md`, `memory.md`, and
+`current_research.md` (blind to `script-writer`'s draft), reacts in the Active
+Persona, stakes 1 specific, non-obvious prediction per non-final chunk, writes
+`current_reader_response.md` (or `current_discussion_response.md`), and ends
+with a 1-line `[Tools: ...]` notice.
 
 ### `prediction-judge`
 
-Reads `<session_dir>/current_judge_prompt.md` and independently evaluates all
-active predictions against `current_chunk.md`, writing verdicts to
-`<session_dir>/current_judge_response.md`.
+Reads `current_judge_prompt.md`, evaluates all active predictions against
+`current_chunk.md` (plus conditional 10-cap retirements when `> 10` are active),
+and writes verdicts to `current_judge_response.md`.
 
 ### `fact-checker`
 
 Runs in parallel with `prediction-judge` and `commentary-critic`. Reads
-`<session_dir>/current_fact_check_prompt.md`, audits concrete factual and
-chronological claims against primary sources (`current_chunk.md`,
-`chunks/chunk_XXXX.md`, and neutral `search_web` queries), and writes
-`<session_dir>/current_fact_check_response.md` (with a `[Tools: ...]` receipt).
-Verified material disputes set `"fact_check_discussion_pending": true` and gate
-`lets-read next` until `blind-reader` responds via `lets-read discuss`.
+`current_fact_check_prompt.md`, audits factual and chronological claims against
+primary sources (`current_chunk.md`, `chunks/chunk_XXXX.md`, and neutral
+`search_web`), and writes `current_fact_check_response.md` (with a
+`[Tools: ...]` receipt). Verified disputes set
+`"fact_check_discussion_pending": true` and gate `lets-read next` until
+resolved via `lets-read discuss`.
 
 ### `commentary-critic`
 
 Runs in parallel with `prediction-judge` and `fact-checker`. Reads
-`<session_dir>/current_critic_prompt.md` and evaluates how well the entry
-inhabited the Active Persona and user style directives, writing notes to
-`<session_dir>/current_critic_response.md` for silent uptake on the next chunk.
+`current_critic_prompt.md` and evaluates how well the entry inhabited the Active
+Persona and user style directives, writing notes to `current_critic_response.md`
+for silent uptake on the next chunk.
 
 ### `topic-curator`
 
 Dispatched in parallel when `record` returns `"topic_curation_needed": true`.
-Reads `<session_dir>/current_topic_prompt.md` and writes synonym or alias
-merges (`=== TOPIC MERGES ===`) to `<session_dir>/current_topic_response.md`
-for `lets-read judge` to apply.
+Reads `current_topic_prompt.md` and writes synonym or alias merges
+(`=== TOPIC MERGES ===`) to `current_topic_response.md` for `lets-read judge`.
 
-In **Batch Mode**, the host delegates sequential slices of ~10 chunks to fresh
+In **Batch Mode**, the host delegates sequential slices of ~7–8 chunks to fresh
 instances of the built-in **`self`** subagent (`Role: "Batch Read-Through
 Driver"`) so the parent host's context window stays bounded across long works.
 
@@ -88,13 +106,12 @@ asks for a custom chunk size.
 
 #### File-Based Data Exchange
 
-The five leaf subagents are defined in [agents/](../../agents/) with
-`subagent: true`, `mainAgent: false`, and explicit `tools` lists (`write_file`
-+ `read_file`, plus `search_web` only for `blind-reader` and `fact-checker`).
-Leaf subagents read only inside `<session_dir>` (plus the shared session-file
-and multi-layer index reference at
+The seven leaf subagents in [agents/](../../agents/) run with `subagent: true`,
+`mainAgent: false`, and explicit `tools` lists (`write_file` + `read_file`, plus
+`search_web` only for `researcher`, `blind-reader`, and `fact-checker`). Leaf
+subagents read only inside `<session_dir>` (plus
 [references/session-files.md](./references/session-files.md)), write only to
-their designated `<session_dir>/current_*_response.md` file via `write_file`
+their designated `<session_dir>/current_*_response.md` via `write_file`
 (`Overwrite: true`), never call `run_command`, `edit_file`, or `send_message`,
 and use `search_web` solely for neutral background lore or reference checks
 (never for the story being read).
@@ -102,14 +119,12 @@ and use `search_web` solely for neutral background lore or reference checks
 #### Sandbox-Compatible Tool Receipts (`[Tools: ...]` & `<!-- TOOLS: ... -->`)
 
 Because Standard Sandbox isolates sibling `<brain>/<child_id>/` subagent
-transcripts from `run_command`, `blind-reader` and `fact-checker` record
-compact tool receipts in two places: a `<!-- TOOLS: ... -->` comment on line 1
-of `current_reader_response.md`, `current_discussion_response.md`, and
-`current_fact_check_response.md` (stripped automatically by `LetsRead`), plus a
-`[Tools: ...]` suffix on their 1-line completion notice (visible in the
-orchestrator's mounted `<brain>/<caller_id>/` inbox and transcript). `LetsRead`
-uses direct `--*-log` parsing when accessible and falls back automatically to
-these receipts in Standard Sandbox without needing `BypassSandbox: true`.
+transcripts from `run_command`, `script-writer`, `researcher`, `blind-reader`,
+and `fact-checker` record compact tool receipts in two places: a
+`<!-- TOOLS: ... -->` comment on line 1 of their `current_*_response.md` file
+(stripped automatically by `LetsRead`), plus a `[Tools: ...]` suffix on their
+1-line completion notice. `LetsRead` uses `--*-log` parsing when accessible and
+falls back automatically to these receipts in Standard Sandbox.
 
 ### 1-Line Notifications, Step Boundaries & No Polling
 
@@ -117,17 +132,18 @@ these receipts in Standard Sandbox without needing `BypassSandbox: true`.
   questions in your own voice, and never call `edit_file` or `write_file`
   directly on `<session_dir>/memory.md`.
 
-- Never read or paste `current_*_prompt.md`, `current_chunk.md`, or `memory.md`
-  into `invoke_subagent` or `send_message`. Send **only a 1-line notification**
-  naming the prompt file to read and the response file to write:
+- Never read or paste `current_*_prompt.md`, `current_chunk.md`,
+  `current_research.md`, or `memory.md` into `invoke_subagent` or
+  `send_message`. Send **only a 1-line notification** naming the prompt file to
+  read and the response file to write:
 
   ```text
   Chunk XXXX/YYYY ready: read <session_dir>/current_prompt.md via read_file and write your response to <session_dir>/current_reader_response.md.
   ```
 
-- Never bundle `run_command` (`lets-read next`, `record`, `judge`, `discuss`,
-  or `discuss-prompt`) with `invoke_subagent` or `send_message` in the same
-  step. Always wait for the CLI command to exit `0` and write its prompt files
+- Never bundle `run_command` (`lets-read next`, `script`, `research`, `record`,
+  `judge`, `discuss`, or `discuss-prompt`) with `invoke_subagent` or
+  `send_message` in the same step. Always wait for the CLI command to exit `0`
   before dispatching subagents.
 
 - Once `invoke_subagent` or `send_message` returns, end your turn immediately
@@ -144,29 +160,31 @@ these receipts in Standard Sandbox without needing `BypassSandbox: true`.
 
 ### Hard Anti-Race Barrier (Zero Tool Calls While Waiting)
 
-**NEVER** emit `run_command` (`lets-read record`, `lets-read judge`, or
-`lets-read discuss`) in the same response where you state you are waiting for a
-subagent (for example, never output `"Waiting for <subagent>..."` alongside a
-tool call).
+**NEVER** emit `run_command` (`lets-read script`, `lets-read research`,
+`lets-read record`, `lets-read judge`, or `lets-read discuss`) in the same
+response where you state you are waiting for a subagent (never output
+`"Waiting for <subagent>..."` alongside a tool call).
 
 Count delivered idle completion notices strictly before advancing: if **fewer
 than all** dispatched subagents for the current phase have sent their idle
-completion notice (`< 1` `blind-reader` before `record` or `discuss`, `< 3`
-reviewers before `judge`, or `< 4` when `topic-curator` was dispatched), you
-**MUST end your turn immediately with ZERO tool calls**.
+completion notice (`< 1` `script-writer` before `script`, `< 1` `researcher`
+before `research`, `< 1` `blind-reader` before `record` or `discuss`, `< 3`
+reviewers before `judge`, or `< 4` when `topic-curator` was dispatched), **end
+your turn immediately with ZERO tool calls**.
 
 ### CLI Whitelist Only — No `python`, `ls`/`cat`, or Ad-Hoc Shell Commands
 
 `<skill_dir>/.bin/lets-read` (where `<skill_dir>` is the directory containing
-this `SKILL.md` file) handles all parsing, receipt verification, indexing, and
-state management natively in compiled Haskell. Use strictly
+this `SKILL.md`) handles all parsing, quarantine cleanup, receipt verification,
+indexing, and state management in compiled Haskell. Use strictly
 `<skill_dir>/scripts/prepare.sh`, `<skill_dir>/.bin/lets-read` (`init`, `next`,
-`record`, `judge`, `discuss-prompt`, `discuss`, `status`), `read_file`,
-`write_file`, `invoke_subagent`, `send_message`, and `manage_subagents`.
+`script`, `research`, `record`, `judge`, `discuss-prompt`, `discuss`, `status`),
+`read_file`, `write_file`, `invoke_subagent`, `send_message`, and
+`manage_subagents`.
 
 **Never** run `python`, `python3`, `ls`, `cat`, `head`, `tail`, `find`, or
 `grep` to inspect `<session_dir>` or `<session_dir>/state.json`, and never
-guess binary paths. Whenever checking session state, run
+guess binary paths. To check session state, run
 `<skill_dir>/.bin/lets-read status --session "<session_dir>"`.
 
 ## Directory & Resource Layout
@@ -174,22 +192,36 @@ guess binary paths. Whenever checking session state, run
 Let `<skill_dir>` denote the directory containing this `SKILL.md` file:
 
 - Gatekeeper CLI: [LetsRead.hs](./scripts/LetsRead.hs) (`scripts/LetsRead/`)
+
 - Build script: [prepare.sh](./scripts/prepare.sh)
+
+- Script Writer: [script-writer.md](../../agents/script-writer.md)
+
+- Researcher: [researcher.md](../../agents/researcher.md)
+
 - Blind Reader: [blind-reader.md](../../agents/blind-reader.md)
+
 - Prediction Judge: [prediction-judge.md](../../agents/prediction-judge.md)
+
 - Fact-Checker: [fact-checker.md](../../agents/fact-checker.md)
+
 - Commentary Critic: [commentary-critic.md](../../agents/commentary-critic.md)
+
 - Topic Curator: [topic-curator.md](../../agents/topic-curator.md)
+
 - Wrapup: [wrapup_prompt_template.md](./resources/wrapup_prompt_template.md)
+
 - Banned jargon list: [banned_jargon.txt](./resources/banned_jargon.txt)
+
 - Persona presets: [personas.md](./references/personas.md)
-- Session files & index layout: [session-files.md](./references/session-files.md)
+
+- Session & index layout: [session-files.md](./references/session-files.md)
 
 ## Workflow
 
 ### Step 1: Clarify Session Preferences (If Not Specified)
 
-If the user has not specified their preferences, check briefly or use defaults:
+If not specified by the user, check briefly or use defaults:
 
 #### Mode
 
@@ -219,8 +251,7 @@ requested.
 
 #### 1. Prepare the Gatekeeper Binary
 
-Run [prepare.sh](./scripts/prepare.sh) as a standalone command to compile
-`<skill_dir>/.bin/lets-read` if missing or out of date:
+Run [prepare.sh](./scripts/prepare.sh) as a standalone command:
 
 ```bash
 <skill_dir>/scripts/prepare.sh
@@ -228,7 +259,7 @@ Run [prepare.sh](./scripts/prepare.sh) as a standalone command to compile
 
 #### 2. Initialize or Resume the Session
 
-Run `<skill_dir>/.bin/lets-read init` as a separate command:
+Initialize a new session:
 
 ```bash
 <skill_dir>/.bin/lets-read init "<source_story_path>" \
@@ -236,31 +267,36 @@ Run `<skill_dir>/.bin/lets-read init` as a separate command:
   --persona "<chosen_persona>"
 ```
 
-If resuming or inspecting an existing session instead of initializing, run
-`status`:
+Or inspect/resume an existing session:
 
 ```bash
 <skill_dir>/.bin/lets-read status --session "<session_dir>"
 ```
 
-### Step 3: Verify the Five Subagents Are Available
+### Step 3: Verify the Seven Subagents Are Available
 
-When the `lets-read` plugin is installed and enabled, its five leaf subagents
+When the `lets-read` plugin is installed and enabled, its seven leaf subagents
 are registered in `<subagents>`:
 
-1. [blind-reader.md](../../agents/blind-reader.md)
+1. [script-writer.md](../../agents/script-writer.md)
+   (`Name: "script-writer"`, `Role: "Unresearched Script Writer"`)
+
+2. [researcher.md](../../agents/researcher.md)
+   (`Name: "researcher"`, `Role: "Continuity & Canon Researcher"`)
+
+3. [blind-reader.md](../../agents/blind-reader.md)
    (`Name: "blind-reader"`, `Role: "Blind Story Reader"`)
 
-2. [prediction-judge.md](../../agents/prediction-judge.md)
+4. [prediction-judge.md](../../agents/prediction-judge.md)
    (`Name: "prediction-judge"`, `Role: "Impartial Prediction Judge"`)
 
-3. [fact-checker.md](../../agents/fact-checker.md)
+5. [fact-checker.md](../../agents/fact-checker.md)
    (`Name: "fact-checker"`, `Role: "Commentary Fact-Checker"`)
 
-4. [commentary-critic.md](../../agents/commentary-critic.md)
+6. [commentary-critic.md](../../agents/commentary-critic.md)
    (`Name: "commentary-critic"`, `Role: "Commentary Critic"`)
 
-5. [topic-curator.md](../../agents/topic-curator.md)
+7. [topic-curator.md](../../agents/topic-curator.md)
    (`Name: "topic-curator"`, `Role: "Topic Index Curator"`)
 
 If running from an uninstalled checkout where they do not yet appear in
@@ -268,39 +304,85 @@ If running from an uninstalled checkout where they do not yet appear in
 `define_subagent` (`EnableWriteTools: true`, `EnableSubagentTools: false`,
 `EnableMCPTools: false`).
 
-### Step 4: Per-Chunk Loop (`next`, `record`, `judge`, optional `discuss`)
+### Step 4: Per-Chunk Loop
 
-For each chunk to be read, follow these steps in strict sequence:
+For each chunk (`next`, `script`, `research`, `record`, `judge`, optional
+`discuss`), follow these steps in strict sequence:
 
-#### 1. Unlock the Next Chunk (`next`)
+#### 1. Unlock Chunk (`next`) & Dispatch Stateless `script-writer`
 
 ```bash
 <skill_dir>/.bin/lets-read next --session "<session_dir>"
 ```
 
-Writes `current_chunk.md`, `chunks/chunk_XXXX.md`, and `current_prompt.md`,
-cleans up stale `current_reader_response.md`, and returns JSON metadata
-including `"rotate_reader_recommended"`.
+Writes `current_chunk.md`, `chunks/chunk_XXXX.md`, and
+`current_script_prompt.md`, returning `"status": "awaiting_script"`.
 
-#### 2. Notify `blind-reader` (1-Line Message Only)
+- After `next` exits `0`, call `invoke_subagent` (`TypeName: "script-writer"`,
+  `Role: "Unresearched Script Writer"`) with a **1-line notification** to read
+  `<session_dir>/current_script_prompt.md` and write
+  `<session_dir>/current_script_response.md` (`Overwrite: true`).
 
-- After `lets-read next` exits `0`, on the first chunk of a session/batch or
-  when `"rotate_reader_recommended": true` (killing any prior `blind-reader`
-  via `manage_subagents` with `Action: "kill"`), call `invoke_subagent`
+- End your turn with **ZERO tool calls** until `script-writer` sends its idle
+  notice (`1/1`).
+
+#### 2. Quarantine Draft (`script`), Kill `script-writer` & Notify `researcher`
+
+Run `script` **only after** `script-writer`'s idle notice arrives:
+
+```bash
+<skill_dir>/.bin/lets-read script \
+  --session "<session_dir>" \
+  --subagent-log "<script_writer_logAbsoluteUri>"
+```
+
+Embeds the stripped draft into `current_research_prompt.md` and **immediately
+deletes `current_script_prompt.md` and `current_script_response.md`**.
+
+- In the same turn after `script` exits `0`:
+
+  1. **Kill the finished one-shot `script-writer` immediately** via
+     `manage_subagents` (`Action: "kill"`).
+
+  2. On the first chunk of a session/batch or when
+     `"rotate_researcher_recommended": true` (killing any prior `researcher` via
+     `manage_subagents` with `Action: "kill"`), call `invoke_subagent`
+     (`TypeName: "researcher"`, `Role: "Continuity & Canon Researcher"`);
+     otherwise call `send_message` to the active `researcher` `conversationId`
+     with a **1-line notification** to read `current_research_prompt.md` and
+     write `current_research_response.md` (`Overwrite: true`).
+
+- End your turn with **ZERO tool calls** until `researcher` sends its idle
+  notice (`1/1`).
+
+#### 3. Verify Research (`research`) & Notify `blind-reader`
+
+Run `research` **only after** `researcher`'s idle notice arrives:
+
+```bash
+<skill_dir>/.bin/lets-read research \
+  --session "<session_dir>" \
+  --subagent-log "<researcher_logAbsoluteUri>"
+```
+
+Verifies verbatim quotes and `search_web` receipts, **deletes
+`current_research_prompt.md` and `current_research_response.md`**, writes
+`current_research.md` and `current_prompt.md`, and returns
+`"status": "unlocked"` and `"rotate_reader_recommended"`.
+
+- After `research` exits `0`, on the first chunk of a session/batch or when
+  `"rotate_reader_recommended": true` (killing any prior `blind-reader` via
+  `manage_subagents` with `Action: "kill"`), call `invoke_subagent`
   (`TypeName: "blind-reader"`, `Role: "Blind Story Reader"`). Otherwise call
   `send_message` to the active `blind-reader` `conversationId`.
 
-- Send **only a 1-line notification** to read `<session_dir>/current_prompt.md`
-  and write `<session_dir>/current_reader_response.md` (`Overwrite: true`).
+- Send **only a 1-line notification** to read `current_prompt.md` and write
+  `current_reader_response.md` (`Overwrite: true`), then end your turn with
+  **ZERO tool calls** until `blind-reader`'s idle notice (`1/1`) arrives.
 
-- Once `invoke_subagent` or `send_message` returns, obey the **Hard Anti-Race
-  Barrier**: end your turn with **ZERO tool calls** and wait for
-  `blind-reader`'s idle completion notice (`1/1`) before calling `record`.
+#### 4. Record `blind-reader`'s Turn (`record`)
 
-#### 3. Record `blind-reader`'s Turn (`record`)
-
-Run `record` **only after** `blind-reader`'s idle completion notice arrives
-(`< 1` reader finished means **ZERO tool calls**):
+Run `record` **only after** `blind-reader`'s idle notice arrives:
 
 ```bash
 <skill_dir>/.bin/lets-read record \
@@ -308,16 +390,14 @@ Run `record` **only after** `blind-reader`'s idle completion notice arrives
   --subagent-log "<blind_reader_logAbsoluteUri>"
 ```
 
-Reads `current_reader_response.md` (auditing rotation/callback `read_file`
-receipts via `--subagent-log` or `[Tools: ...]` / `<!-- TOOLS: ... -->`),
-records the entry, updates predictions and indices, writes reviewer prompts,
+Records the entry, updates predictions and indices, writes reviewer prompts,
 and returns `"rotate_*_recommended"` and `"topic_curation_needed"`.
 
-#### 4. Notify Reviewers in Parallel (1-Line Messages Only)
+#### 5. Notify Reviewers in Parallel (1-Line Messages Only)
 
-- After `lets-read record` exits `0`, do **not** read `current_*_prompt.md`.
-  Dispatch all post-record reviewers **in parallel in the same turn** with
-  1-line notifications:
+- After `record` exits `0`, do **not** read `current_*_prompt.md`. Dispatch all
+  post-record reviewers **in parallel in the same turn** with 1-line
+  notifications:
 
   - For `prediction-judge`, `fact-checker`, and `commentary-critic`, call
     `invoke_subagent` on the first chunk of a session/batch or when
@@ -330,13 +410,13 @@ and returns `"rotate_*_recommended"` and `"topic_curation_needed"`.
     `current_topic_prompt.md` and write `current_topic_response.md`.
 
 - Obey the **Hard Anti-Race Barrier**: end the post-dispatch turn—and any
-  staggered wakeup turn where `< 3` reviewers (or `< 4` when `topic-curator`
-  was dispatched) have sent idle completion notices—with **ZERO tool calls**.
+  staggered wakeup turn where `< 3` reviewers (or `< 4` with `topic-curator`)
+  have sent idle notices—with **ZERO tool calls**.
 
-#### 5. Apply Verdicts, Fact-Check, Persona Critique & Topic Merges (`judge`)
+#### 6. Apply Verdicts, Fact-Check, Persona Critique & Topic Merges (`judge`)
 
-Run `judge` **only after** all `3/3` dispatched reviewers (or `4/4` when
-`topic-curator` was dispatched) have delivered their idle completion notices:
+Run `judge` **only after** all `3/3` dispatched reviewers (or `4/4` with
+`topic-curator`) have delivered idle completion notices:
 
 ```bash
 <skill_dir>/.bin/lets-read judge \
@@ -347,32 +427,23 @@ Run `judge` **only after** all `3/3` dispatched reviewers (or `4/4` when
   [--topic-log "<topic_curator_logAbsoluteUri>"]
 ```
 
-Reads `current_judge_response.md`, `current_fact_check_response.md`,
-`current_critic_response.md`, and (when triggered) `current_topic_response.md`,
-verifying tool usage via `--*-log` or sandbox-safe `[Tools: ...]` and
-`<!-- TOOLS: ... -->` receipts.
-
 ##### Immediate One-Shot `topic-curator` Cleanup
 
-Whenever `topic-curator` was dispatched on this chunk
-(`"topic_curation_needed": true`), **kill the finished `topic-curator`
-immediately via `manage_subagents` (`Action: "kill"`) right after
-`lets-read judge` completes** rather than leaving it parked until batch end.
+Whenever `topic-curator` was dispatched (`"topic_curation_needed": true`),
+**kill the finished `topic-curator` immediately via `manage_subagents`
+(`Action: "kill"`) right after `lets-read judge` completes**.
 
-#### 6. Resolve Pending Fact-Check Peer Queries (`discuss`)
+#### 7. Resolve Pending Fact-Check Peer Queries (`discuss`)
 
-Whenever `lets-read judge` returns `"fact_check_discussion_pending": true`
+Whenever `judge` returns `"fact_check_discussion_pending": true`
 (`"awaiting_fact_check_response"`), **do NOT run `next` yet**:
 
 1. Send a 1-line notification to `blind-reader` (via `send_message`, or
    `invoke_subagent` if resuming without an active `blind-reader`) to read
-   `<session_dir>/current_discussion_prompt.md` and write
-   `<session_dir>/current_discussion_response.md` (`Overwrite: true`), then end
-   your turn with **ZERO tool calls**.
+   `current_discussion_prompt.md` and write `current_discussion_response.md`
+   (`Overwrite: true`), then end your turn with **ZERO tool calls**.
 
-2. Only after `blind-reader`'s idle completion notice arrives, record the reply
-   (verifying tool usage via `--subagent-log` or `[Tools: ...]` /
-   `<!-- TOOLS: ... -->` receipts):
+2. Only after `blind-reader`'s idle notice arrives, record the reply:
 
    ```bash
    <skill_dir>/.bin/lets-read discuss \
@@ -392,8 +463,8 @@ host banner, and link to `lets_read_log.md`, `memory.md`,
 
 If the user replies with comments, questions, or non-spoiler discussion:
 
-1. Generate `<session_dir>/current_discussion_prompt.md` using `discuss-prompt`
-   (or pass `--user-file "<session_dir>/last_user_message.md"`):
+1. Generate `current_discussion_prompt.md` using `discuss-prompt` (or
+   `--user-file "<session_dir>/last_user_message.md"`):
 
    ```bash
    <skill_dir>/.bin/lets-read discuss-prompt \
@@ -407,8 +478,7 @@ If the user replies with comments, questions, or non-spoiler discussion:
    `current_discussion_response.md`, then end your turn with **ZERO tool
    calls**.
 
-3. Only after `blind-reader`'s idle completion notice arrives, record the
-   response:
+3. Only after `blind-reader`'s idle notice arrives, record the response:
 
    ```bash
    <skill_dir>/.bin/lets-read discuss \
@@ -423,26 +493,26 @@ If the user replies with comments, questions, or non-spoiler discussion:
 
 #### Batch Mode
 
-Delegate long read-throughs in sequential batches of **~10 chunks** (`1..10`,
-`11..20`, etc.; if $\le 3$ chunks would remain after a batch, fold them into
+Delegate long read-throughs in sequential batches of **~7–8 chunks** (`1..8`,
+`9..16`, etc.; if $\le 3$ chunks would remain after a batch, fold them into
 the current batch so chunk `N/N` and the Final Wrapup finish together):
 
 1. Call `invoke_subagent` (`TypeName: "self"`,
-   `Role: "Batch Read-Through Driver"`), passing the exact paths `<skill_dir>`,
+   `Role: "Batch Read-Through Driver"`), passing `<skill_dir>`,
    `<skill_dir>/.bin/lets-read`, `<skill_dir>/SKILL.md`, `<session_dir>`, and
-   the target chunk range (`<start_chunk>..<end_chunk>`), and instruct the
-   driver to:
+   `<start_chunk>..<end_chunk>`, and instruct the driver to:
 
-   - Read `<skill_dir>/SKILL.md` in full first; if checking session state, run
+   - Read `<skill_dir>/SKILL.md` in full first; check state via
      `<skill_dir>/.bin/lets-read status --session "<session_dir>"` (**never**
-     run `ls`, `cat state.json`, `head`, `tail`, or guessed binary paths).
+     `ls`, `cat state.json`, `head`, `tail`, or guessed binary paths).
 
-   - Execute **Step 4** using `<skill_dir>/.bin/lets-read` for each assigned
-     chunk (plus **Step 6** Final Wrapup if completing chunk `N/N`), strictly
-     honoring the **Hard Anti-Race Barrier** (`< 1` reader or `< 3` / `< 4`
+   - Execute **Step 4** for each assigned chunk (plus **Step 6** Final Wrapup if
+     completing chunk `N/N`), strictly honoring the **Hard Anti-Race Barrier**
+     (`< 1` `script-writer`, `researcher`, or `blind-reader` or `< 3` / `< 4`
      reviewers idle means **ZERO tool calls**; never emit `"Waiting for..."`
-     alongside `run_command`) and killing one-shot `topic-curator` via
-     `manage_subagents(Action: "kill")` right after `lets-read judge`.
+     alongside `run_command`) and killing one-shot `script-writer` after
+     `lets-read script` and one-shot `topic-curator` after `lets-read judge` via
+     `manage_subagents(Action: "kill")`.
 
    - Before returning, call `manage_subagents` (`Action: "kill_all"`) to
      terminate all remaining leaf subagents spawned during its batch.
@@ -453,29 +523,42 @@ the current batch so chunk `N/N` and the Final Wrapup finish together):
      Batch complete: completed_range=<A..B>, chunk_index=<N>/<Total>, active_predictions_count=<K>, is_finished=<true|false>.
      ```
 
-2. When the `self` batch driver returns its 1-line summary, terminate that
-   finished driver via `manage_subagents` (`Action: "kill"`).
+2. When the `self` batch driver returns its 1-line summary, terminate it via
+   `manage_subagents` (`Action: "kill"`).
 
 3. If more chunks remain before the user's target or `"is_finished": true`,
    invoke a **new** `self` subagent (`Role: "Batch Read-Through Driver"`) for
-   the next ~10-chunk batch.
+   the next ~7–8-chunk batch.
 
 ### Step 6: Dedicated Final Wrapup Round (When `"wrapup_pending": true`)
 
-- Run `next` one more time to unlock the **Final Wrapup Round**
-  (`"status": "wrapup_unlocked"`):
+- Run the same pre-`record` pipeline (`next` → `script` → `research`) to unlock
+  the **Final Wrapup Round**:
 
-  ```bash
-  <skill_dir>/.bin/lets-read next --session "<session_dir>"
-  ```
+  1. Run `<skill_dir>/.bin/lets-read next --session "<session_dir>"`
+     (`"status": "awaiting_script"`, `"is_wrapup": true`), call
+     `invoke_subagent` (`TypeName: "script-writer"`,
+     `Role: "Unresearched Script Writer"`) to read `current_script_prompt.md`
+     and write `current_script_response.md`, and wait for its idle notice
+     (`ZERO tool calls`).
 
-- Send a 1-line notification to `blind-reader` (via `send_message`, or
-  `invoke_subagent` if no `blind-reader` is active in this conversation) to
-  read `current_prompt.md` and write `current_reader_response.md`, then end
-  your turn with **ZERO tool calls**.
+  2. Run `lets-read script` (passing `--session "<session_dir>"` and
+     `--subagent-log "<script_writer_logAbsoluteUri>"`), kill `script-writer`
+     via `manage_subagents(Action: "kill")`, notify `researcher` (via
+     `send_message`, or `invoke_subagent` if no `researcher` is active) to read
+     `current_research_prompt.md` and write `current_research_response.md`, and
+     wait for its idle notice (`ZERO tool calls`).
 
-- Only after `blind-reader`'s idle completion notice arrives, record the Final
-  Wrapup (no `judge` step is needed after `"wrapup_recorded"`):
+  3. Run `lets-read research` (passing `--session "<session_dir>"` and
+     `--subagent-log "<researcher_logAbsoluteUri>"`, returning
+     `"status": "wrapup_unlocked"`), send a 1-line notification to
+     `blind-reader` (via `send_message`, or `invoke_subagent` if no
+     `blind-reader` is active in this conversation) to read `current_prompt.md`
+     and write `current_reader_response.md`, and wait for its idle notice
+     (`ZERO tool calls`).
+
+- Only after `blind-reader`'s idle notice arrives, record the Final Wrapup (no
+  `judge` or `fact-checker` step runs after `"wrapup_recorded"`):
 
   ```bash
   <skill_dir>/.bin/lets-read record \

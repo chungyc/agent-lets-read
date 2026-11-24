@@ -15,14 +15,11 @@ import qualified Data.Text.IO as TIO
 import LetsRead.Command.Common (usage)
 import LetsRead.Types
   ( loadState
-  , renderStateJson
+  , readSessionFileStatus
+  , renderStateJsonWithFiles
   )
-import System.Directory
-  ( canonicalizePath
-  , doesFileExist
-  )
+import System.Directory (canonicalizePath)
 import System.Exit (die)
-import System.FilePath ((</>))
 
 -- | Parse CLI arguments for the @status@ subcommand, returning the session directory path.
 parseStatusArgs :: [String] -> IO FilePath
@@ -40,7 +37,5 @@ cmdStatus :: FilePath -> IO ()
 cmdStatus rawSessionDir = do
   sessionDir <- canonicalizePath rawSessionDir
   st <- loadState sessionDir
-  hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
-  hasFactCheckPending <- doesFileExist (sessionDir </> "current_fact_check_questions.md")
-  hasTopicPrompt <- doesFileExist (sessionDir </> "current_topic_prompt.md")
-  TIO.putStr (renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt st)
+  sfs <- readSessionFileStatus sessionDir
+  TIO.putStr (renderStateJsonWithFiles sessionDir sfs st)

@@ -7,9 +7,10 @@ chunk-by-chunk "Let's Read" liveblog of a story or book in `.txt`, `.md`,
 When you ask an AI assistant to liveblog a book normally, it either reads ahead
 in the file or draws on spoilers from its training data. This plugin prevents
 both by sealing the story inside an obfuscated archive controlled by a compiled
-Haskell gatekeeper and delegating the reading, prediction judging,
-fact-checking, editorial critique, and topic indexing to five isolated
-subagents that exchange data through predetermined session files.
+Haskell gatekeeper and delegating the draft topic scouting, continuity/canon
+research, reading, prediction judging, fact-checking, editorial critique, and
+topic indexing to seven isolated subagents that exchange data through
+predetermined session files.
 
 ## Prerequisites
 
@@ -100,7 +101,7 @@ indices across `chunks/`, `entries/`, and `predictions/`.
 ### Reader Notebook
 
 The blind reader's evolving unspoiled notebook (`memory.md`) of characters,
-factions, plot threads, and active predictions.
+factions, plot threads, and active mysteries.
 
 ## How It Works
 
@@ -110,7 +111,11 @@ per-chunk loop (orchestrated by the host session):
 ```mermaid
 flowchart TD
     V["Sealed Story Vault (.vault.bin)"] -->|"unlocks 1 chunk"| GK1["Haskell Gatekeeper (next)"]
-    GK1 -->|"current_chunk.md + prompt"| BR["Blind Reader"]
+    GK1 -->|"current_chunk.md + script prompt"| SW["Script Writer (stateless)"]
+    SW -->|"unresearched draft"| GK_S["Haskell Gatekeeper (script)"]
+    GK_S -->|"quarantined draft (deletes script files)"| RES["Researcher"]
+    RES -->|"verified excerpts + canon notes"| GK_R["Haskell Gatekeeper (research)"]
+    GK_R -->|"current_chunk.md + current_research.md (blind to script)"| BR["Blind Reader"]
     BR -->|"commentary + new prediction"| GK2["Haskell Gatekeeper (record)"]
 
     subgraph Concurrent["Concurrent Review"]
@@ -139,15 +144,33 @@ flowchart TD
 
 Implemented in [LetsRead.hs](./skills/lets-read/scripts/LetsRead.hs). Splits the
 source story into chapter-aware chunks, seals them inside the session vault,
-unlocks strictly one chunk at a time, and manages all session state, prediction
-scoreboards, and bounded multi-layer indices.
+unlocks strictly one chunk at a time, enforces script quarantine and receipt
+verification, and manages all session state, prediction scoreboards, and bounded
+multi-layer indices.
+
+### Script Writer
+
+Defined in [script-writer.md](./agents/script-writer.md). Runs as a stateless,
+persona-matched first-pass reader on each unlocked chunk (and before the Final
+Wrapup) to surface the callbacks, predictions, and canon comparisons the persona
+naturally reaches for; its draft is consumed solely to build the research prompt
+and is deleted before the blind reader runs.
+
+### Researcher
+
+Defined in [researcher.md](./agents/researcher.md). Collects receipt-verified
+verbatim excerpts from earlier story chunks, prior commentary entries, and
+prediction records—plus spoiler-safe external canon checks—relevant to what the
+script writer touched, producing a neutral reference packet without ever
+revealing the draft to the blind reader.
 
 ### Blind Reader
 
 Defined in [blind-reader.md](./agents/blind-reader.md). Reads each newly
-unlocked passage without access to future chapters or the source file. It reacts
-in character in the session's active persona, stakes one new falsifiable
-prediction per chunk, and maintains an evolving notebook (`memory.md`).
+unlocked passage alongside the verified reference packet (completely blind to
+the script writer's draft and without access to future chapters). It reacts in
+character in the session's active persona, stakes one new falsifiable prediction
+per chunk, and maintains an evolving notebook (`memory.md`).
 
 ### Prediction Judge
 

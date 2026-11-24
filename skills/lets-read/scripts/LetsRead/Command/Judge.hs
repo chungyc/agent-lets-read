@@ -39,7 +39,6 @@ import LetsRead.Memory
 import LetsRead.Predictions
   ( applyJudgeVerdicts
   , countActivePredictions
-  , extractJudgeSection
   , formatAuditEntryCallout
   , formatJudgeCallout
   , stripExistingJudgeCallout
@@ -170,14 +169,13 @@ cmdJudge opts = do
   (criticFeedbackWritten, criticNotesCount, factCheckPending, factQueriesCount, rejectedCriticQuotesCount, factCheckAuditWarningsCount) <-
     processCriticFeedbackWithAudit sessionDir st curIdx factAudit (stPendingLinterWarnings st) (Just rawFactCheck) (Just rawCritic)
 
-  let judgeSec = extractJudgeSection rawJudge
-      (preds', judgeAuditBlocks, judgeSummaryLines) =
+  let (preds', judgeAuditBlocks, judgeSummaryLines) =
         applyJudgeVerdicts
           curIdx
           (currentChunkMetaTuple st)
           (stPredictions st)
           (stPendingRetirements st)
-          judgeSec
+          rawJudge
       entriesDir = sessionDir </> "entries"
       entryFile = entriesDir </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")
 

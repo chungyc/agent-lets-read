@@ -6,11 +6,14 @@ All {{TOTAL_CHUNKS}} story chunks of *{{TITLE}}* have been read and
 
 ## Session Files & Context
 
-- Reader Memory (`memory.md`, mandatory read — includes final Judge rulings):
-  {{MEMORY_FILE}}
+- Reader Memory (`memory.md`, mandatory read — curated summary, cast, and
+  running gags): {{MEMORY_FILE}}
 
 - Prediction Hall of Fame & Shame (mandatory read — final scoreboard, Confirmed
   Hits, Subverted Twists, and Debunked Misses): {{HALL_OF_FAME_FILE}}
+
+- Pre-Pulled Reference Packet (mandatory read — verified story, entry,
+  prediction, and canon excerpts): {{RESEARCH_FILE}}
 
 - Story Chunks Indices (`chunks/by_chronology.md` & `chunks/by_topic.md`,
   on-demand `read_file`): {{CHUNKS_DIR}}
@@ -41,10 +44,12 @@ All {{TOTAL_CHUNKS}} story chunks of *{{TITLE}}* have been read and
 
 ### 1. Mandatory Reads & Pre-Writing Verification
 
-Read `memory.md` and `predictions/hall_of_fame.md` first (applying any
-`## Persona & Style Critique` notes above silently). Because your subagent
-instance may have rotated in late in the story, do **NOT** reconstruct earlier
-prediction wording or multi-chapter chronology from memory alone:
+Read `memory.md`, `predictions/hall_of_fame.md`, and `current_research.md`
+first (applying any `## Persona & Style Critique` notes above silently, and
+using `current_research.md` selectively where relevant without forcing
+callbacks). Because your subagent instance may have rotated in late in the
+story, do **NOT** reconstruct earlier prediction wording or multi-chapter
+chronology from memory or fanon alone:
 
 - Check the **exact original `**Clue/Anomaly**` and `**Theory**` text** in
   `predictions/hall_of_fame.md` (or via `read_file` on
@@ -71,8 +76,9 @@ automatically).
 
 #### Finale Verdicts & Immediate Aftermath
 
-React to `prediction-judge`'s final rulings from the last chunk
-(`### Latest Prediction Judge Rulings` in `memory.md`).
+React to `prediction-judge`'s final rulings from the last chunk (shown above if
+any resolved on the final chunk, and collected in
+`predictions/hall_of_fame.md`).
 
 #### Whole-Story & Character Retrospective
 
@@ -101,5 +107,5 @@ Write line 1 as `<!-- TOOLS: read_file(...) -->` followed by
 `{{READER_RESPONSE_FILE}}` using `write_file` (`Overwrite: true`). Once
 `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text
 completion notice ending with
-`[Tools: read_file(memory.md, predictions/hall_of_fame.md, ...)]` and no tool
-calls (do not call `send_message` or re-read files).
+`[Tools: read_file(memory.md, current_research.md, ...)]` and no tool calls (do
+not call `send_message` or re-read files).

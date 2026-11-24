@@ -107,7 +107,9 @@ testRec1OrchestratorGuardrails mBinPath = do
     Just binPath -> withTempDir "rec1-cli" $ \tmp -> do
       let repoDir = takeDirectory (takeDirectory (takeDirectory (takeDirectory binPath)))
           agentFiles =
-            [ "blind-reader.md"
+            [ "script-writer.md"
+            , "researcher.md"
+            , "blind-reader.md"
             , "prediction-judge.md"
             , "fact-checker.md"
             , "commentary-critic.md"
@@ -147,13 +149,110 @@ testRec1OrchestratorGuardrails mBinPath = do
 
       (ecNext, outNext, _) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
       assertEq "CLI next exit 0" ExitSuccess ecNext
-      assertBool "next hint forbids Waiting... race" ("ZERO tool calls" `isInfixOf` outNext && "Waiting..." `isInfixOf` outNext)
+      assertBool
+        "next unlocks awaiting_script and forbids Waiting... race"
+        ( "\"status\": \"awaiting_script\"" `isInfixOf` outNext
+            && "\"is_wrapup\": false" `isInfixOf` outNext
+            && "ZERO tool calls" `isInfixOf` outNext
+            && "Waiting..." `isInfixOf` outNext
+        )
 
-      let readerResp = sessDir </> "current_reader_response.md"
+      (ecStatScript, outStatScript, _) <- readProcessWithExitCode binPath ["status", "--session", sessDir] ""
+      assertEq "CLI status during awaiting_script exit 0" ExitSuccess ecStatScript
+      assertBool
+        "status reports awaiting_script true and awaiting_research/awaiting_reader false"
+        ( "\"awaiting_script\": true" `isInfixOf` outStatScript
+            && "\"awaiting_research\": false" `isInfixOf` outStatScript
+            && "\"awaiting_reader\": false" `isInfixOf` outStatScript
+        )
+
+      (ecEarlyRes, _, _) <- readProcessWithExitCode binPath ["research", "--session", sessDir] ""
+      assertBool "CLI research is gated while awaiting_script" (ecEarlyRes /= ExitSuccess)
+      (ecEarlyRec1, _, _) <- readProcessWithExitCode binPath ["record", "--session", sessDir] ""
+      assertBool "CLI record is gated while awaiting_script" (ecEarlyRec1 /= ExitSuccess)
+
+      let scriptResp = sessDir </> "current_script_response.md"
+          researchResp = sessDir </> "current_research_response.md"
+          readerResp = sessDir </> "current_reader_response.md"
+          secretCanaryPhrase = "CANARY_SECRET_MARKER_0001"
+      TIO.writeFile
+        scriptResp
+        ( T.unlines
+            [ "<!-- TOOLS: read_file(current_chunk.md, memory.md) -->"
+            , "=== DRAFT COMMENTARY ==="
+            , "> \"Inspector Lin examined the brass compass on the dock.\""
+            , ""
+            , "Unresearched canary riff " <> T.pack secretCanaryPhrase <> " wondering about harbor compasses!"
+            , ""
+            , "=== DRAFT PREDICTION ==="
+            , "- **[Predicted Chunk 0001 | Topics: Inspector Lin, Brass Compass]** **Clue/Anomaly**: Unmarked compass -> **Theory**: Mara left it (vs. **Plausible Rival**: Dropped by crew)"
+            ]
+        )
+      (ecScr1, outScr1, errScr1) <- readProcessWithExitCode binPath ["script", "--session", sessDir] ""
+      assertEq ("CLI script chunk 1/2 exit 0 (" ++ errScr1 ++ ")") ExitSuccess ecScr1
+      assertBool
+        "script transitions to awaiting_research and reminds host to kill script-writer"
+        ( "\"status\": \"awaiting_research\"" `isInfixOf` outScr1
+            && "script-writer" `isInfixOf` outScr1
+            && "manage_subagents" `isInfixOf` outScr1
+            && "ZERO tool calls" `isInfixOf` outScr1
+        )
+      hasScriptPromptAfterScr <- doesFileExist (sessDir </> "current_script_prompt.md")
+      hasScriptRespAfterScr <- doesFileExist scriptResp
+      assertBool
+        "script immediately deletes current_script_prompt.md and current_script_response.md"
+        (not hasScriptPromptAfterScr && not hasScriptRespAfterScr)
+
+      (ecStatRes, outStatRes, _) <- readProcessWithExitCode binPath ["status", "--session", sessDir] ""
+      assertEq "CLI status during awaiting_research exit 0" ExitSuccess ecStatRes
+      assertBool
+        "status reports awaiting_research true"
+        ( "\"awaiting_script\": false" `isInfixOf` outStatRes
+            && "\"awaiting_research\": true" `isInfixOf` outStatRes
+            && "\"awaiting_reader\": false" `isInfixOf` outStatRes
+        )
+      (ecEarlyRec2, _, _) <- readProcessWithExitCode binPath ["record", "--session", sessDir] ""
+      assertBool "CLI record is gated while awaiting_research" (ecEarlyRec2 /= ExitSuccess)
+
+      TIO.writeFile
+        researchResp
+        ( T.unlines
+            [ "<!-- TOOLS: read_file(current_chunk.md, memory.md) -->"
+            , "=== RESEARCH NOTES ==="
+            , "- NONE"
+            ]
+        )
+      (ecRes1, outRes1, errRes1) <- readProcessWithExitCode binPath ["research", "--session", sessDir] ""
+      assertEq ("CLI research chunk 1/2 exit 0 (" ++ errRes1 ++ ")") ExitSuccess ecRes1
+      assertBool
+        "research unlocks chunk for blind-reader"
+        ("\"status\": \"unlocked\"" `isInfixOf` outRes1 && "ZERO tool calls" `isInfixOf` outRes1)
+      hasResPromptAfterRes <- doesFileExist (sessDir </> "current_research_prompt.md")
+      hasResRespAfterRes <- doesFileExist researchResp
+      hasResPacket1 <- doesFileExist (sessDir </> "current_research.md")
+      assertBool
+        "research deletes current_research_prompt.md and current_research_response.md and writes current_research.md"
+        (not hasResPromptAfterRes && not hasResRespAfterRes && hasResPacket1)
+      resPacket1Txt <- TIO.readFile (sessDir </> "current_research.md")
+      readerPrompt1Txt <- TIO.readFile (sessDir </> "current_prompt.md")
+      assertBool
+        "blind-reader files contain zero trace of the deleted canary draft"
+        ( not (T.pack secretCanaryPhrase `T.isInfixOf` resPacket1Txt)
+            && not (T.pack secretCanaryPhrase `T.isInfixOf` readerPrompt1Txt)
+        )
+      (ecStatReader, outStatReader, _) <- readProcessWithExitCode binPath ["status", "--session", sessDir] ""
+      assertEq "CLI status during awaiting_reader exit 0" ExitSuccess ecStatReader
+      assertBool
+        "status reports awaiting_reader true once current_prompt.md is unlocked"
+        ( "\"awaiting_script\": false" `isInfixOf` outStatReader
+            && "\"awaiting_research\": false" `isInfixOf` outStatReader
+            && "\"awaiting_reader\": true" `isInfixOf` outStatReader
+        )
+
       TIO.writeFile
         readerResp
         ( T.unlines
-            [ "<!-- TOOLS: read_file(current_chunk.md, memory.md) -->"
+            [ "<!-- TOOLS: read_file(current_chunk.md, memory.md, current_research.md) -->"
             , "=== COMMENTARY ==="
             , "> \"Inspector Lin examined the brass compass on the dock.\""
             , ""
@@ -227,13 +326,36 @@ testRec1OrchestratorGuardrails mBinPath = do
       (ecNext2, _, errNext2) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
       assertEq ("CLI next chunk 2/2 exit 0 (" ++ errNext2 ++ ")") ExitSuccess ecNext2
       TIO.writeFile
-        readerResp
+        scriptResp
+        ( T.unlines
+            [ "<!-- TOOLS: read_file(current_chunk.md, memory.md, chunks/chunk_0001.md, chunks/by_chronology.md, entries/by_chronology.md) -->"
+            , "=== DRAFT COMMENTARY ==="
+            , "Mara is climbing toward the beacon—maybe connecting back to the compass on the dock!"
+            ]
+        )
+      (ecScr2, _, errScr2) <- readProcessWithExitCode binPath ["script", "--session", sessDir] ""
+      assertEq ("CLI script chunk 2/2 exit 0 (" ++ errScr2 ++ ")") ExitSuccess ecScr2
+      TIO.writeFile
+        researchResp
         ( T.unlines
             [ "<!-- TOOLS: read_file(current_chunk.md, memory.md, chunks/chunk_0001.md) -->"
+            , "=== RESEARCH NOTES ==="
+            , "- **[Earlier Story Passage | Source: chunks/chunk_0001.md | Quote: \"Inspector Lin examined the brass compass on the dock.\"]** Chapter 1 established the unmarked brass compass on the dock."
+            ]
+        )
+      (ecRes2, outRes2, errRes2) <- readProcessWithExitCode binPath ["research", "--session", sessDir] ""
+      assertEq ("CLI research chunk 2/2 exit 0 (" ++ errRes2 ++ ")") ExitSuccess ecRes2
+      assertBool
+        "research on chunk 2/2 verifies 1 excerpt from chunk_0001.md"
+        ("\"verified_research_notes_count\": 1" `isInfixOf` outRes2 && "\"rejected_research_notes_count\": 0" `isInfixOf` outRes2)
+      TIO.writeFile
+        readerResp
+        ( T.unlines
+            [ "<!-- TOOLS: read_file(current_chunk.md, memory.md, current_research.md) -->"
             , "=== COMMENTARY ==="
             , "> \"Mara climbed the spiral stairs toward the beacon.\""
             , ""
-            , "Mara was at the lighthouse the whole time!"
+            , "Mara was at the lighthouse the whole time, right after the dockside compass in `chunks/chunk_0001.md`!"
             , ""
             , "- **[Predicted Chunk 0002 | Topics: Mara, Lighthouse, Beacon]** **Clue/Anomaly**: Mara ascends the spiral stairs toward the unlit beacon -> **Theory**: Mara is relighting the beacon to warn ships away from the harbor reef (vs. **Plausible Rival**: She is signaling an accomplice offshore)"
             , ""
@@ -249,8 +371,11 @@ testRec1OrchestratorGuardrails mBinPath = do
             , "- **Core Premise, Timeline & Baseline Facts (Persistent)**: Inspector Lin investigates the dock while Mara climbs the lighthouse."
             ]
         )
-      (ecRec2, _, errRec2) <- readProcessWithExitCode binPath ["record", "--session", sessDir] ""
+      (ecRec2, outRec2, errRec2) <- readProcessWithExitCode binPath ["record", "--session", sessDir] ""
       assertEq ("CLI record chunk 2/2 exit 0 (" ++ errRec2 ++ ")") ExitSuccess ecRec2
+      assertBool
+        "record credits chunk_0001.md verified in current_research.md with 0 callback audit warnings"
+        ("\"reader_callback_audit_warnings_count\": 0" `isInfixOf` outRec2)
 
       TIO.writeFile
         (sessDir </> "current_judge_response.md")
@@ -387,12 +512,44 @@ testRec1OrchestratorGuardrails mBinPath = do
       (ecNextWrap, outNextWrap, errNextWrap) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
       assertEq ("CLI next wrapup unlock exit 0 (" ++ errNextWrap ++ ")") ExitSuccess ecNextWrap
       assertBool
-        "wrapup_unlocked hint mentions invoke_subagent fallback when no blind-reader is active"
-        ("\"status\": \"wrapup_unlocked\"" `isInfixOf` outNextWrap && "invoke_subagent" `isInfixOf` outNextWrap)
+        "next on wrapup starts awaiting_script with is_wrapup true"
+        ("\"status\": \"awaiting_script\"" `isInfixOf` outNextWrap && "\"is_wrapup\": true" `isInfixOf` outNextWrap)
+      (ecDoubleNextWrap, _, _) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
+      assertBool "duplicate next on wrapup without --force is gated" (ecDoubleNextWrap /= ExitSuccess)
+      TIO.writeFile
+        scriptResp
+        ( T.unlines
+            [ "<!-- TOOLS: read_file(memory.md, predictions/hall_of_fame.md, chunks/by_chronology.md, entries/by_chronology.md) -->"
+            , "=== DRAFT COMMENTARY ==="
+            , "Draft retrospective recalling the Chunk 1 compass prediction and Chapter 2 lighthouse climb."
+            ]
+        )
+      (ecScrWrap, outScrWrap, errScrWrap) <- readProcessWithExitCode binPath ["script", "--session", sessDir] ""
+      assertEq ("CLI script wrapup exit 0 (" ++ errScrWrap ++ ")") ExitSuccess ecScrWrap
+      assertBool
+        "script on wrapup emits awaiting_research and is_wrapup true"
+        ("\"status\": \"awaiting_research\"" `isInfixOf` outScrWrap && "\"is_wrapup\": true" `isInfixOf` outScrWrap)
+      TIO.writeFile
+        researchResp
+        ( T.unlines
+            [ "<!-- TOOLS: read_file(memory.md, predictions/hall_of_fame.md, predictions/pred_0001.md, entries/chunk_0002.md) -->"
+            , "=== RESEARCH NOTES ==="
+            , "- **[Prior Prediction | Source: predictions/pred_0001.md | Quote: \"Lin finds an unmarked brass compass on the dock\"]** Exact original Clue/Anomaly from Chunk 0001."
+            , "- **[Prior Session Entry | Source: entries/chunk_0002.md | Quote: \"Mara was at the lighthouse the whole time\"]** Finale liveblog reaction on Chunk 0002."
+            ]
+        )
+      (ecResWrap, outResWrap, errResWrap) <- readProcessWithExitCode binPath ["research", "--session", sessDir] ""
+      assertEq ("CLI research wrapup exit 0 (" ++ errResWrap ++ ")") ExitSuccess ecResWrap
+      assertBool
+        "wrapup_unlocked hint mentions invoke_subagent fallback and verifies both pred_0001 and entries/chunk_0002"
+        ( "\"status\": \"wrapup_unlocked\"" `isInfixOf` outResWrap
+            && "\"verified_research_notes_count\": 2" `isInfixOf` outResWrap
+            && "invoke_subagent" `isInfixOf` outResWrap
+        )
       TIO.writeFile
         readerResp
         ( T.unlines
-            [ "<!-- TOOLS: read_file(memory.md, predictions/hall_of_fame.md) -->"
+            [ "<!-- TOOLS: read_file(memory.md, predictions/hall_of_fame.md, current_research.md) -->"
             , "=== COMMENTARY ==="
             , "Looking back across both chapters, Lin's harbor investigation and Mara's climb tie together cleanly."
             ]

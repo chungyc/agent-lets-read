@@ -12,9 +12,14 @@ module LetsRead.Verification
   , renderCriticFeedbackMarkdown
   , processCriticFeedback
   , processCriticFeedbackWithAudit
+  , parseResearchNotesSection
+  , verifyAndFilterResearchBullets
+  , renderCurrentResearchMarkdown
+  , extractVerifiedResearchChunkRefs
   , parseToolReceiptTag
   , resolveSubagentToolAudit
   , auditReaderToolUsage
+  , auditReaderToolUsageWithResearch
   , auditFactCheckerClaims
   , extractSubagentLogResponse
   , checkSubagentLogUsedSearchWeb
@@ -48,6 +53,7 @@ import LetsRead.Types
   , stripFileUriPrefix
   , stripToolReceiptComments
   , wrapMarkdownBullet
+  , wrapMarkdownParagraph
   , wrapMarkdownQuote
   )
 import Numeric (readHex)
@@ -460,6 +466,245 @@ isStoryChunkFileRef rawRef =
                 else Nothing
         else Nothing
 
+isEntryFileRef :: Text -> Maybe Int
+isEntryFileRef rawRef =
+  let norm = T.map (\c -> if c == '\\' then '/' else c) (T.dropAround (\c -> c == '"' || c == '\'' || c == '`') (T.strip rawRef))
+      low = T.toLower norm
+      base = T.unpack (snd (T.breakOnEnd "/" norm))
+      inEntriesDir = ("/entries/" <> T.pack base) `T.isSuffixOf` low || ("entries/" <> T.pack base) == low
+   in if inEntriesDir && "chunk_" `isPrefixOf` base && ".md" `isSuffixOf` base
+        then
+          let digits = take (length base - 9) (drop 6 base)
+           in if not (null digits) && all isDigit digits
+                then case reads digits of
+                  [(n, "")] | n >= 1 -> Just n
+                  _ -> Nothing
+                else Nothing
+        else Nothing
+
+isPredictionFileRef :: Text -> Maybe Int
+isPredictionFileRef rawRef =
+  let norm = T.map (\c -> if c == '\\' then '/' else c) (T.dropAround (\c -> c == '"' || c == '\'' || c == '`') (T.strip rawRef))
+      low = T.toLower norm
+      base = T.unpack (snd (T.breakOnEnd "/" norm))
+      inPredsOrBare =
+        not ("/" `T.isInfixOf` norm)
+          || ("/predictions/" <> T.pack base) `T.isSuffixOf` low
+          || ("predictions/" <> T.pack base) == low
+   in if inPredsOrBare && "pred_" `isPrefixOf` base && ".md" `isSuffixOf` base
+        then
+          let digits = take (length base - 8) (drop 5 base)
+           in if not (null digits) && all isDigit digits
+                then case reads digits of
+                  [(n, "")] | n >= 1 -> Just n
+                  _ -> Nothing
+                else Nothing
+        else Nothing
+
+isMemoryArchiveFileRef :: Text -> Maybe (String, Int)
+isMemoryArchiveFileRef rawRef =
+  let norm = T.map (\c -> if c == '\\' then '/' else c) (T.dropAround (\c -> c == '"' || c == '\'' || c == '`') (T.strip rawRef))
+      low = T.toLower norm
+      base = T.unpack (snd (T.breakOnEnd "/" norm))
+      inMemArcDir =
+        ("/archive/memory/" <> T.pack base) `T.isSuffixOf` low
+          || ("archive/memory/" <> T.pack base) == low
+      parsePfx pfx =
+        if pfx `isPrefixOf` base && ".md" `isSuffixOf` base
+          then
+            let digits = take (length base - length pfx - 3) (drop (length pfx) base)
+             in if not (null digits) && all isDigit digits
+                  then case reads digits of
+                    [(n, "")] | n >= 1 -> Just (pfx, n)
+                    _ -> Nothing
+                  else Nothing
+          else Nothing
+   in if not inMemArcDir
+        then Nothing
+        else case parsePfx "curated_" of
+          Just res -> Just res
+          Nothing -> parsePfx "chunk_"
+
+isHallOfFameFileRef :: Text -> Bool
+isHallOfFameFileRef rawRef =
+  let norm = T.map (\c -> if c == '\\' then '/' else c) (T.dropAround (\c -> c == '"' || c == '\'' || c == '`') (T.strip rawRef))
+      low = T.toLower norm
+   in low == "predictions/hall_of_fame.md" || "/predictions/hall_of_fame.md" `T.isSuffixOf` low || low == "hall_of_fame.md"
+
+isResearchNoneLine :: Text -> Bool
+isResearchNoneLine raw =
+  let s = T.toLower (T.strip raw)
+      noBullet =
+        if "- " `T.isPrefixOf` s || "* " `T.isPrefixOf` s
+          then T.strip (T.drop 2 s)
+          else s
+      cleaned = T.dropAround (\c -> c == '*' || c == '_' || c == '`' || c == '(' || c == ')' || c == '.') noBullet
+   in T.null cleaned
+        || cleaned == "none"
+        || cleaned == "pass"
+        || cleaned == "n/a"
+        || "no prior" `T.isPrefixOf` cleaned
+        || "no earlier" `T.isPrefixOf` cleaned
+        || "no specific" `T.isPrefixOf` cleaned
+
+parseResearchNotesSection :: Text -> [Text]
+parseResearchNotesSection raw =
+  let ls = coalesceBulletLines (T.lines (stripToolReceiptComments raw))
+      isResHdr l = T.toUpper (T.strip l) == "=== RESEARCH NOTES ==="
+      (_, afterHdr) = break isResHdr ls
+      targetLines =
+        case afterHdr of
+          (_ : rest) -> takeWhile (not . isDelimiterHeaderLine) rest
+          [] -> ls
+      isBullet l =
+        let t = T.strip l
+         in ("- " `T.isPrefixOf` t || "* " `T.isPrefixOf` t) && not (isResearchNoneLine t)
+   in [T.strip l | l <- targetLines, isBullet l]
+
+hasDraftQuarantineLeak :: Text -> Bool
+hasDraftQuarantineLeak bullet =
+  let low = T.toLower bullet
+      forbidden =
+        [ "script-writer"
+        , "script writer"
+        , "draft commentary"
+        , "draft prediction"
+        , "current_script"
+        , "unverified draft"
+        , "internal draft"
+        ]
+   in any (`T.isInfixOf` low) forbidden
+
+verifyAndFilterResearchBullets :: FilePath -> Int -> Bool -> SubagentToolAudit -> [Text] -> IO ([Text], Int)
+verifyAndFilterResearchBullets sessionDir curIdx isWrapup researchAudit bullets = do
+  let allReadPaths = staReadFiles researchAudit ++ staPriorTranscriptReadFiles researchAudit
+      readStoryChunks = nub [n | f <- allReadPaths, Just n <- [isStoryChunkFileRef f]]
+      readEntryChunks = nub [n | f <- allReadPaths, Just n <- [isEntryFileRef f]]
+      readPredChunks = nub [n | f <- allReadPaths, Just n <- [isPredictionFileRef f]]
+      readMemArchives = nub [ pair | f <- allReadPaths, Just pair <- [isMemoryArchiveFileRef f] ]
+      readHallOfFame = any isHallOfFameFileRef allReadPaths
+      readCurChunk =
+        any
+          ( \f ->
+              let b = takeFileName (stripFileUriPrefix (T.unpack (T.strip f)))
+               in b == "current_chunk.md"
+          )
+          allReadPaths
+      hasSearchWebCall = staUsedSearchWeb researchAudit == Just True
+      enforceReceipts = staSource researchAudit /= "unavailable"
+      maxPriorIdx = if isWrapup then curIdx else curIdx - 1
+      resolveResearchTarget srcRaw
+        | T.toLower (T.pack (takeFileName srcRaw)) == "current_chunk.md" && not isWrapup =
+            Just (sessionDir </> "current_chunk.md", readCurChunk || curIdx `elem` readStoryChunks)
+        | isWrapup && isHallOfFameFileRef (T.pack srcRaw) =
+            Just (sessionDir </> "predictions" </> "hall_of_fame.md", readHallOfFame)
+        | Just n <- isStoryChunkFileRef (T.pack srcRaw)
+        , n >= 1 && n <= curIdx =
+            let rMatch = n `elem` readStoryChunks || (not isWrapup && n == curIdx && readCurChunk)
+             in Just (sessionDir </> "chunks" </> ("chunk_" ++ padChunkNumber n ++ ".md"), rMatch)
+        | Just n <- isEntryFileRef (T.pack srcRaw)
+        , n >= 1 && n <= maxPriorIdx =
+            Just (sessionDir </> "entries" </> ("chunk_" ++ padChunkNumber n ++ ".md"), n `elem` readEntryChunks)
+        | Just n <- isPredictionFileRef (T.pack srcRaw)
+        , n >= 1 && n <= maxPriorIdx =
+            Just (sessionDir </> "predictions" </> ("pred_" ++ padChunkNumber n ++ ".md"), n `elem` readPredChunks)
+        | Just (pfx, n) <- isMemoryArchiveFileRef (T.pack srcRaw)
+        , n >= 1 && n <= maxPriorIdx =
+            Just (sessionDir </> "archive" </> "memory" </> (pfx ++ padChunkNumber n ++ ".md"), (pfx, n) `elem` readMemArchives)
+        | otherwise = Nothing
+  results <- forM bullets $ \b ->
+    if hasDraftQuarantineLeak b
+      then pure (Left ())
+      else case extractBracketHeaderFromBullet b of
+        Nothing -> pure (Left ())
+        Just hdr ->
+          let hdrLow = T.toLower hdr
+           in if "search_web" `T.isInfixOf` hdrLow
+                && ("external canon" `T.isInfixOf` hdrLow || "reference" `T.isInfixOf` hdrLow || "source:" `T.isInfixOf` hdrLow)
+                then
+                  if hasSearchWebCall
+                    then pure (Right (T.strip b))
+                    else pure (Left ())
+                else case extractSourceAndQuote hdr of
+                  Nothing -> pure (Left ())
+                  Just (relSrc, quoteTxt) ->
+                    case resolveResearchTarget relSrc of
+                      Nothing -> pure (Left ())
+                      Just (targetPath, receiptOk)
+                        | enforceReceipts && not receiptOk -> pure (Left ())
+                        | otherwise -> do
+                            exists <- doesFileExist targetPath
+                            if not exists
+                              then pure (Left ())
+                              else do
+                                docTxt <- readTextFileSafe targetPath
+                                let normDoc = normalizeForQuoteCheck docTxt
+                                    rawSegs = concatMap (T.splitOn "...") (T.splitOn "[...]" quoteTxt)
+                                    normSegs = [normalizeForQuoteCheck s | s <- rawSegs, not (T.null (T.strip s))]
+                                    hasSubstantialSeg = any (\s -> T.length s >= 6) normSegs
+                                    allMatch = not (null normSegs) && hasSubstantialSeg && all (`T.isInfixOf` normDoc) normSegs
+                                 in if allMatch
+                                      then pure (Right (T.strip b))
+                                      else pure (Left ())
+  let verified = [b | Right b <- results]
+      rejected = length [() | Left () <- results]
+  pure (verified, rejected)
+
+renderCurrentResearchMarkdown :: FilePath -> Int -> Bool -> [Text] -> Text
+renderCurrentResearchMarkdown sessionDir curIdx isWrapup verifiedBullets =
+  let titleSuffix =
+        if isWrapup
+          then "Final Wrapup"
+          else "Chunk " <> T.pack (padChunkNumber curIdx)
+      notesBlock =
+        if null verifiedBullets
+          then "- *(No prior-chunk excerpts or external canon notes pulled for this turn.)*"
+          else T.intercalate "\n\n" (map (wrapMarkdownBullet 78) verifiedBullets)
+   in T.unlines
+        [ "# Pre-Pulled Continuity & Canon Reference Packet (" <> titleSuffix <> ")"
+        , ""
+        , "Session Directory: `" <> T.pack sessionDir <> "`"
+        , ""
+        , "> [!NOTE]"
+        , wrapMarkdownQuote
+            78
+            "Optional pre-pulled excerpts and external reference notes. Draw on an item only when it naturally connects to what you want to react to—never force callbacks."
+        , ""
+        , "## Story-Factual Hierarchy"
+        , ""
+        , "### 1. Explicit Story Text (Highest Authority on This Story)"
+        , ""
+        , wrapMarkdownParagraph
+            78
+            "Excerpts from `chunks/chunk_XXXX.md` (together with `current_chunk.md` and verified baseline facts in Bullet 1 of `memory.md`) are primary ground truth for what is true inside *this story* and override all other sources below."
+        , ""
+        , "### 2. External Canon and Reference Material"
+        , ""
+        , wrapMarkdownParagraph
+            78
+            "`search_web` notes establish what external source canon or real-world reference works state (overriding fanon), but never override or fill in unconfirmed facts inside *this story* where the story diverges from canon."
+        , ""
+        , "### 3. Prior Predictions, Session Entries, and Memory Snapshots"
+        , ""
+        , wrapMarkdownParagraph
+            78
+            "Excerpts from `predictions/`, `entries/`, and `archive/memory/` record earlier reader bets, verdicts, gags, and discussions only—never treat earlier reader speculation as established story fact unless confirmed by `chunks/` text."
+        , ""
+        , "## Verified Reference Notes"
+        , ""
+        , notesBlock
+        ]
+
+extractVerifiedResearchChunkRefs :: Text -> [Int]
+extractVerifiedResearchChunkRefs researchDoc =
+  nub
+    [ n
+    | l <- coalesceBulletLines (T.lines researchDoc)
+    , Just hdr <- [extractBracketHeaderFromBullet l]
+    , Just (srcPath, _) <- [extractSourceAndQuote hdr]
+    , Just n <- [isStoryChunkFileRef (T.pack srcPath)]
+    ]
+
 extractExplicitStoryChunkRefs :: Text -> [Int]
 extractExplicitStoryChunkRefs txt =
   let norm = T.map (\c -> if c == '\\' then '/' else c) txt
@@ -467,15 +712,31 @@ extractExplicitStoryChunkRefs txt =
    in nub [n | rawTok <- T.words cleaned, let tok = T.dropAround (\c -> c == '.' || c == '/') rawTok, Just n <- [isStoryChunkFileRef tok]]
 
 auditReaderToolUsage :: Int -> Bool -> Text -> SubagentToolAudit -> (Maybe Bool, Int, [Text])
-auditReaderToolUsage curIdx shouldRotateRecommended commAndPredText audit =
-  let readPriorChunks = nub [n | f <- staReadFiles audit, Just n <- [isStoryChunkFileRef f], n < curIdx]
+auditReaderToolUsage curIdx shouldRotateRecommended =
+  auditReaderToolUsageWithResearch curIdx shouldRotateRecommended []
+
+auditReaderToolUsageWithResearch :: Int -> Bool -> [Int] -> Text -> SubagentToolAudit -> (Maybe Bool, Int, [Text])
+auditReaderToolUsageWithResearch curIdx shouldRotateRecommended researchChunkRefs commAndPredText audit =
+  let allReadFiles = staReadFiles audit ++ staPriorTranscriptReadFiles audit
+      didReadResearchPacket =
+        any
+          ( \f ->
+              takeFileName (stripFileUriPrefix (T.unpack (T.strip f))) == "current_research.md"
+          )
+          allReadFiles
+      creditedResearchChunks =
+        if didReadResearchPacket
+          then [n | n <- researchChunkRefs, n < curIdx]
+          else []
+      readPriorChunks = nub [n | f <- staReadFiles audit, Just n <- [isStoryChunkFileRef f], n < curIdx]
       allKnownReadChunks =
-        nub
+        nub $
           [ n
-          | f <- staReadFiles audit ++ staPriorTranscriptReadFiles audit
+          | f <- allReadFiles
           , Just n <- [isStoryChunkFileRef f]
           , n < curIdx
           ]
+            ++ creditedResearchChunks
       callbackCount = length readPriorChunks
    in if staSource audit == "unavailable" || curIdx <= 1
         then (Nothing, callbackCount, [])
@@ -987,6 +1248,8 @@ isTurnPromptFilePath :: Text -> Bool
 isTurnPromptFilePath rawP =
   takeFileName (stripFileUriPrefix (T.unpack (T.strip rawP)))
     `elem` [ "current_prompt.md"
+           , "current_script_prompt.md"
+           , "current_research_prompt.md"
            , "current_discussion_prompt.md"
            , "current_fact_check_prompt.md"
            , "current_judge_prompt.md"
@@ -1044,9 +1307,15 @@ isDelimiterHeaderLine rawLine =
   let s = T.toUpper (T.strip (T.dropAround (\c -> c == '`' || c == '*') (T.strip rawLine)))
    in s
         `elem` [ "=== COMMENTARY ==="
+               , "=== DRAFT COMMENTARY ==="
+               , "=== DRAFT PREDICTION ==="
+               , "=== RESEARCH NOTES ==="
                , "=== UPDATED MEMORY ==="
                , "=== PREDICTION UPDATES ==="
                , "=== PREDICTION JUDGMENTS ==="
+               , "=== CONDITIONAL RETIREMENTS ==="
+               , "=== CONDITIONAL RETIREMENT ==="
+               , "=== RETIREMENTS ==="
                , "=== VERIFIED CLAIMS LOG ==="
                , "=== CRITIC FEEDBACK ==="
                , "=== DISPUTED FACTS & MEMORY CHECKS ==="

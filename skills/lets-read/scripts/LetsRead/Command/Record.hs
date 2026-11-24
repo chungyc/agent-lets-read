@@ -4,10 +4,9 @@
 -- Module      : LetsRead.Command.Record
 -- Description : Handler and CLI parser for the 'record' subcommand
 --
--- Records the blind-reader's commentary, chunk summaries, prediction proposals
--- and conditional retirement nominations, and curated memory updates for the
--- currently unlocked chunk (or the Final Wrapup & Retrospective turn). Runs the
--- deterministic style linter and writes the prompt files for @prediction-judge@,
+-- Records the blind-reader's commentary, chunk summaries, prediction proposals,
+-- and curated memory updates for the currently unlocked chunk (or the Final
+-- Wrapup & Retrospective turn). Runs the deterministic style linter and writes the prompt files for @prediction-judge@,
 -- @fact-checker@, @commentary-critic@, and (when triggered) @topic-curator@.
 module LetsRead.Command.Record
   ( RecordOptions (..)
@@ -64,10 +63,12 @@ import LetsRead.Types
   , loadState
   , orchestratorRuleText
   , padChunkNumber
+  , readTextFileSafe
   , saveState
   )
 import LetsRead.Verification
-  ( auditReaderToolUsage
+  ( auditReaderToolUsageWithResearch
+  , extractVerifiedResearchChunkRefs
   , lintReaderCommentary
   , lintStorySummaryBullets
   , loadBannedJargonIO
@@ -76,6 +77,7 @@ import LetsRead.Verification
 import System.Directory
   ( canonicalizePath
   , createDirectoryIfMissing
+  , doesFileExist
   )
 import System.Exit (die)
 import System.FilePath ((</>))
@@ -119,6 +121,14 @@ cmdRecord opts = do
   let curIdx = stCurrentIndex st
   when (curIdx < 1) $
     die "Error: No chunk is currently unlocked. Run 'next' first."
+
+  hasScriptPrompt <- doesFileExist (sessionDir </> "current_script_prompt.md")
+  when hasScriptPrompt $
+    die "Error: script-writer step has not completed yet (current_script_prompt.md is still active). Run 'lets-read script' and 'lets-read research' before 'record'."
+
+  hasResearchPrompt <- doesFileExist (sessionDir </> "current_research_prompt.md")
+  when hasResearchPrompt $
+    die "Error: researcher step has not completed yet (current_research_prompt.md is still active). Run 'lets-read research' before 'record'."
 
   (rawResp, _, commText, parsedSummaries, mParsedPredUpdates, mParsedMem) <-
     resolveCommentaryOrResponseWithRaw
@@ -210,6 +220,12 @@ cmdRecord opts = do
     else do
       bannedJargon <- loadBannedJargonIO
       readerAudit <- resolveSubagentToolAudit (recSubagentLog opts) (Just rawResp)
+      let researchFilePath = sessionDir </> "current_research.md"
+      hasResearchFile <- doesFileExist researchFilePath
+      researchChunkRefs <-
+        if hasResearchFile
+          then extractVerifiedResearchChunkRefs <$> readTextFileSafe researchFilePath
+          else pure []
       let (chapNum, chapTitle, partNum, partsTotal) = currentChunkMetaTuple st
           priorStory = [e | e <- stStoryRecords st, scrChunkIndex e < curIdx]
           shouldRotateHere =
@@ -244,7 +260,7 @@ cmdRecord opts = do
               <> "\n"
               <> fromMaybe "" mParsedPredUpdates
           (mReadPrevChunk, callbackReadsCnt, readerCallbackWarns) =
-            auditReaderToolUsage curIdx shouldRotateHere commAndPredForAudit readerAudit
+            auditReaderToolUsageWithResearch curIdx shouldRotateHere researchChunkRefs commAndPredForAudit readerAudit
           (storyTopics, storySumTxt) =
             fromMaybe ([], "Story events recorded.") (pcsStory parsedSummaries)
           (entryTopics, entrySumTxt) =

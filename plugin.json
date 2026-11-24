@@ -3,7 +3,7 @@
   "name": "lets-read",
   "displayName": "Let's Read",
   "version": "0.0.1",
-  "description": "Conducts a spoiler-free, chapter-by-chapter or chunk-by-chunk \"Let's Read\" liveblog of a story (.txt, .md, .html, .epub) using a Haskell gatekeeper and five isolated subagents.",
+  "description": "Conducts a spoiler-free, chapter-by-chapter or chunk-by-chunk \"Let's Read\" liveblog of a story (.txt, .md, .html, .epub) using a Haskell gatekeeper and seven isolated subagents.",
   "author": {
     "name": "Yoo Chung",
     "url": "https://chungyc.org/"

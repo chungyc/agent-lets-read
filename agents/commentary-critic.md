@@ -39,9 +39,8 @@ critique to `<session_dir>/current_critic_response.md` via `write_file`
 - `<session_dir>/entries/chunk_NNNN.md` (`blind-reader`'s newly recorded
   commentary for `Chunk N`)
 
-- `<session_dir>/memory.md` (to check `### Reader Persona`,
-  `- **Reader Craft Directives & Running Gags (Persistent)**:`, and the
-  running prediction scoreboard)
+- `<session_dir>/memory.md` (to check `### Reader Persona` and
+  `- **Reader Craft Directives & Running Gags (Persistent)**:`)
 
 #### Allowed on-demand via `read_file`
 

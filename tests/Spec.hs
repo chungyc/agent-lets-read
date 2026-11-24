@@ -14,7 +14,8 @@ import PredictionsAndMemorySpec
   )
 import System.Environment (getArgs)
 import VerificationSpec
-  ( testRec2SandboxToolTelemetry
+  ( testRec10HiddenScriptAndResearchVerification
+  , testRec2SandboxToolTelemetry
   , testRec3CallbackAndFactCheckAudits
   )
 
@@ -26,6 +27,7 @@ main = do
   testRec1OrchestratorGuardrails mBin
   testRec2SandboxToolTelemetry
   testRec3CallbackAndFactCheckAudits
+  testRec10HiddenScriptAndResearchVerification
   testRec4PredictionSubClausesAndScreening
   testRec5ArcRollupsFinalMysteriesAndHallOfFame
   testRec6LeadingEmphasisAndMarkdownFormatting

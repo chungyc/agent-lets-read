@@ -14,6 +14,7 @@ import qualified Data.ByteString as BS
 import Data.List (isPrefixOf, isSuffixOf)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import LetsRead.Command.Judge (JudgeOptions (..), cmdJudge)
 import LetsRead.Index
   ( IndexSpec (..)
   , applyTopicCuratorResponse
@@ -45,7 +46,11 @@ import LetsRead.Prompts
   , renderPredictionSlateNote
   , resolveSessionFilesRefPathIO
   , writeCurrentJudgePromptFile
+  , writeCurrentPromptFile
+  , writeCurrentScriptPromptFile
   , writeCurrentTopicPromptFile
+  , writeFactCheckDiscussionPromptFile
+  , writeUserDiscussionPromptFile
   , writeWrapupPromptFile
   )
 import LetsRead.Types
@@ -59,7 +64,9 @@ import LetsRead.Types
   , SessionState (..)
   , StoryChunkRecord (..)
   , chunkToMeta
+  , loadState
   , predActiveScreeningNote
+  , saveState
   , stripAfterClosingBracket
   , wrapMarkdownBullet
   , wrapMarkdownParagraph
@@ -69,7 +76,7 @@ import LetsRead.Verification
   , lintStorySummaryBullets
   , renderCriticFeedbackMarkdown
   )
-import System.Directory (doesFileExist, listDirectory)
+import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory)
 import System.Exit (die)
 import System.FilePath ((</>))
 import TestHarness
@@ -182,10 +189,143 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
         (prStatus pr4)
     [] -> die "Expected 1 same-chunk prediction record"
 
-  let slate10 = normWs (renderPredictionSlateNote 8 12 10)
+  let slate10 = normWs (renderPredictionSlateNote 8 12)
   assertBool
-    "10-cap slate note warns against mechanical oldest-first FIFO and prioritizes [UNINTERESTING]"
-    ("[DUPLICATE-THESIS]" `T.isInfixOf` slate10 && "[UNINTERESTING]" `T.isInfixOf` slate10 && "oldest-first FIFO" `T.isInfixOf` slate10)
+    "Reader slate note stays focused on 1 new prediction with zero 10-cap or RETIRED bookkeeping"
+    (not ("RETIRED" `T.isInfixOf` slate10) && not ("10-PREDICTION CAP" `T.isInfixOf` slate10))
+
+  let elevenActives =
+        [ PredictionRecord
+            { prOriginChunk = i
+            , prChapterNumber = i
+            , prChapterTitle = "Chap " <> T.pack (show i)
+            , prPartInChapter = 1
+            , prPartsInChapter = 1
+            , prTopics = ["Harbor"]
+            , prClue = "Clue " <> T.pack (show i)
+            , prTheory = "Theory " <> T.pack (show i)
+            , prRival = "Rival " <> T.pack (show i)
+            , prRawBody = "**Clue/Anomaly**: Clue -> **Theory**: Theory (vs. **Plausible Rival**: Rival)"
+            , prStatus =
+                if i == 5
+                  then PredStatusActive (Just "[DUPLICATE-THESIS] Duplicates Predicted Chunk 0002.")
+                  else PredStatusActive Nothing
+            }
+        | i <- [1 .. 11]
+        ]
+      stOver10 = (baseDummyState 15) {stCurrentIndex = 11, stPredictions = elevenActives}
+  jpOverPath <- writeCurrentJudgePromptFile tmp stOver10
+  jpOverNorm <- normWs <$> TIO.readFile jpOverPath
+  assertBool
+    "Judge prompt at 11 active includes Conditional 10-Cap Retirement prioritizing [DUPLICATE-THESIS] and [UNINTERESTING]"
+    ( "### Conditional 10-Cap Retirement" `T.isInfixOf` jpOverNorm
+        && "=== CONDITIONAL RETIREMENTS ===" `T.isInfixOf` jpOverNorm
+        && "[DUPLICATE-THESIS]" `T.isInfixOf` jpOverNorm
+        && "[UNINTERESTING]" `T.isInfixOf` jpOverNorm
+    )
+
+  let (afterJudgeRetire, capWarns1, _) =
+        applyJudgeVerdicts
+          11
+          (11, "Chap 11", 1, 1)
+          elevenActives
+          []
+          ( T.unlines
+              [ "=== PREDICTION JUDGMENTS ==="
+              , "- **[Predicted Chunk 0011 -> ACTIVE]** Sharp finale setup."
+              , "=== CONDITIONAL RETIREMENTS ==="
+              , "- **[Predicted Chunk 0005 -> RETIRED Chunk 0011]** Retiring duplicate bet."
+              ]
+          )
+  assertEq "Judge conditional retirement brings active count from 11 to 10 with 0 warnings" (10, 0) (length [p | p <- afterJudgeRetire, prStatus p /= PredStatusRetired (ResolutionMeta 11 11 "Chap 11" 1 1 "Retiring duplicate bet.")], length capWarns1)
+
+  let (afterJudgeSpared, _, _) =
+        applyJudgeVerdicts
+          11
+          (11, "Chap 11", 1, 1)
+          elevenActives
+          []
+          ( T.unlines
+              [ "=== PREDICTION JUDGMENTS ==="
+              , "- **[Predicted Chunk 0002 -> CONFIRMED Chunk 0011]** Confirmed on page."
+              , "=== CONDITIONAL RETIREMENTS ==="
+              , "- **[Predicted Chunk 0005 -> RETIRED Chunk 0011]** Spare if merit resolution suffices."
+              ]
+          )
+  assertEq
+    "Judge conditional retirement is spared when a merit CONFIRMED verdict already brings active count to 10"
+    0
+    (length [p | p <- afterJudgeSpared, case prStatus p of PredStatusRetired _ -> True; _ -> False])
+
+  let (afterFallbackRetire, _, _) =
+        applyJudgeVerdicts
+          11
+          (11, "Chap 11", 1, 1)
+          elevenActives
+          []
+          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0011 -> ACTIVE]** Still open.\n"
+  case [p | p <- afterFallbackRetire, prOriginChunk p == 5] of
+    (p5Fallback : _) ->
+      assertBool
+        "Deterministic fallback retires [DUPLICATE-THESIS] Chunk 0005 rather than oldest unflagged Chunk 0001"
+        (case prStatus p5Fallback of PredStatusRetired _ -> True; _ -> False)
+    [] -> die "Expected pred 5 in afterFallbackRetire"
+
+  -- End-to-end cmdJudge test with === CONDITIONAL RETIREMENTS === + same-chunk flagged cap retirement
+  withTempDir "cmd-judge-retire" $ \sessTmp -> do
+    createDirectoryIfMissing True (sessTmp </> "entries")
+    createDirectoryIfMissing True (sessTmp </> "chunks")
+    TIO.writeFile (sessTmp </> "chunks" </> "chunk_0011.md") "Mara checked the narrow lantern alcove.\n"
+    TIO.writeFile (sessTmp </> "entries" </> "chunk_0011.md") "## Chunk 11/15\n\nCommentary.\n\n---\n\n"
+    let unflagged11 = [p {prStatus = PredStatusActive Nothing} | p <- elevenActives]
+        stJudge11 =
+          (baseDummyState 15)
+            { stCurrentIndex = 11
+            , stCurrentRecorded = True
+            , stCurrentJudged = False
+            , stCurrentMeta = Just (chunkToMeta (dummyChunk 11 11 1 1))
+            , stPredictions = unflagged11
+            }
+    saveState sessTmp stJudge11
+    TIO.writeFile
+      (sessTmp </> "current_judge_response.md")
+      ( T.unlines
+          [ "=== PREDICTION JUDGMENTS ==="
+          , "- **[Predicted Chunk 0011 -> ACTIVE]** [DUPLICATE-THESIS] Duplicates Predicted Chunk 0004's lantern signal theory."
+          , "=== CONDITIONAL RETIREMENTS ==="
+          , "- **[Predicted Chunk 0011 -> RETIRED Chunk 0011]** Retiring duplicate bet to keep overarching harbor mysteries active."
+          ]
+      )
+    TIO.writeFile
+      (sessTmp </> "current_fact_check_response.md")
+      "<!-- TOOLS: read_file(current_chunk.md, entries/chunk_0011.md, memory.md) -->\n=== VERIFIED CLAIMS LOG ===\n- [OK | Source: current_chunk.md] Checked.\n\n=== DISPUTED FACTS & MEMORY CHECKS ===\n- PASS\n"
+    TIO.writeFile
+      (sessTmp </> "current_critic_response.md")
+      "=== PERSONA & STYLE CRITIQUE ===\n- **[Persona & Lens]** Good.\n- **[What Worked Well]** Good.\n- **[Where the Voice Drifted or Felt Formulaic]** None.\n"
+    cmdJudge (JudgeOptions sessTmp Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing)
+    stAfterCmdJudge <- loadState sessTmp
+    assertBool
+      "cmdJudge honors === CONDITIONAL RETIREMENTS === (retires Chunk 0011, keeps oldest unflagged Chunk 0001 active)"
+      ( any (\p -> prOriginChunk p == 1 && prStatus p == PredStatusActive Nothing) (stPredictions stAfterCmdJudge)
+          && any (\p -> prOriginChunk p == 11 && case prStatus p of PredStatusRetired _ -> True; _ -> False) (stPredictions stAfterCmdJudge)
+      )
+    p12Path <- writeCurrentPromptFile sessTmp (stAfterCmdJudge {stCurrentIndex = 12}) (dummyChunk 12 12 1 1)
+    p12Norm <- normWs <$> TIO.readFile p12Path
+    assertBool
+      "Same-chunk flagged + cap-retired bet still delivers ### Prediction Quality Note on Chunk 12"
+      ( "### Prediction Quality Note from Chunk 11" `T.isInfixOf` p12Norm
+          && "Predicted Chunk 0011 -> RETIRED (10-Cap)" `T.isInfixOf` p12Norm
+          && "[DUPLICATE-THESIS] Duplicates Predicted Chunk 0004's lantern signal theory." `T.isInfixOf` p12Norm
+      )
+    chron11Txt <- TIO.readFile (sessTmp </> "predictions" </> "by_chronology.md")
+    topic11Txt <- TIO.readFile (sessTmp </> "predictions" </> "by_topic.md")
+    let hof11Txt = renderHallOfFameMarkdown sessTmp (stAfterCmdJudge {stCurrentIndex = 15, stCurrentRecorded = True, stCurrentJudged = True})
+    assertBool
+      "Retired bet strips leading [DUPLICATE-THESIS] flag in by_chronology.md, by_topic.md, and hall_of_fame.md"
+      ( not ("[DUPLICATE-THESIS]" `T.isInfixOf` chron11Txt)
+          && not ("[DUPLICATE-THESIS]" `T.isInfixOf` topic11Txt)
+          && not ("[DUPLICATE-THESIS]" `T.isInfixOf` hof11Txt)
+      )
 
 testRec5ArcRollupsFinalMysteriesAndHallOfFame :: IO ()
 testRec5ArcRollupsFinalMysteriesAndHallOfFame = do
@@ -927,14 +1067,22 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
           }
   syncPredictionsDirectory tmp stRender
   let memTxt = renderMemoryMarkdown tmp stRender
-      memNorm = normWs memTxt
   pred2FileTxt <- TIO.readFile (tmp </> "predictions" </> "pred_0002.md")
   byChronTxt <- TIO.readFile (tmp </> "predictions" </> "by_chronology.md")
   byTopicTxt <- TIO.readFile (tmp </> "predictions" </> "by_topic.md")
+  jpPersistPath <- writeCurrentJudgePromptFile tmp (stRender {stCurrentIndex = 4})
+  jpPersistNorm <- normWs <$> TIO.readFile jpPersistPath
   assertBool
-    "memory.md retains both earlier active screening notes across subsequent turns"
-    ( "*Judge screening*: Sharp catch linking Mara's wet boots to the tide chart!" `T.isInfixOf` memNorm
-        && "*Judge screening*: [DUPLICATE-THESIS] Redundant restatement of stated dock schedule." `T.isInfixOf` memNorm
+    "memory.md omits Active Prediction Slate and scoreboard tally while preserving predictions index links"
+    ( not ("Active Prediction Slate" `T.isInfixOf` memTxt)
+        && not ("Judge screening" `T.isInfixOf` memTxt)
+        && "predictions/by_chronology.md" `T.isInfixOf` memTxt
+        && "predictions/by_topic.md" `T.isInfixOf` memTxt
+    )
+  assertBool
+    "Judge prompt retains both earlier active screening notes across subsequent turns"
+    ( "*Prior screening*: Sharp catch linking Mara's wet boots to the tide chart!" `T.isInfixOf` jpPersistNorm
+        && "*Prior screening*: [DUPLICATE-THESIS] Redundant restatement of stated dock schedule." `T.isInfixOf` jpPersistNorm
     )
   assertBool
     "pred_0002.md renders - **Judge Screening**: while unresolved"
@@ -942,6 +1090,65 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
   assertBool
     "by_chronology.md and by_topic.md omit internal [DUPLICATE-THESIS] screening notes"
     (not ("[DUPLICATE-THESIS]" `T.isInfixOf` byChronTxt) && not ("[DUPLICATE-THESIS]" `T.isInfixOf` byTopicTxt))
+
+  -- Event-only turn prompts check: quiet turn vs. verdict + flagged + syntax-warning turn
+  let stQuietTurn2 = (baseDummyState 10) {stCurrentIndex = 2, stPredictions = after1ReRun}
+      chk2 = dummyChunk 2 2 1 1
+  quietPromptPath <- writeCurrentPromptFile tmp stQuietTurn2 chk2
+  quietPromptTxt <- TIO.readFile quietPromptPath
+  assertBool
+    "Quiet turn (unflagged active bet on Chunk 1, 0 resolutions, 0 warnings) emits zero prediction event subsections"
+    ( not ("### Prediction Verdicts" `T.isInfixOf` quietPromptTxt)
+        && not ("### Prediction Quality Note" `T.isInfixOf` quietPromptTxt)
+        && not ("### Prediction Format and Length Warnings" `T.isInfixOf` quietPromptTxt)
+        && not ("Sharp catch linking Mara's wet boots" `T.isInfixOf` quietPromptTxt)
+    )
+
+  let stEventTurn4 =
+        (baseDummyState 10)
+          { stCurrentIndex = 4
+          , stPredictions =
+              [ if prOriginChunk p == 2
+                  then p {prOriginChunk = 3}
+                  else
+                    if prOriginChunk p == 3
+                      then p {prOriginChunk = 2}
+                      else p
+              | p <- after3
+              ]
+          , stPredictionAuditWarnings = ["- **[INVALID PREDICTION TAG OR FORMAT]** Sample syntax warning."]
+          }
+      chk4 = dummyChunk 4 4 1 1
+  evReaderPath <- writeCurrentPromptFile tmp stEventTurn4 chk4
+  evReaderNorm <- normWs <$> TIO.readFile evReaderPath
+  evScriptPath <- writeCurrentScriptPromptFile tmp stEventTurn4 chk4
+  evScriptNorm <- normWs <$> TIO.readFile evScriptPath
+  assertBool
+    "Reader prompt surfaces CONFIRMED verdict + original Theory, flagged [DUPLICATE-THESIS] note, and syntax warnings"
+    ( "### Prediction Verdicts from Chunk 3" `T.isInfixOf` evReaderNorm
+        && "Original prediction — **Clue/Anomaly**: Clue 3 -> **Theory**: Mara's lantern signal summons the cutter" `T.isInfixOf` evReaderNorm
+        && "### Prediction Quality Note from Chunk 3" `T.isInfixOf` evReaderNorm
+        && "### Prediction Format and Length Warnings" `T.isInfixOf` evReaderNorm
+    )
+  assertBool
+    "Script-writer prompt surfaces verdicts and quality flag while omitting syntax warnings"
+    ( "### Prediction Verdicts from Chunk 3" `T.isInfixOf` evReaderNorm
+        && "### Prediction Verdicts from Chunk 3" `T.isInfixOf` evScriptNorm
+        && "### Prediction Quality Note from Chunk 3" `T.isInfixOf` evScriptNorm
+        && not ("### Prediction Format and Length Warnings" `T.isInfixOf` evScriptNorm)
+    )
+
+  (_, fcDiscPath) <- writeFactCheckDiscussionPromptFile tmp (stRender {stCurrentIndex = 2}) ["- **[Peer Verification Query]** Check timeline."]
+  fcDiscTxt <- TIO.readFile fcDiscPath
+  (_, uDiscPath) <- writeUserDiscussionPromptFile tmp (stRender {stCurrentIndex = 2}) "What about Pier 2?"
+  uDiscTxt <- TIO.readFile uDiscPath
+  assertBool
+    "Fact-check and user discussion prompts include Chunk N's logged prediction as a clean single bullet"
+    ( "- **[Predicted Chunk 0002" `T.isInfixOf` fcDiscTxt
+        && "- **[Predicted Chunk 0002" `T.isInfixOf` uDiscTxt
+        && not ("- `- **[Predicted" `T.isInfixOf` fcDiscTxt)
+        && not ("- `- **[Predicted" `T.isInfixOf` uDiscTxt)
+    )
 
   -- Chunk 4: cliffhanger fake-out reopening resets bet3 to PredStatusActive Nothing
   let (after4Reopen, _, _) =
@@ -965,6 +1172,9 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
           [ "- **[Predicted Chunk 0002 | Topics: Inspector Lin, Harbor]** **Clue/Anomaly**: Clue 2 -> **Theory**: Lin arrives at Pier 2 after breakfast (vs. **Plausible Rival**: Rival 2) ([details](predictions/pred_0002.md))"
           , "  - *Judge screening*: [DUPLICATE-THESIS] Redundant restatement of stated dock schedule."
           , "  - `Judge screening`: [UNINTERESTING] Backtick-formatted screening label."
+          , "  - *Prior screening*: [DUPLICATE-THESIS] Prior screening label."
+          , "  - Original prediction — **Clue/Anomaly**: Clue 2 -> **Theory**: Lin arrives at Pier 2 after breakfast"
+          , "  - Previous prediction — **Clue/Anomaly**: Clue 4 -> **Theory**: Patrol cutter"
           , "- **[Predicted Chunk 0005 | Topics: Mara, Beacon]** **Clue/Anomaly**: Mara oils the shutter hinge -> **Theory**: Mara will flash a shuttered signal at midnight (vs. **Plausible Rival**: Routine maintenance before rain)"
           ]
       (recs5, _, auditWarns5, _) =

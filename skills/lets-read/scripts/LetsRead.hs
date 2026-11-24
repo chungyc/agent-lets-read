@@ -18,6 +18,8 @@ import LetsRead.Command.Init (cmdInit, parseInitArgs)
 import LetsRead.Command.Judge (cmdJudge, parseJudgeArgs)
 import LetsRead.Command.Next (cmdNext, parseNextArgs)
 import LetsRead.Command.Record (cmdRecord, parseRecordArgs)
+import LetsRead.Command.Research (cmdResearch, parseResearchArgs)
+import LetsRead.Command.Script (cmdScript, parseScriptArgs)
 import LetsRead.Command.Status (cmdStatus, parseStatusArgs)
 import System.Environment (getArgs)
 import System.Exit (die, exitSuccess)
@@ -37,6 +39,8 @@ main = do
     ("next" : rest) -> do
       (sess, frc) <- parseNextArgs rest
       cmdNext sess frc
+    ("script" : rest) -> parseScriptArgs rest >>= cmdScript
+    ("research" : rest) -> parseResearchArgs rest >>= cmdResearch
     ("record" : rest) -> parseRecordArgs rest >>= cmdRecord
     ("judge" : rest) -> parseJudgeArgs rest >>= cmdJudge
     ("discuss-prompt" : rest) -> parseDiscussPromptArgs rest >>= cmdDiscussPrompt
@@ -44,4 +48,4 @@ main = do
     ("status" : rest) -> parseStatusArgs rest >>= cmdStatus
     _ -> do
       hPutStrLn stderr usage
-      die "Error: Please specify a valid command (init, next, record, judge, discuss-prompt, discuss, status)."
+      die "Error: Please specify a valid command (init, next, script, research, record, judge, discuss-prompt, discuss, status)."
