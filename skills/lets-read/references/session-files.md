@@ -104,8 +104,9 @@ Judge rulings, and final session scoreboard.
 
 Full record for the prediction logged on `Chunk XXXX`, including origin
 chapter/part metadata, topic tags, structured clauses, status (`ACTIVE`,
-`CONFIRMED`, `DEBUNKED`, `SUBVERTED`, `RETIRED`), and Judge explanation with
-origin and resolution chunk links.
+`CONFIRMED`, `DEBUNKED`, `SUBVERTED`, `RETIRED`), Judge screening note while
+unresolved, and Judge outcome explanation with origin and resolution chunk links
+once resolved.
 
 #### `<session_dir>/predictions/by_chronology.md` & `by_topic.md`
 

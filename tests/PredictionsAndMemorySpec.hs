@@ -6,6 +6,7 @@ module PredictionsAndMemorySpec
   , testRec6LeadingEmphasisAndMarkdownFormatting
   , testRec7IndexByteBudgetsWrappingAndSummaryLint
   , testRec8CrossArcPredictionIndexesAndEchoGuard
+  , testRec9PersistentActiveScreeningNotes
   ) where
 
 import Control.Monad (forM_, when)
@@ -58,6 +59,7 @@ import LetsRead.Types
   , SessionState (..)
   , StoryChunkRecord (..)
   , chunkToMeta
+  , predActiveScreeningNote
   , stripAfterClosingBracket
   , wrapMarkdownBullet
   , wrapMarkdownParagraph
@@ -288,7 +290,7 @@ testRec5ArcRollupsFinalMysteriesAndHallOfFame = do
           , prTheory = "Mara unlocks the lighthouse vault in Act 2"
           , prRival = "Mara tosses the key into the bay"
           , prRawBody = "**Clue/Anomaly**: Mara pockets the brass key -> **Theory**: Mara unlocks the lighthouse vault in Act 2 (vs. **Plausible Rival**: Mara tosses the key into the bay)"
-          , prStatus = PredStatusActive
+          , prStatus = PredStatusActive Nothing
           }
       (judgedPreds, _, _) =
         applyJudgeVerdicts
@@ -628,7 +630,7 @@ testRec8CrossArcPredictionIndexesAndEchoGuard = withTempDir "rec8-cross-arc" $ \
                 <> " (vs. **Plausible Rival**: Mundane coincidence on chunk "
                 <> T.pack (show idx)
                 <> ")"
-          , prStatus = PredStatusActive
+          , prStatus = PredStatusActive Nothing
           }
 
       pr2 = mkActivePred 2 1 ["Beacon Cipher", "Mara"] "Mara uses the Beacon Cipher to unlock the vault"
@@ -814,3 +816,171 @@ testRec8CrossArcPredictionIndexesAndEchoGuard = withTempDir "rec8-cross-arc" $ \
   assertBool
     "Sharded predictions/by_topic.md excludes cap-retired Tide Bell from Recently Updated Topics"
     (not ("### Tide Bell" `T.isInfixOf` byTopicArc3))
+
+testRec9PersistentActiveScreeningNotes :: IO ()
+testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> do
+  putStrLn "== Rec #9: Persistent Active Screening Notes, Overwrite Guards & Copied-Slate Parser Guard =="
+  let mkBet idx chap topics theoryTxt =
+        PredictionRecord
+          { prOriginChunk = idx
+          , prChapterNumber = chap
+          , prChapterTitle = "Chapter " <> T.pack (show chap) <> ": Harbor"
+          , prPartInChapter = 1
+          , prPartsInChapter = 1
+          , prTopics = topics
+          , prClue = "Clue " <> T.pack (show idx)
+          , prTheory = theoryTxt
+          , prRival = "Rival " <> T.pack (show idx)
+          , prRawBody =
+              "**Clue/Anomaly**: Clue "
+                <> T.pack (show idx)
+                <> " -> **Theory**: "
+                <> theoryTxt
+                <> " (vs. **Plausible Rival**: Rival "
+                <> T.pack (show idx)
+                <> ")"
+          , prStatus = PredStatusActive Nothing
+          }
+      bet1 = mkBet 1 1 ["Mara", "Harbor"] "Mara hid the tide chart in the boathouse"
+      bet2 = mkBet 2 2 ["Inspector Lin", "Harbor"] "Lin arrives at Pier 2 after breakfast"
+
+      -- Chunk 1 initial screening (unflagged sharp note) + same-chunk re-run check
+      (after1Draft, _, _) =
+        applyJudgeVerdicts
+          1
+          (1, "Chapter 1: Harbor", 1, 1)
+          [bet1]
+          []
+          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0001 -> ACTIVE]** [UNINTERESTING] Initial mistaken flag.\n"
+      (after1ReRun, _, _) =
+        applyJudgeVerdicts
+          1
+          (1, "Chapter 1: Harbor", 1, 1)
+          after1Draft
+          []
+          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0001 -> ACTIVE]** Sharp catch linking Mara's wet boots to the tide chart!\n"
+  case after1ReRun of
+    (p1 : _) ->
+      assertEq
+        "Same-chunk Judge re-run replaces flagged note with updated unflagged screening note"
+        (Just "Sharp catch linking Mara's wet boots to the tide chart!")
+        (predActiveScreeningNote p1)
+    [] -> die "Expected bet1 after Chunk 1 judge"
+
+  -- Chunk 2: bet2 gets [UNINTERESTING]; bet1 gets routine 'Still unresolved' mentioning [DUPLICATE-THESIS] mid-sentence
+  let (after2, _, _) =
+        applyJudgeVerdicts
+          2
+          (2, "Chapter 2: Harbor", 1, 1)
+          (after1ReRun ++ [bet2])
+          []
+          ( T.unlines
+              [ "=== PREDICTION JUDGMENTS ==="
+              , "- **[Predicted Chunk 0001 -> ACTIVE]** Still unresolved; not addressed in Chunk 0002 (avoid logging a [DUPLICATE-THESIS] of this)."
+              , "- **[Predicted Chunk 0002 -> ACTIVE]** [UNINTERESTING] Routine morning itinerary already stated on page."
+              ]
+          )
+  case [p | p <- after2, prOriginChunk p == 1] of
+    (p1After2 : _) ->
+      assertEq
+        "Later-chunk 'Still unresolved' mentioning [DUPLICATE-THESIS] mid-sentence does not clobber bet1's screening note"
+        (Just "Sharp catch linking Mara's wet boots to the tide chart!")
+        (predActiveScreeningNote p1After2)
+    [] -> die "Expected bet1 after Chunk 2"
+  case [p | p <- after2, prOriginChunk p == 2] of
+    (p2After2 : _) ->
+      assertEq
+        "Newly logged bet2 records [UNINTERESTING] screening note"
+        (Just "[UNINTERESTING] Routine morning itinerary already stated on page.")
+        (predActiveScreeningNote p2After2)
+    [] -> die "Expected bet2 after Chunk 2"
+
+  -- Chunk 3: explicit prefix flag [DUPLICATE-THESIS] on older bet2 updates it; rendering checks
+  let bet3 = mkBet 3 3 ["Mara"] "Mara's lantern signal summons the cutter"
+      (after3, _, _) =
+        applyJudgeVerdicts
+          3
+          (3, "Chapter 3: Harbor", 1, 1)
+          (after2 ++ [bet3])
+          []
+          ( T.unlines
+              [ "=== PREDICTION JUDGMENTS ==="
+              , "- **[Predicted Chunk 0001 -> ACTIVE]** Still unresolved in Chunk 0003."
+              , "- **[Predicted Chunk 0002 -> ACTIVE]** [DUPLICATE-THESIS] Redundant restatement of stated dock schedule."
+              , "- **[Predicted Chunk 0003 -> CONFIRMED Chunk 0003]** Cutter answers Mara's lantern immediately."
+              ]
+          )
+  case [p | p <- after3, prOriginChunk p == 2] of
+    (p2After3 : _) ->
+      assertEq
+        "Explicit prefix flag [DUPLICATE-THESIS] on older active bet updates its screening note"
+        (Just "[DUPLICATE-THESIS] Redundant restatement of stated dock schedule.")
+        (predActiveScreeningNote p2After3)
+    [] -> die "Expected bet2 after Chunk 3"
+
+  let stRender =
+        (baseDummyState 10)
+          { stCurrentIndex = 3
+          , stCurrentRecorded = True
+          , stCurrentJudged = True
+          , stPredictions = after3
+          }
+  syncPredictionsDirectory tmp stRender
+  let memTxt = renderMemoryMarkdown tmp stRender
+      memNorm = normWs memTxt
+  pred2FileTxt <- TIO.readFile (tmp </> "predictions" </> "pred_0002.md")
+  byChronTxt <- TIO.readFile (tmp </> "predictions" </> "by_chronology.md")
+  byTopicTxt <- TIO.readFile (tmp </> "predictions" </> "by_topic.md")
+  assertBool
+    "memory.md retains both earlier active screening notes across subsequent turns"
+    ( "*Judge screening*: Sharp catch linking Mara's wet boots to the tide chart!" `T.isInfixOf` memNorm
+        && "*Judge screening*: [DUPLICATE-THESIS] Redundant restatement of stated dock schedule." `T.isInfixOf` memNorm
+    )
+  assertBool
+    "pred_0002.md renders - **Judge Screening**: while unresolved"
+    ("- **Judge Screening**: [DUPLICATE-THESIS] Redundant restatement of stated dock schedule." `T.isInfixOf` normWs pred2FileTxt)
+  assertBool
+    "by_chronology.md and by_topic.md omit internal [DUPLICATE-THESIS] screening notes"
+    (not ("[DUPLICATE-THESIS]" `T.isInfixOf` byChronTxt) && not ("[DUPLICATE-THESIS]" `T.isInfixOf` byTopicTxt))
+
+  -- Chunk 4: cliffhanger fake-out reopening resets bet3 to PredStatusActive Nothing
+  let (after4Reopen, _, _) =
+        applyJudgeVerdicts
+          4
+          (4, "Chapter 4: Harbor", 1, 1)
+          after3
+          []
+          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0003 -> ACTIVE]** The cutter turned out to be a harbor patrol decoy!\n"
+  case [p | p <- after4Reopen, prOriginChunk p == 3] of
+    (p3Reopened : _) ->
+      assertEq
+        "Cliffhanger fake-out reopening resets to PredStatusActive Nothing"
+        (PredStatusActive Nothing)
+        (prStatus p3Reopened)
+    [] -> die "Expected reopened bet3 after Chunk 4"
+
+  -- Parser guard: copying active prediction + indented '*Judge screening*:' sub-bullet from memory.md into === PREDICTION UPDATES ===
+  let copiedSlateWithNewBet =
+        T.unlines
+          [ "- **[Predicted Chunk 0002 | Topics: Inspector Lin, Harbor]** **Clue/Anomaly**: Clue 2 -> **Theory**: Lin arrives at Pier 2 after breakfast (vs. **Plausible Rival**: Rival 2) ([details](predictions/pred_0002.md))"
+          , "  - *Judge screening*: [DUPLICATE-THESIS] Redundant restatement of stated dock schedule."
+          , "  - `Judge screening`: [UNINTERESTING] Backtick-formatted screening label."
+          , "- **[Predicted Chunk 0005 | Topics: Mara, Beacon]** **Clue/Anomaly**: Mara oils the shutter hinge -> **Theory**: Mara will flash a shuttered signal at midnight (vs. **Plausible Rival**: Routine maintenance before rain)"
+          ]
+      (recs5, _, auditWarns5, _) =
+        auditAndApplyPredictionUpdates
+          5
+          10
+          5
+          "Chapter 5: Beacon"
+          1
+          1
+          True
+          copiedSlateWithNewBet
+          after4Reopen
+          (Just copiedSlateWithNewBet)
+  assertEq
+    "Copying active prediction + '*Judge screening*: [DUPLICATE-THESIS] ...' from memory.md produces 0 audit warnings"
+    0
+    (length auditWarns5)
+  assertEq "Records new Chunk 5 prediction cleanly alongside existing bets" 4 (length recs5)

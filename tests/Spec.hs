@@ -10,6 +10,7 @@ import PredictionsAndMemorySpec
   , testRec6LeadingEmphasisAndMarkdownFormatting
   , testRec7IndexByteBudgetsWrappingAndSummaryLint
   , testRec8CrossArcPredictionIndexesAndEchoGuard
+  , testRec9PersistentActiveScreeningNotes
   )
 import System.Environment (getArgs)
 import VerificationSpec
@@ -30,4 +31,5 @@ main = do
   testRec6LeadingEmphasisAndMarkdownFormatting
   testRec7IndexByteBudgetsWrappingAndSummaryLint
   testRec8CrossArcPredictionIndexesAndEchoGuard
+  testRec9PersistentActiveScreeningNotes
   putStrLn "\nAll lets-read gatekeeper tests passed!"

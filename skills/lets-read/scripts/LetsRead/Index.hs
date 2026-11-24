@@ -48,6 +48,7 @@ import LetsRead.Types
   , SessionState (..)
   , StoryChunkRecord (..)
   , formatChapLabel
+  , isPredActive
   , jsonInt
   , padChunkNumber
   , predStoryResolutionMeta
@@ -828,7 +829,7 @@ predictionIndexSpec =
     , isRenderChronBullet = \_ pr -> renderPredSummaryBullet pr
     , isRenderTopicBullet = \_ pr -> renderPredSummaryBullet pr
     , isSummarizeArc = \arcPreds ->
-        let activeCnt = length [pr | pr <- arcPreds, prStatus pr == PredStatusActive]
+        let activeCnt = length [pr | pr <- arcPreds, isPredActive pr]
             confCnt = length [pr | pr <- arcPreds, case prStatus pr of PredStatusConfirmed {} -> True; _ -> False]
             debCnt = length [pr | pr <- arcPreds, case prStatus pr of PredStatusDebunked {} -> True; _ -> False]
             subCnt = length [pr | pr <- arcPreds, case prStatus pr of PredStatusSubverted {} -> True; _ -> False]

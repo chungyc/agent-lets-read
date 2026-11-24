@@ -12,6 +12,8 @@ module LetsRead.Types
   , ResolutionMeta (..)
   , PredictionStatus (..)
   , PredictionRecord (..)
+  , isPredActive
+  , predActiveScreeningNote
   , predResolutionMeta
   , predStoryResolutionMeta
   , SessionState (..)
@@ -162,7 +164,7 @@ data ResolutionMeta = ResolutionMeta
 instance Binary ResolutionMeta
 
 data PredictionStatus
-  = PredStatusActive
+  = PredStatusActive !(Maybe Text) -- ^ optional Judge screening note while active
   | PredStatusConfirmed !ResolutionMeta !Bool -- ^ meta, isSameChunk (0 chunks foresight)
   | PredStatusDebunked !ResolutionMeta
   | PredStatusSubverted !ResolutionMeta
@@ -188,10 +190,22 @@ data PredictionRecord = PredictionRecord
 
 instance Binary PredictionRecord
 
+isPredActive :: PredictionRecord -> Bool
+isPredActive pr =
+  case prStatus pr of
+    PredStatusActive _ -> True
+    _ -> False
+
+predActiveScreeningNote :: PredictionRecord -> Maybe Text
+predActiveScreeningNote pr =
+  case prStatus pr of
+    PredStatusActive mNote -> mNote
+    _ -> Nothing
+
 predResolutionMeta :: PredictionRecord -> Maybe ResolutionMeta
 predResolutionMeta pr =
   case prStatus pr of
-    PredStatusActive -> Nothing
+    PredStatusActive _ -> Nothing
     PredStatusConfirmed rm _ -> Just rm
     PredStatusDebunked rm -> Just rm
     PredStatusSubverted rm -> Just rm
@@ -204,7 +218,7 @@ predStoryResolutionMeta pr =
     PredStatusDebunked rm -> Just rm
     PredStatusSubverted rm -> Just rm
     PredStatusRetired _ -> Nothing
-    PredStatusActive -> Nothing
+    PredStatusActive _ -> Nothing
 
 data SessionState = SessionState
   { stTitle :: !Text
@@ -388,7 +402,7 @@ renderStateJson :: FilePath -> Bool -> Bool -> Bool -> SessionState -> Text
 renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt st =
   let storyChunksDone = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st && not hasFactCheckPending
       isFin = storyChunksDone && hasWrapup
-      activeCnt = length [pr | pr <- stPredictions st, prStatus pr == PredStatusActive]
+      activeCnt = length [pr | pr <- stPredictions st, isPredActive pr]
       totalPreds = length (stPredictions st)
    in jsonObject
         [ ("title", jsonStr (stTitle st))

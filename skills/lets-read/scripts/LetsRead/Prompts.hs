@@ -40,10 +40,10 @@ import LetsRead.Types
   ( Chunk (..)
   , ChunkMeta (..)
   , PredictionRecord (..)
-  , PredictionStatus (..)
   , ResolutionMeta (..)
   , SessionState (..)
   , StoryChunkRecord (..)
+  , isPredActive
   , jsonInt
   , padChunkNumber
   , predStoryResolutionMeta
@@ -546,7 +546,7 @@ writeCurrentJudgePromptFile sessionDir st = do
       totalChunks = stTotalChunks st
       preds = stPredictions st
       pendingRetires = stPendingRetirements st
-      activePreds = [pr | pr <- preds, prStatus pr == PredStatusActive]
+      activePreds = [pr | pr <- preds, isPredActive pr]
       recentResolved =
         [ pr
         | pr <- preds
