@@ -225,8 +225,8 @@ testRec1OrchestratorGuardrails mBinPath = do
       (ecRes1, outRes1, errRes1) <- readProcessWithExitCode binPath ["research", "--session", sessDir] ""
       assertEq ("CLI research chunk 1/2 exit 0 (" ++ errRes1 ++ ")") ExitSuccess ecRes1
       assertBool
-        "research unlocks chunk for blind-reader"
-        ("\"status\": \"unlocked\"" `isInfixOf` outRes1 && "ZERO tool calls" `isInfixOf` outRes1)
+        "research unlocks chunk for blind-reader and reminds host to kill one-shot researcher"
+        ("\"status\": \"unlocked\"" `isInfixOf` outRes1 && "ZERO tool calls" `isInfixOf` outRes1 && "Kill the finished one-shot researcher" `isInfixOf` outRes1)
       hasResPromptAfterRes <- doesFileExist (sessDir </> "current_research_prompt.md")
       hasResRespAfterRes <- doesFileExist researchResp
       hasResPacket1 <- doesFileExist (sessDir </> "current_research.md")

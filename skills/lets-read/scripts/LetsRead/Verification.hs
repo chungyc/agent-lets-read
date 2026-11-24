@@ -262,14 +262,70 @@ normalizeForQuoteCheck =
     normQChar '\x2013' = '-'
     normQChar c = c
 
-extractBracketHeaderFromBullet :: Text -> Maybe Text
-extractBracketHeaderFromBullet line =
+splitBracketHeader :: Text -> Maybe (Text, Text)
+splitBracketHeader line =
   let (_, afterOpen) = T.breakOn "[" line
    in if T.null afterOpen
         then Nothing
         else
-          let (inside, afterClose) = T.breakOn "]" (T.drop 1 afterOpen)
-           in if T.null afterClose then Nothing else Just inside
+          let body = T.drop 1 afterOpen
+              scanBalanced :: Int -> [Char] -> Text -> Maybe (Text, Text)
+              scanBalanced _ _ t | T.null t = Nothing
+              scanBalanced depth acc t =
+                case T.uncons t of
+                  Nothing -> Nothing
+                  Just ('[', rest) -> scanBalanced (depth + 1) ('[' : acc) rest
+                  Just (']', rest)
+                    | depth <= 1 -> Just (T.pack (reverse acc), T.cons ']' rest)
+                    | otherwise -> scanBalanced (depth - 1) (']' : acc) rest
+                  Just (c, rest) -> scanBalanced depth (c : acc) rest
+           in case scanBalanced 1 [] body of
+                Just res -> Just res
+                Nothing ->
+                  let (inside2, afterBoldClose) = T.breakOn "]**" body
+                   in if not (T.null afterBoldClose)
+                        then Just (inside2, afterBoldClose)
+                        else
+                          let (inside3, afterAnyClose) = T.breakOn "]" body
+                           in if T.null afterAnyClose
+                                then Nothing
+                                else Just (inside3, afterAnyClose)
+
+extractBracketHeaderFromBullet :: Text -> Maybe Text
+extractBracketHeaderFromBullet line = fst <$> splitBracketHeader line
+
+splitNormalizedQuoteSegments :: Text -> [Text]
+splitNormalizedQuoteSegments qTxt =
+  let isQuoteDelim c =
+        c == '"'
+          || c == '\''
+          || c == '\x201C'
+          || c == '\x201D'
+          || c == '\x2018'
+          || c == '\x2019'
+      rawSegs =
+        concatMap (T.splitOn "...") $
+          concatMap (T.splitOn "\x2026") $
+            T.splitOn "[...]" qTxt
+      cleanSeg s = normalizeForQuoteCheck (T.dropAround isQuoteDelim (T.strip s))
+   in [cs | s <- rawSegs, let cs = cleanSeg s, not (T.null cs)]
+
+segmentsAppearInOrder :: [Text] -> Text -> Bool
+segmentsAppearInOrder [] _ = False
+segmentsAppearInOrder segs haystack = go segs haystack
+  where
+    go [] _ = True
+    go (s : rest) remTxt =
+      let (_, matchedAndAfter) = T.breakOn s remTxt
+       in if T.null matchedAndAfter
+            then False
+            else go rest (T.drop (T.length s) matchedAndAfter)
+
+verifyQuoteInNormalizedDoc :: Text -> Text -> Bool
+verifyQuoteInNormalizedDoc quoteTxt normDoc =
+  let normSegs = splitNormalizedQuoteSegments quoteTxt
+      hasSubstantialSeg = any (\s -> T.length s >= 6) normSegs
+   in not (null normSegs) && hasSubstantialSeg && segmentsAppearInOrder normSegs normDoc
 
 extractSourceAndQuote :: Text -> Maybe (FilePath, Text)
 extractSourceAndQuote hdr =
@@ -308,11 +364,9 @@ extractSourceAndQuote hdr =
 formatFactBulletAsPeerQuery :: Text -> Text
 formatFactBulletAsPeerQuery rawBullet =
   let s = T.strip rawBullet
-      (_, afterOpen) = T.breakOn "[" s
-      (inside, afterClose) = T.breakOn "]" (T.drop 1 afterOpen)
-   in if T.null afterOpen || T.null afterClose
-        then s
-        else
+   in case splitBracketHeader s of
+        Nothing -> s
+        Just (inside, afterClose) ->
           let bodyAfter = stripAfterClosingBracket afterClose
               parts = map T.strip (T.splitOn "|" inside)
               rewritePart idx p =
@@ -367,11 +421,7 @@ verifyAndFilterCriticFactBullets sessionDir hasSearchWebCall bullets = do
                     else do
                       chunkContents <- mapM readTextFileSafe existingPaths
                       let normChunk = normalizeForQuoteCheck (T.unlines chunkContents)
-                          rawSegs = concatMap (T.splitOn "...") (T.splitOn "[...]" quoteTxt)
-                          normSegs = [normalizeForQuoteCheck s | s <- rawSegs, not (T.null (T.strip s))]
-                          hasSubstantialSeg = any (\s -> T.length s >= 6) normSegs
-                          allMatch = not (null normSegs) && hasSubstantialSeg && all (`T.isInfixOf` normChunk) normSegs
-                       in if allMatch
+                       in if verifyQuoteInNormalizedDoc quoteTxt normChunk
                             then pure (Right (formatFactBulletAsPeerQuery b))
                             else pure (Left ())
   let verified = [b | Right b <- results]
@@ -639,11 +689,7 @@ verifyAndFilterResearchBullets sessionDir curIdx isWrapup researchAudit bullets 
                               else do
                                 docTxt <- readTextFileSafe targetPath
                                 let normDoc = normalizeForQuoteCheck docTxt
-                                    rawSegs = concatMap (T.splitOn "...") (T.splitOn "[...]" quoteTxt)
-                                    normSegs = [normalizeForQuoteCheck s | s <- rawSegs, not (T.null (T.strip s))]
-                                    hasSubstantialSeg = any (\s -> T.length s >= 6) normSegs
-                                    allMatch = not (null normSegs) && hasSubstantialSeg && all (`T.isInfixOf` normDoc) normSegs
-                                 in if allMatch
+                                 in if verifyQuoteInNormalizedDoc quoteTxt normDoc
                                       then pure (Right (T.strip b))
                                       else pure (Left ())
   let verified = [b | Right b <- results]
@@ -832,9 +878,10 @@ auditFactCheckerClaims sessionDir curIdx audit verifiedLogBullets factBullets = 
                           && ( "current_chunk.md" `T.isInfixOf` srcLow
                                  || ("chunk_" <> curPad <> ".md") `T.isInfixOf` srcLow
                              )
-                      (_, afterOpen) = T.breakOn "[" l
-                      (_, afterClose) = T.breakOn "]" (T.drop 1 afterOpen)
-                      claimBody = if T.null afterClose then "" else stripAfterClosingBracket afterClose
+                      claimBody =
+                        case splitBracketHeader l of
+                          Nothing -> ""
+                          Just (_, afterClose) -> stripAfterClosingBracket afterClose
                       bodyPriorRefs =
                         [ n
                         | n <- extractExplicitStoryChunkRefs claimBody
@@ -850,10 +897,9 @@ auditFactCheckerClaims sessionDir curIdx audit verifiedLogBullets factBullets = 
                       misusedCurChunkQuote =
                         case (isOk && citesOnlyCurrentChunk, extractSourceAndQuote hdr, mCurChunkNorm) of
                           (True, Just (_, qTxt), Just normCur) ->
-                            let rawSegs = concatMap (T.splitOn "...") (T.splitOn "[...]" qTxt)
-                                normSegs = [normalizeForQuoteCheck s | s <- rawSegs, not (T.null (T.strip s))]
+                            let normSegs = splitNormalizedQuoteSegments qTxt
                              in [ "Quote cited under Source: current_chunk.md was not found in current_chunk.md"
-                                | not (null normSegs) && any (\s -> not (s `T.isInfixOf` normCur)) normSegs
+                                | not (null normSegs) && not (segmentsAppearInOrder normSegs normCur)
                                 ]
                           _ -> []
                       citesMemoryAsPrimary =
@@ -1354,9 +1400,10 @@ resolveTranscriptTargetPath rawLogPath = do
 -- | Resolve subagent tool-usage telemetry with 3-tier sandbox compatibility:
 --
 -- 1. Direct child transcript (@transcript_full.jsonl@ / @transcript.jsonl@) when accessible.
--- 2. Mounted parent/caller @<brain>/<caller_id>/.system_generated/@ logs & messages
---    (including @[Tools: ...]@ tags on 1-line completion notices).
--- 3. Optional @<!-- TOOLS: ... -->@ header comment inside the subagent's response file.
+-- 2. @<!-- TOOLS: ... -->@ header comment inside the freshly written response file.
+-- 3. Mounted parent/caller @<brain>/<caller_id>/.system_generated/@ logs & messages
+--    (including @[Tools: ...]@ tags on 1-line completion notices) when the response
+--    file omitted @<!-- TOOLS: ... -->@ or was not provided.
 resolveSubagentToolAudit :: Maybe FilePath -> Maybe Text -> IO SubagentToolAudit
 resolveSubagentToolAudit mRawLogPath mRawResponseText = do
   targetPath <-
@@ -1396,41 +1443,39 @@ resolveSubagentToolAudit mRawLogPath mRawResponseText = do
           , staPriorTranscriptReadFiles = priorReadPaths
           , staIsFirstTurnInTranscript = Just (turnStartCount <= 1)
           }
-    else do
-      mParentAudit <-
-        case mRawLogPath >>= extractSubagentIdFromPath of
-          Nothing -> pure Nothing
-          Just subId -> do
-            let rawLp = fromMaybe "" mRawLogPath
-            mMsg <- findSubagentMessageFromParent rawLp subId
-            case mMsg of
+    else
+      case mRawResponseText >>= parseToolReceiptTag of
+        Just tup -> pure (auditFromReceiptTuple "response_header" tup)
+        Nothing -> do
+          mParentAudit <-
+            case mRawLogPath >>= extractSubagentIdFromPath of
               Nothing -> pure Nothing
-              Just msg ->
-                case parseToolReceiptTag msg of
-                  Just tup -> pure (Just (auditFromReceiptTuple "parent_log" tup))
-                  Nothing
-                    | isCompletionNoticeOnly msg -> pure Nothing
-                    | otherwise ->
-                        let low = T.toLower msg
-                            hasSW = "search_web" `T.isInfixOf` low
-                            hasRF = "read_file" `T.isInfixOf` low
-                         in pure
-                              ( Just
-                                  SubagentToolAudit
-                                    { staSource = "parent_log"
-                                    , staUsedSearchWeb = Just hasSW
-                                    , staUsedVerificationTools = Just (hasSW || hasRF)
-                                    , staReadFiles = []
-                                    , staPriorTranscriptReadFiles = []
-                                    , staIsFirstTurnInTranscript = Nothing
-                                    }
-                              )
-      case mParentAudit of
-        Just pa -> pure pa
-        Nothing ->
-          case mRawResponseText >>= parseToolReceiptTag of
-            Just tup -> pure (auditFromReceiptTuple "response_header" tup)
-            Nothing -> pure emptySubagentToolAudit
+              Just subId -> do
+                let rawLp = fromMaybe "" mRawLogPath
+                mMsg <- findSubagentMessageFromParent rawLp subId
+                case mMsg of
+                  Nothing -> pure Nothing
+                  Just msg ->
+                    case parseToolReceiptTag msg of
+                      Just tup -> pure (Just (auditFromReceiptTuple "parent_log" tup))
+                      Nothing
+                        | isCompletionNoticeOnly msg -> pure Nothing
+                        | otherwise ->
+                            let low = T.toLower msg
+                                hasSW = "search_web" `T.isInfixOf` low
+                                hasRF = "read_file" `T.isInfixOf` low
+                             in pure
+                                  ( Just
+                                      SubagentToolAudit
+                                        { staSource = "parent_log"
+                                        , staUsedSearchWeb = Just hasSW
+                                        , staUsedVerificationTools = Just (hasSW || hasRF)
+                                        , staReadFiles = []
+                                        , staPriorTranscriptReadFiles = []
+                                        , staIsFirstTurnInTranscript = Nothing
+                                        }
+                                  )
+          pure (fromMaybe emptySubagentToolAudit mParentAudit)
 
 checkSubagentLogUsedSearchWeb :: FilePath -> IO (Maybe Bool)
 checkSubagentLogUsedSearchWeb rawLogPath =

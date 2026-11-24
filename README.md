@@ -113,7 +113,7 @@ flowchart TD
     V["Sealed Story Vault (.vault.bin)"] -->|"unlocks 1 chunk"| GK1["Haskell Gatekeeper (next)"]
     GK1 -->|"current_chunk.md + script prompt"| SW["Script Writer (stateless)"]
     SW -->|"unresearched draft"| GK_S["Haskell Gatekeeper (script)"]
-    GK_S -->|"quarantined draft (deletes script files)"| RES["Researcher"]
+    GK_S -->|"quarantined draft (deletes script files)"| RES["Researcher (stateless)"]
     RES -->|"verified excerpts + canon notes"| GK_R["Haskell Gatekeeper (research)"]
     GK_R -->|"current_chunk.md + current_research.md (blind to script)"| BR["Blind Reader"]
     BR -->|"commentary + new prediction"| GK2["Haskell Gatekeeper (record)"]

@@ -62,14 +62,13 @@ in `current_research.md`, **stop and check before calling `write_file`**:
 
 - Whenever you quote, count, verify elapsed time/sequence details from, call
   back to, or base a prediction premise (`**Clue/Anomaly**`) on an earlier chunk
-  (`XXXX < N`) not verbatim in `current_chunk.md` or `current_research.md` (and
-  not already read in this conversation), locate it via `chunks/by_topic.md` or
-  `chunks/by_chronology.md` and call `read_file` on
-  `<session_dir>/chunks/chunk_XXXX.md` before calling `write_file` (`LetsRead`
-  audits `read_file` receipts for rotation and callback checks). When
-  referencing an earlier prediction/ruling not shown in `current_prompt.md` or
-  `current_research.md`, check `predictions/by_topic.md` or
-  `predictions/by_chronology.md`.
+  (`XXXX < N`) not verbatim in `current_chunk.md` or `current_research.md`,
+  locate it via `chunks/by_topic.md` or `chunks/by_chronology.md` and call
+  `read_file` on `<session_dir>/chunks/chunk_XXXX.md` on this turn before
+  calling `write_file` (`LetsRead` audits `read_file` receipts for rotation and
+  callback checks). When referencing an earlier prediction/ruling not shown in
+  `current_prompt.md` or `current_research.md`, check `predictions/by_topic.md`
+  or `predictions/by_chronology.md`.
 
 #### Allowed On-Demand
 

@@ -122,11 +122,11 @@ earlier chunks in your context window, whenever `blind-reader` references,
 quotes, counts, checks elapsed time/sequence details from, or summarizes
 something from an earlier chunk (`XXXX < N`)—in `entries/chunk_NNNN.md`,
 `=== CHUNK SUMMARY ===`, `=== PREDICTION UPDATES ===` (`**Clue/Anomaly**`), or
-`memory.md`—that is not verbatim in `current_chunk.md` (and not already read
-in your current conversation), you **MUST** locate the relevant chunk via
-`chunks/by_topic.md` or `chunks/by_chronology.md` and **call `read_file` on
-`<session_dir>/chunks/chunk_XXXX.md`**. (`LetsRead` audits
-`Source: chunks/chunk_XXXX.md` citations against your `read_file` receipts.)
+`memory.md`—that is not verbatim in `current_chunk.md`, you **MUST** locate the
+relevant chunk via `chunks/by_topic.md` or `chunks/by_chronology.md` and **call
+`read_file` on `<session_dir>/chunks/chunk_XXXX.md` on this turn** (listing it
+in `<!-- TOOLS: ... -->`; `LetsRead` audits `Source: chunks/chunk_XXXX.md`
+citations against this turn's `read_file` receipts).
 
 #### Chronology, Elapsed Time & Status Continuity
 

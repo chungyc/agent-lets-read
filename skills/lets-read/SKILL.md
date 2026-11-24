@@ -37,7 +37,8 @@ it.
 
 ### `researcher`
 
-Reads `current_research_prompt.md`, pulls verbatim excerpts from
+Stateless one-shot subagent dispatched after `lets-read script`. Reads
+`current_research_prompt.md`, pulls verbatim excerpts from
 `chunks/chunk_XXXX.md`, `entries/chunk_XXXX.md`, and `predictions/pred_XXXX.md`
 plus verified external canon notes via neutral `search_web` queries relevant to
 the draft (never mentioning the draft), and writes
@@ -326,7 +327,7 @@ Writes `current_chunk.md`, `chunks/chunk_XXXX.md`, and
 - End your turn with **ZERO tool calls** until `script-writer` sends its idle
   notice (`1/1`).
 
-#### 2. Quarantine Draft (`script`), Kill `script-writer` & Notify `researcher`
+#### 2. Quarantine Draft (`script`), Kill `script-writer` & Invoke `researcher`
 
 Run `script` **only after** `script-writer`'s idle notice arrives:
 
@@ -344,18 +345,15 @@ deletes `current_script_prompt.md` and `current_script_response.md`**.
   1. **Kill the finished one-shot `script-writer` immediately** via
      `manage_subagents` (`Action: "kill"`).
 
-  2. On the first chunk of a session/batch or when
-     `"rotate_researcher_recommended": true` (killing any prior `researcher` via
-     `manage_subagents` with `Action: "kill"`), call `invoke_subagent`
-     (`TypeName: "researcher"`, `Role: "Continuity & Canon Researcher"`);
-     otherwise call `send_message` to the active `researcher` `conversationId`
-     with a **1-line notification** to read `current_research_prompt.md` and
-     write `current_research_response.md` (`Overwrite: true`).
+  2. Invoke a fresh one-shot `researcher` via `invoke_subagent`
+     (`TypeName: "researcher"`, `Role: "Continuity & Canon Researcher"`) with a
+     **1-line notification** to read `current_research_prompt.md` and write
+     `current_research_response.md` (`Overwrite: true`).
 
 - End your turn with **ZERO tool calls** until `researcher` sends its idle
   notice (`1/1`).
 
-#### 3. Verify Research (`research`) & Notify `blind-reader`
+#### 3. Verify Research (`research`), Kill `researcher` & Notify `blind-reader`
 
 Run `research` **only after** `researcher`'s idle notice arrives:
 
@@ -370,11 +368,16 @@ Verifies verbatim quotes and `search_web` receipts, **deletes
 `current_research.md` and `current_prompt.md`, and returns
 `"status": "unlocked"` and `"rotate_reader_recommended"`.
 
-- After `research` exits `0`, on the first chunk of a session/batch or when
-  `"rotate_reader_recommended": true` (killing any prior `blind-reader` via
-  `manage_subagents` with `Action: "kill"`), call `invoke_subagent`
-  (`TypeName: "blind-reader"`, `Role: "Blind Story Reader"`). Otherwise call
-  `send_message` to the active `blind-reader` `conversationId`.
+- In the same turn after `research` exits `0`:
+
+  1. **Kill the finished one-shot `researcher` immediately** via
+     `manage_subagents` (`Action: "kill"`).
+
+  2. On the first chunk of a session/batch or when
+     `"rotate_reader_recommended": true` (killing any prior `blind-reader` via
+     `manage_subagents` with `Action: "kill"`), call `invoke_subagent`
+     (`TypeName: "blind-reader"`, `Role: "Blind Story Reader"`). Otherwise call
+     `send_message` to the active `blind-reader` `conversationId`.
 
 - Send **only a 1-line notification** to read `current_prompt.md` and write
   `current_reader_response.md` (`Overwrite: true`), then end your turn with
@@ -511,7 +514,8 @@ the current batch so chunk `N/N` and the Final Wrapup finish together):
      (`< 1` `script-writer`, `researcher`, or `blind-reader` or `< 3` / `< 4`
      reviewers idle means **ZERO tool calls**; never emit `"Waiting for..."`
      alongside `run_command`) and killing one-shot `script-writer` after
-     `lets-read script` and one-shot `topic-curator` after `lets-read judge` via
+     `lets-read script`, one-shot `researcher` after `lets-read research`, and
+     one-shot `topic-curator` after `lets-read judge` via
      `manage_subagents(Action: "kill")`.
 
    - Before returning, call `manage_subagents` (`Action: "kill_all"`) to
@@ -544,14 +548,16 @@ the current batch so chunk `N/N` and the Final Wrapup finish together):
 
   2. Run `lets-read script` (passing `--session "<session_dir>"` and
      `--subagent-log "<script_writer_logAbsoluteUri>"`), kill `script-writer`
-     via `manage_subagents(Action: "kill")`, notify `researcher` (via
-     `send_message`, or `invoke_subagent` if no `researcher` is active) to read
+     via `manage_subagents(Action: "kill")`, invoke a fresh one-shot
+     `researcher` via `invoke_subagent` (`TypeName: "researcher"`,
+     `Role: "Continuity & Canon Researcher"`) to read
      `current_research_prompt.md` and write `current_research_response.md`, and
      wait for its idle notice (`ZERO tool calls`).
 
   3. Run `lets-read research` (passing `--session "<session_dir>"` and
      `--subagent-log "<researcher_logAbsoluteUri>"`, returning
-     `"status": "wrapup_unlocked"`), send a 1-line notification to
+     `"status": "wrapup_unlocked"`), kill `researcher` via
+     `manage_subagents(Action: "kill")`, send a 1-line notification to
      `blind-reader` (via `send_message`, or `invoke_subagent` if no
      `blind-reader` is active in this conversation) to read `current_prompt.md`
      and write `current_reader_response.md`, and wait for its idle notice

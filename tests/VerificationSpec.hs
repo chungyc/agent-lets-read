@@ -146,9 +146,14 @@ testRec2SandboxToolTelemetry = withTempDir "rec2-sandbox" $ \tmp -> do
           , "Checked the harbor chart and verified!"
           ]
   auditHdr <- resolveSubagentToolAudit Nothing (Just rawRespWithTools)
-  assertEq "Tier 3 response header source" "response_header" (staSource auditHdr)
-  assertEq "Tier 3 response header usedVerificationTools" (Just True) (staUsedVerificationTools auditHdr)
-  assertEq "Tier 3 response header usedSearchWeb" (Just True) (staUsedSearchWeb auditHdr)
+  assertEq "Tier 2 response header source" "response_header" (staSource auditHdr)
+  assertEq "Tier 2 response header usedVerificationTools" (Just True) (staUsedVerificationTools auditHdr)
+  assertEq "Tier 2 response header usedSearchWeb" (Just True) (staUsedSearchWeb auditHdr)
+  auditHdrBeatsStaleParent <- resolveSubagentToolAudit (Just unmountedPathB) (Just rawRespWithTools)
+  assertEq
+    "Fresh response_header <!-- TOOLS: ... --> takes precedence over stale parent_log [Tools: none]"
+    ("response_header", Just True, ["chunks/chunk_0001.md"])
+    (staSource auditHdrBeatsStaleParent, staUsedSearchWeb auditHdrBeatsStaleParent, staReadFiles auditHdrBeatsStaleParent)
   let (_, parsedComm, _, _, _) = parseCombinedResponse rawRespWithTools
   assertEq "parseCombinedResponse strips <!-- TOOLS: ... --> cleanly" "Checked the harbor chart and verified!" parsedComm
   assertBool "stripToolReceiptComments removes comment line" (not ("TOOLS:" `T.isInfixOf` stripToolReceiptComments rawRespWithTools))
@@ -287,7 +292,9 @@ testRec10HiddenScriptAndResearchVerification = withTempDir "rec10-research" $ \t
   createDirectoryIfMissing True (tmp </> "entries")
   createDirectoryIfMissing True (tmp </> "predictions")
   createDirectoryIfMissing True (tmp </> "archive" </> "memory")
-  TIO.writeFile (tmp </> "chunks" </> "chunk_0001.md") "Inspector Lin found the silver whistle beside Pier 2."
+  TIO.writeFile
+    (tmp </> "chunks" </> "chunk_0001.md")
+    "\"Good evening, Inspector,\" Mara said at the pier. Later that night, the foghorn sounded twice. Inspector Lin found the silver whistle beside Pier 2."
   TIO.writeFile (tmp </> "chunks" </> "chunk_0004.md") "Future spoiler chunk that must never be accepted on Chunk 3."
   TIO.writeFile (tmp </> "entries" </> "chunk_0002.md") "I joked that the harbor seagulls are running the smuggling ring."
   TIO.writeFile (tmp </> "entries" </> "chunk_0003.md") "Same-chunk entry not yet valid before Chunk 3 is recorded."
@@ -345,6 +352,21 @@ testRec10HiddenScriptAndResearchVerification = withTempDir "rec10-research" $ \t
       auditWithSearch
       ["- **[Prior Prediction | Source: predictions/hall_of_fame.md | Quote: \"Confirmed Hit: Chunk 0001 bosun whistle bet.\"]** Scoreboard entry on Wrapup."]
   assertEq "Allows predictions/hall_of_fame.md citation on Wrapup round" (1, 0) (length verifiedWrapHof, rejWrapHof)
+
+  let bridgeAndDialogueBullets =
+        parseResearchNotesSection $
+          T.unlines
+            [ "=== RESEARCH NOTES ==="
+            , "- **[Earlier Story Passage | Source: chunks/chunk_0001.md | Quote: \"Later that night [...] beside Pier 2.\"]** Single-quote [...] bridge."
+            , "- **[Earlier Story Passage | Source: chunks/chunk_0001.md | Quote: \"Later that night, the foghorn sounded twice.\" [...] \"Inspector Lin found the silver whistle beside Pier 2.\"]** Split-quote [...] bridge."
+            , "- **[Earlier Story Passage | Source: chunks/chunk_0001.md | Quote: \"\"Good evening, Inspector,\" Mara said at the pier.\"]** Nested dialogue quotes."
+            , "- **[Earlier Story Passage | Source: chunks/chunk_0001.md | Quote: \"Inspector Lin found the silver whistle [...] Later that night, the foghorn sounded twice.\"]** Out-of-order [...] bridge must be rejected."
+            ]
+  (verifiedBridges, rejBridges) <- verifyAndFilterResearchBullets tmp 3 False auditWithSearch bridgeAndDialogueBullets
+  assertEq
+    "Verifies in-order [...] bridges (inside or between quotes) and nested dialogue quotes while rejecting out-of-order [...] bridges"
+    (3, 1)
+    (length verifiedBridges, rejBridges)
 
   let auditNoSearchNoRead =
         auditWithSearch

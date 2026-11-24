@@ -126,12 +126,8 @@ cmdScript opts = do
 
   saveState sessionDir st
 
-  let rotateResearcher = curIdx > 1 && not isWrapupTurn && (curIdx - 1) `mod` 8 == 0
-      dispatchResearcherHint
-        | rotateResearcher =
-            "Kill the finished one-shot script-writer via manage_subagents(Action: \"kill\"), and because rotate_researcher_recommended is true, also kill any prior researcher via manage_subagents(Action: \"kill\") and invoke a fresh researcher subagent with a 1-line notification to read research_prompt_file and write research_response_file, then STOP and end your turn with ZERO tool calls until researcher sends its idle completion notice (never emit 'Waiting...' alongside 'research'); only after its idle notice arrives, run 'lets-read research --session <dir> --subagent-log <research_log>'."
-        | otherwise =
-            "Kill the finished one-shot script-writer immediately via manage_subagents(Action: \"kill\"), and send a 1-line notification to researcher (via send_message, or invoke_subagent on the first chunk or if no researcher is active) to read research_prompt_file and write research_response_file, then STOP and end your turn with ZERO tool calls until researcher sends its idle completion notice (never emit 'Waiting...' alongside 'research'); only after its idle notice arrives, run 'lets-read research --session <dir> --subagent-log <research_log>'."
+  let dispatchResearcherHint =
+        "Kill the finished one-shot script-writer immediately via manage_subagents(Action: \"kill\"), and invoke a fresh one-shot researcher subagent via invoke_subagent with a 1-line notification to read research_prompt_file and write research_response_file, then STOP and end your turn with ZERO tool calls until researcher sends its idle completion notice (never emit 'Waiting...' alongside 'research'); only after its idle notice arrives, run 'lets-read research --session <dir> --subagent-log <research_log>'."
 
   TIO.putStrLn $
     jsonObject
@@ -142,7 +138,7 @@ cmdScript opts = do
       , ("research_prompt_file", jsonStr (T.pack writtenResearchPrompt))
       , ("research_response_file", jsonStr (T.pack researchRespPath))
       , ("script_files_deleted", jsonBool True)
-      , ("rotate_researcher_recommended", jsonBool rotateResearcher)
+      , ("rotate_researcher_recommended", jsonBool True)
       , ("orchestrator_rule", jsonStr orchestratorRuleText)
       , ("next_step_hint", jsonStr dispatchResearcherHint)
       ]
