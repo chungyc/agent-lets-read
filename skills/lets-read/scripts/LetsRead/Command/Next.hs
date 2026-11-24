@@ -129,7 +129,7 @@ cmdNext rawSessionDir forceFlag = do
               , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
               , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
               , ("orchestrator_rule", jsonStr orchestratorRuleText)
-              , ("next_step_hint", jsonStr "Send a 1-line notification to blind-reader to read subagent_prompt_file and write reader_response_file for the Final Wrapup & Retrospective, then STOP and end your turn with ZERO tool calls until blind-reader sends its idle completion notice (never emit 'Waiting...' text alongside 'record'); only after its idle notice arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'.")
+              , ("next_step_hint", jsonStr "Send a 1-line notification to blind-reader (via send_message, or invoke_subagent if no blind-reader is active) to read subagent_prompt_file and write reader_response_file for the Final Wrapup & Retrospective, then STOP and end your turn with ZERO tool calls until blind-reader sends its idle completion notice (never emit 'Waiting...' text alongside 'record'); only after its idle notice arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'.")
               ]
         else
           TIO.putStrLn $

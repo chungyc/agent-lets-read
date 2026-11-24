@@ -364,7 +364,8 @@ immediately via `manage_subagents` (`Action: "kill"`) right after
 Whenever `lets-read judge` returns `"fact_check_discussion_pending": true`
 (`"awaiting_fact_check_response"`), **do NOT run `next` yet**:
 
-1. Send a 1-line notification via `send_message` to `blind-reader` to read
+1. Send a 1-line notification to `blind-reader` (via `send_message`, or
+   `invoke_subagent` if resuming without an active `blind-reader`) to read
    `<session_dir>/current_discussion_prompt.md` and write
    `<session_dir>/current_discussion_response.md` (`Overwrite: true`), then end
    your turn with **ZERO tool calls**.
@@ -379,34 +380,15 @@ Whenever `lets-read judge` returns `"fact_check_discussion_pending": true`
      --subagent-log "<blind_reader_logAbsoluteUri>"
    ```
 
-#### 7. Dedicated Final Wrapup Round (When `"wrapup_pending": true`)
-
-- Once chunk `N/N` is judged and `"fact_check_discussion_pending"` is `false`,
-  run `next` one more time to unlock the **Final Wrapup Round**
-  (`"status": "wrapup_unlocked"`).
-
-- Send a 1-line notification to `blind-reader` to read `current_prompt.md` and
-  write `current_reader_response.md`, then end your turn with **ZERO tool
-  calls**.
-
-- Only after `blind-reader`'s idle completion notice arrives, record the Final
-  Wrapup (no `judge` step is needed after `"wrapup_recorded"`):
-
-  ```bash
-  <skill_dir>/.bin/lets-read record \
-    --session "<session_dir>" \
-    --subagent-log "<blind_reader_logAbsoluteUri>"
-  ```
-
 ### Step 5: Interactive Discussion vs. Batch Progression
 
 #### Interactive Mode
 
-Read and present `<session_dir>/entries/chunk_XXXX.md` (or `entries/wrapup.md`)
-under the third-person host banner, and link to `lets_read_log.md`,
-`memory.md`, `predictions/by_chronology.md`, and `predictions/by_topic.md`
-(plus `entries/wrapup.md` and `predictions/hall_of_fame.md` when finished). Do
-**not** relay `critic_feedback.md` unless asked.
+Read and present `<session_dir>/entries/chunk_XXXX.md` under the third-person
+host banner, and link to `lets_read_log.md`, `memory.md`,
+`predictions/by_chronology.md`, and `predictions/by_topic.md` (plus
+`predictions/hall_of_fame.md` once chunk `N/N` is judged). Do **not** relay
+`critic_feedback.md` unless asked.
 
 If the user replies with comments, questions, or non-spoiler discussion:
 
@@ -419,9 +401,11 @@ If the user replies with comments, questions, or non-spoiler discussion:
      --user-message "<user_message>"
    ```
 
-2. Send a 1-line notification to `blind-reader` via `send_message` to read
-   `current_discussion_prompt.md` and write `current_discussion_response.md`,
-   then end your turn with **ZERO tool calls**.
+2. Send a 1-line notification to `blind-reader` (via `send_message`, or
+   `invoke_subagent` if no `blind-reader` is active in this conversation) to
+   read `current_discussion_prompt.md` and write
+   `current_discussion_response.md`, then end your turn with **ZERO tool
+   calls**.
 
 3. Only after `blind-reader`'s idle completion notice arrives, record the
    response:
@@ -454,7 +438,7 @@ the current batch so chunk `N/N` and the Final Wrapup finish together):
      run `ls`, `cat state.json`, `head`, `tail`, or guessed binary paths).
 
    - Execute **Step 4** using `<skill_dir>/.bin/lets-read` for each assigned
-     chunk (plus Step 4.7 Final Wrapup if completing chunk `N/N`), strictly
+     chunk (plus **Step 6** Final Wrapup if completing chunk `N/N`), strictly
      honoring the **Hard Anti-Race Barrier** (`< 1` reader or `< 3` / `< 4`
      reviewers idle means **ZERO tool calls**; never emit `"Waiting for..."`
      alongside `run_command`) and killing one-shot `topic-curator` via
@@ -475,3 +459,31 @@ the current batch so chunk `N/N` and the Final Wrapup finish together):
 3. If more chunks remain before the user's target or `"is_finished": true`,
    invoke a **new** `self` subagent (`Role: "Batch Read-Through Driver"`) for
    the next ~10-chunk batch.
+
+### Step 6: Dedicated Final Wrapup Round (When `"wrapup_pending": true`)
+
+- Run `next` one more time to unlock the **Final Wrapup Round**
+  (`"status": "wrapup_unlocked"`):
+
+  ```bash
+  <skill_dir>/.bin/lets-read next --session "<session_dir>"
+  ```
+
+- Send a 1-line notification to `blind-reader` (via `send_message`, or
+  `invoke_subagent` if no `blind-reader` is active in this conversation) to
+  read `current_prompt.md` and write `current_reader_response.md`, then end
+  your turn with **ZERO tool calls**.
+
+- Only after `blind-reader`'s idle completion notice arrives, record the Final
+  Wrapup (no `judge` step is needed after `"wrapup_recorded"`):
+
+  ```bash
+  <skill_dir>/.bin/lets-read record \
+    --session "<session_dir>" \
+    --subagent-log "<blind_reader_logAbsoluteUri>"
+  ```
+
+- In **Interactive Mode**, read and present `<session_dir>/entries/wrapup.md`
+  under the third-person host banner alongside links to
+  `predictions/hall_of_fame.md`, `lets_read_log.md`, `memory.md`,
+  `predictions/by_chronology.md`, and `predictions/by_topic.md`.

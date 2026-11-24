@@ -20,7 +20,7 @@ import LetsRead.Types
   , saveState
   , saveVault
   )
-import System.Directory (createDirectoryIfMissing)
+import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory, (</>))
 import System.Process (readProcessWithExitCode)
@@ -205,3 +205,238 @@ testRec1OrchestratorGuardrails mBinPath = do
       assertBool
         "lets_read_log.md header prose lines after rebuildMasterLog wrap <= 80 cols"
         (all (\l -> "#" `T.isPrefixOf` l || T.length l <= 80) rebuiltHeaderLines)
+
+      skillTxt <- TIO.readFile (repoDir </> "skills" </> "lets-read" </> "SKILL.md")
+      let (beforeStep5, fromStep5) = T.breakOn "### Step 5: Interactive Discussion vs. Batch Progression" skillTxt
+      assertBool
+        "SKILL.md contains Step 5 heading"
+        (not (T.null fromStep5))
+      assertBool
+        "SKILL.md places Step 6 Final Wrapup after Step 5 rather than inside Step 4"
+        ( not ("Dedicated Final Wrapup Round" `T.isInfixOf` beforeStep5)
+            && "### Step 6: Dedicated Final Wrapup Round" `T.isInfixOf` fromStep5
+            && not ("Step 4.7" `T.isInfixOf` skillTxt)
+        )
+      let (_, fromStep6) = T.breakOn "### Step 6: Dedicated Final Wrapup Round" fromStep5
+      assertBool
+        "SKILL.md Step 5 and Step 6 mention invoke_subagent fallback when no blind-reader is active"
+        ( "invoke_subagent" `T.isInfixOf` fst (T.breakOn "#### Batch Mode" fromStep5)
+            && "invoke_subagent" `T.isInfixOf` fromStep6
+        )
+
+      (ecNext2, _, errNext2) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
+      assertEq ("CLI next chunk 2/2 exit 0 (" ++ errNext2 ++ ")") ExitSuccess ecNext2
+      TIO.writeFile
+        readerResp
+        ( T.unlines
+            [ "<!-- TOOLS: read_file(current_chunk.md, memory.md, chunks/chunk_0001.md) -->"
+            , "=== COMMENTARY ==="
+            , "> \"Mara climbed the spiral stairs toward the beacon.\""
+            , ""
+            , "Mara was at the lighthouse the whole time!"
+            , ""
+            , "- **[Predicted Chunk 0002 | Topics: Mara, Lighthouse, Beacon]** **Clue/Anomaly**: Mara ascends the spiral stairs toward the unlit beacon -> **Theory**: Mara is relighting the beacon to warn ships away from the harbor reef (vs. **Plausible Rival**: She is signaling an accomplice offshore)"
+            , ""
+            , "=== CHUNK SUMMARY ==="
+            , "- **[Story | Topics: Mara, Lighthouse, Beacon]** Mara climbs the spiral stairs toward the lighthouse beacon."
+            , "- **[Entry | Topics: Mara, Lighthouse, Beacon]** Reaction to Mara reaching the beacon in the finale."
+            , ""
+            , "=== PREDICTION UPDATES ==="
+            , "- **[Predicted Chunk 0002 | Topics: Mara, Lighthouse, Beacon]** **Clue/Anomaly**: Mara ascends the spiral stairs toward the unlit beacon -> **Theory**: Mara is relighting the beacon to warn ships away from the harbor reef (vs. **Plausible Rival**: She is signaling an accomplice offshore)"
+            , ""
+            , "=== UPDATED MEMORY ==="
+            , "## Story Summary So Far"
+            , "- **Core Premise, Timeline & Baseline Facts (Persistent)**: Inspector Lin investigates the dock while Mara climbs the lighthouse."
+            ]
+        )
+      (ecRec2, _, errRec2) <- readProcessWithExitCode binPath ["record", "--session", sessDir] ""
+      assertEq ("CLI record chunk 2/2 exit 0 (" ++ errRec2 ++ ")") ExitSuccess ecRec2
+
+      TIO.writeFile
+        (sessDir </> "current_judge_response.md")
+        ( T.unlines
+            [ "=== PREDICTION JUDGMENTS ==="
+            , "- **[Predicted Chunk 0001 -> ACTIVE]** Still unresolved."
+            , "- **[Predicted Chunk 0002 -> ACTIVE]** Open finale thread."
+            ]
+        )
+      TIO.writeFile
+        (sessDir </> "current_fact_check_response.md")
+        ( T.unlines
+            [ "<!-- TOOLS: read_file(current_chunk.md, entries/chunk_0002.md, memory.md) -->"
+            , "=== VERIFIED CLAIMS LOG ==="
+            , "- [OK | Source: current_chunk.md] Mara climbed the spiral stairs toward the beacon."
+            , ""
+            , "=== DISPUTED FACTS & MEMORY CHECKS ==="
+            , "- [In-Story Fact | Source: current_chunk.md | Quote: \"Mara climbed the spiral stairs toward the beacon.\"] Does Chapter 2 actually state that the beacon is unlit?"
+            ]
+        )
+      TIO.writeFile
+        (sessDir </> "current_critic_response.md")
+        "=== PERSONA & STYLE CRITIQUE ===\n- **[Persona & Lens]** Strong voice.\n- **[What Worked Well]** Good energy.\n- **[Where the Voice Drifted or Felt Formulaic]** None.\n"
+      TIO.writeFile
+        (sessDir </> "current_topic_response.md")
+        "=== TOPIC MERGES ===\n- NONE\n"
+
+      (ecJDispute, outJDispute, errJDispute) <- readProcessWithExitCode binPath ["judge", "--session", sessDir] ""
+      assertEq ("CLI judge chunk 2/2 with fact-check dispute exit 0 (" ++ errJDispute ++ ")") ExitSuccess ecJDispute
+      assertBool
+        "judge on chunk N/N with pending fact-check dispute withholds wrapup_pending"
+        ( "\"status\": \"awaiting_fact_check_response\"" `isInfixOf` outJDispute
+            && "\"fact_check_discussion_pending\": true" `isInfixOf` outJDispute
+            && "\"wrapup_pending\": false" `isInfixOf` outJDispute
+        )
+
+      (ecStatPending, outStatPending, _) <- readProcessWithExitCode binPath ["status", "--session", sessDir] ""
+      assertEq "CLI status while fact-check dispute is pending on chunk 2/2 exit 0" ExitSuccess ecStatPending
+      assertBool
+        "status on chunk N/N withholds wrapup_pending while fact-check dispute is pending"
+        ( "\"fact_check_discussion_pending\": true" `isInfixOf` outStatPending
+            && "\"wrapup_pending\": false" `isInfixOf` outStatPending
+        )
+
+      TIO.writeFile
+        (sessDir </> "current_discussion_response.md")
+        ( T.unlines
+            [ "<!-- TOOLS: read_file(current_discussion_prompt.md, current_chunk.md, memory.md) -->"
+            , "=== COMMENTARY ==="
+            , "Good catch: Chapter 2 only mentions climbing toward the beacon without stating it is unlit."
+            , ""
+            , "=== CHUNK SUMMARY ==="
+            , "- **[Discussion | Topics: Mara, Beacon]** Clarified that Chapter 2 does not explicitly state the beacon is unlit."
+            ]
+        )
+      (ecFcDisc, outFcDisc, errFcDisc) <-
+        readProcessWithExitCode binPath ["discuss", "--session", sessDir] ""
+      assertEq ("CLI fact-check discuss on chunk 2/2 exit 0 (" ++ errFcDisc ++ ")") ExitSuccess ecFcDisc
+      assertBool
+        "fact-check discuss on chunk N/N flips wrapup_pending to true and includes present-to-user option"
+        ( "\"wrapup_pending\": true" `isInfixOf` outFcDisc
+            && "\"fact_check_discussion_resolved\": true" `isInfixOf` outFcDisc
+            && "\"fact_check_discussion_pending\": false" `isInfixOf` outFcDisc
+            && "Fact-check discussion resolved" `isInfixOf` outFcDisc
+            && "(or present the commentary and discussion to the user)" `isInfixOf` outFcDisc
+        )
+
+      (ecStatFinal, outStatFinal, _) <- readProcessWithExitCode binPath ["status", "--session", sessDir] ""
+      assertEq "CLI status after resolving fact-check on chunk 2/2 exit 0" ExitSuccess ecStatFinal
+      assertBool
+        "status on chunk N/N reports wrapup_pending true once fact-check dispute is resolved"
+        ( "\"fact_check_discussion_pending\": false" `isInfixOf` outStatFinal
+            && "\"wrapup_pending\": true" `isInfixOf` outStatFinal
+        )
+
+      TIO.writeFile
+        (sessDir </> "current_fact_check_response.md")
+        "<!-- TOOLS: read_file(current_chunk.md, entries/chunk_0002.md, memory.md) -->\n=== VERIFIED CLAIMS LOG ===\n- [OK | Source: current_chunk.md] Mara climbed the spiral stairs toward the beacon.\n\n=== DISPUTED FACTS & MEMORY CHECKS ===\n- PASS\n"
+      (ecJFinal, outJFinal, errJFinal) <- readProcessWithExitCode binPath ["judge", "--session", sessDir] ""
+      assertEq ("CLI clean judge chunk 2/2 exit 0 (" ++ errJFinal ++ ")") ExitSuccess ecJFinal
+      assertBool
+        "clean judge on chunk N/N sets wrapup_pending true and includes present-to-user option"
+        ( "\"wrapup_pending\": true" `isInfixOf` outJFinal
+            && "(or present the commentary to the user)" `isInfixOf` outJFinal
+        )
+
+      let userFinaleMsg = "What did you make of that cliffhanger at the lighthouse?"
+      (ecDP, outDP, errDP) <-
+        readProcessWithExitCode
+          binPath
+          ["discuss-prompt", "--session", sessDir, "--user-message", userFinaleMsg]
+          ""
+      assertEq ("CLI discuss-prompt on chunk 2/2 exit 0 (" ++ errDP ++ ")") ExitSuccess ecDP
+      assertBool
+        "discuss-prompt hint mentions invoke_subagent fallback when no blind-reader is active"
+        ("invoke_subagent" `isInfixOf` outDP)
+      TIO.writeFile
+        (sessDir </> "current_discussion_response.md")
+        ( T.unlines
+            [ "<!-- TOOLS: read_file(current_discussion_prompt.md, current_chunk.md, memory.md) -->"
+            , "=== COMMENTARY ==="
+            , "Ending right on the spiral stairs leaves the compass mystery wide open!"
+            , ""
+            , "=== CHUNK SUMMARY ==="
+            , "- **[Discussion | Topics: Mara, Lighthouse]** Discussing the cliffhanger ending on the lighthouse stairs."
+            ]
+        )
+      (ecDisc, outDisc, errDisc) <-
+        readProcessWithExitCode
+          binPath
+          ["discuss", "--session", sessDir, "--user-message", userFinaleMsg]
+          ""
+      assertEq ("CLI discuss on chunk 2/2 exit 0 (" ++ errDisc ++ ")") ExitSuccess ecDisc
+      assertBool
+        "user discuss on chunk N/N reports wrapup_pending true, is_finished false, and fact_check_discussion_resolved false"
+        ( "\"wrapup_pending\": true" `isInfixOf` outDisc
+            && "\"is_finished\": false" `isInfixOf` outDisc
+            && "\"fact_check_discussion_resolved\": false" `isInfixOf` outDisc
+        )
+      assertBool
+        "user discuss on chunk N/N does not mislabel hint as Fact-check discussion resolved and includes present-to-user option"
+        ( not ("Fact-check discussion resolved" `isInfixOf` outDisc)
+            && "(or present the commentary and discussion to the user)" `isInfixOf` outDisc
+        )
+      hasWrapupAfterDisc <- doesFileExist (sessDir </> "entries" </> "wrapup.md")
+      assertBool "wrapup.md is still not created during pre-wrapup finale discussion" (not hasWrapupAfterDisc)
+      chunk2EntryTxt <- TIO.readFile (sessDir </> "entries" </> "chunk_0002.md")
+      assertBool
+        "pre-wrapup user discussion appends ### Reader Discussion to entries/chunk_0002.md"
+        ( "### Reader Discussion" `T.isInfixOf` chunk2EntryTxt
+            && T.pack userFinaleMsg `T.isInfixOf` chunk2EntryTxt
+        )
+
+      (ecNextWrap, outNextWrap, errNextWrap) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
+      assertEq ("CLI next wrapup unlock exit 0 (" ++ errNextWrap ++ ")") ExitSuccess ecNextWrap
+      assertBool
+        "wrapup_unlocked hint mentions invoke_subagent fallback when no blind-reader is active"
+        ("\"status\": \"wrapup_unlocked\"" `isInfixOf` outNextWrap && "invoke_subagent" `isInfixOf` outNextWrap)
+      TIO.writeFile
+        readerResp
+        ( T.unlines
+            [ "<!-- TOOLS: read_file(memory.md, predictions/hall_of_fame.md) -->"
+            , "=== COMMENTARY ==="
+            , "Looking back across both chapters, Lin's harbor investigation and Mara's climb tie together cleanly."
+            ]
+        )
+      (ecRecWrap, outRecWrap, errRecWrap) <- readProcessWithExitCode binPath ["record", "--session", sessDir] ""
+      assertEq ("CLI record wrapup exit 0 (" ++ errRecWrap ++ ")") ExitSuccess ecRecWrap
+      assertBool
+        "record wrapup emits wrapup_recorded and is_finished true"
+        ("\"status\": \"wrapup_recorded\"" `isInfixOf` outRecWrap && "\"is_finished\": true" `isInfixOf` outRecWrap)
+
+      let postWrapMsg = "Any favorite scene looking back at the whole story?"
+      (ecDPWrap, _, errDPWrap) <-
+        readProcessWithExitCode
+          binPath
+          ["discuss-prompt", "--session", sessDir, "--user-message", postWrapMsg]
+          ""
+      assertEq ("CLI post-wrapup discuss-prompt exit 0 (" ++ errDPWrap ++ ")") ExitSuccess ecDPWrap
+      TIO.writeFile
+        (sessDir </> "current_discussion_response.md")
+        ( T.unlines
+            [ "<!-- TOOLS: none -->"
+            , "=== COMMENTARY ==="
+            , "Definitely the brass compass discovery on the dock in Chapter 1!"
+            , ""
+            , "=== CHUNK SUMMARY ==="
+            , "- **[Discussion | Topics: Brass Compass, Harbor]** Post-wrapup favorite scene reflection."
+            ]
+        )
+      (ecDiscWrap, outDiscWrap, errDiscWrap) <-
+        readProcessWithExitCode
+          binPath
+          ["discuss", "--session", sessDir, "--user-message", postWrapMsg]
+          ""
+      assertEq ("CLI post-wrapup discuss exit 0 (" ++ errDiscWrap ++ ")") ExitSuccess ecDiscWrap
+      assertBool
+        "post-wrapup discuss reports is_finished true, wrapup_pending false, and omits unlock-next-chunk hint"
+        ( "\"is_finished\": true" `isInfixOf` outDiscWrap
+            && "\"wrapup_pending\": false" `isInfixOf` outDiscWrap
+            && "Post-wrapup discussion recorded!" `isInfixOf` outDiscWrap
+            && not ("unlock the next chunk" `isInfixOf` outDiscWrap)
+        )
+      wrapupEntryTxt <- TIO.readFile (sessDir </> "entries" </> "wrapup.md")
+      assertBool
+        "post-wrapup user discussion appends ### Reader Discussion to entries/wrapup.md"
+        ( "### Reader Discussion" `T.isInfixOf` wrapupEntryTxt
+            && T.pack postWrapMsg `T.isInfixOf` wrapupEntryTxt
+        )

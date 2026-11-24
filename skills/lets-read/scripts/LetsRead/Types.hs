@@ -417,6 +417,7 @@ renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt st =
         , ("fact_check_discussion_pending", jsonBool hasFactCheckPending)
         , ("completed_chunks_count", jsonInt (length (stCompletedChunks st)))
         , ("wrapup_recorded", jsonBool hasWrapup)
+        , ("wrapup_pending", jsonBool (storyChunksDone && not hasWrapup))
         , ("is_finished", jsonBool isFin)
         , ("active_predictions_count", jsonInt activeCnt)
         , ("total_predictions_count", jsonInt totalPreds)

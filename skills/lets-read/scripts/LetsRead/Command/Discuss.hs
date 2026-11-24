@@ -309,11 +309,17 @@ cmdDiscuss opts = do
 
   stillPending <- doesFileExist questionsPath
   let storyChunksDone = curIdx >= stTotalChunks st && stCurrentRecorded st' && stCurrentJudged st' && not stillPending
+      wrapupPending = storyChunksDone && not hasWrapup
+      isFin = storyChunksDone && hasWrapup
       nextHint
         | stillPending =
             "A Fact-Check Peer Query is still pending in current_discussion_prompt.md. Send it to blind-reader and run 'discuss' before 'next'."
-        | storyChunksDone && not hasWrapup =
-            "Fact-check discussion resolved and all story chunks are judged! Run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round."
+        | wrapupPending && isFactCheckDiscussion =
+            "Fact-check discussion resolved and all story chunks are judged! Run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round (or present the commentary and discussion to the user)."
+        | wrapupPending =
+            "Discussion recorded! Run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round (or present the commentary and discussion to the user)."
+        | isFin =
+            "Post-wrapup discussion recorded! Relay the appended Reader Discussion reply from entries/wrapup.md to the user."
         | otherwise =
             "Discussion recorded! Run 'lets-read next --session <dir>' to unlock the next chunk (or present the commentary and discussion to the user)."
 
@@ -321,6 +327,8 @@ cmdDiscuss opts = do
     jsonObject
       [ ("status", jsonStr "discussed")
       , ("chunk_index", jsonInt curIdx)
+      , ("is_finished", jsonBool isFin)
+      , ("wrapup_pending", jsonBool wrapupPending)
       , ("fact_check_discussion_resolved", jsonBool isFactCheckDiscussion)
       , ("fact_check_discussion_pending", jsonBool stillPending)
       , ("reader_verified_with_tools", maybe "null" jsonBool mUsedVerifyTools)

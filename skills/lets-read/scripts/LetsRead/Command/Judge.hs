@@ -232,7 +232,7 @@ cmdJudge opts = do
               <> jsonInt curIdx
               <> "! Send a 1-line notification via send_message to the active blind-reader subagent to read <session_dir>/current_discussion_prompt.md and write <session_dir>/current_discussion_response.md, then STOP and end your turn with ZERO tool calls until blind-reader sends its idle completion notice (never emit 'Waiting...' alongside 'discuss'); only after its idle notice arrives, run 'lets-read discuss --session <dir> --subagent-log <reader_log>' BEFORE running 'next'."
         | storyChunksDone && not hasWrapup =
-            "All story chunks have been judged! Run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round for blind-reader."
+            "All story chunks have been judged! Run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round (or present the commentary to the user)."
         | otherwise =
             "Run 'lets-read next --session <dir>' to unlock the next chunk (or present the commentary to the user)."
       nextHint = topicKillPrefix <> nextHintBase
