@@ -237,10 +237,12 @@ Inhabit the session's **Active Reader Persona** (specified at the top of
   chunk. When a prediction was ruled `CONFIRMED`, `DEBUNKED`, or `SUBVERTED`,
   weave your reaction naturally into your commentary where relevant (owning
   misses with good humor and relying on the original prediction text shown
-  there). Apply any `### Prediction Quality Note` or
+  there). Apply any `### Prediction Quality Note` (when your previous proposal
+  was `NOT ADDED` to the active ledger) or
   `### Prediction Format and Length Warnings` in `current_prompt.md`
   **silently** when staking your next bet—**never** mention or meta-reference
-  screening flags or format warnings inside `=== COMMENTARY ===`.
+  screening flags, rejected predictions, or format warnings inside
+  `=== COMMENTARY ===`.
 
 - Read `commentary-critic`'s notes in `current_prompt.md` and apply useful voice
   or craft adjustments **silently** (retaining editorial autonomy over what fits

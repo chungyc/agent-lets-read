@@ -73,6 +73,7 @@ baseDummyState totalChks =
     , stEntryRecords = []
     , stCuratedMemory = defaultCuratedMemory
     , stPredictions = []
+    , stRejectedPredictions = []
     , stPendingRetirements = []
     , stPendingLinterWarnings = []
     , stLastJudgeSummary = []

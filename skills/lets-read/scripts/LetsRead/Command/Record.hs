@@ -60,6 +60,7 @@ import LetsRead.Types
   , jsonInt
   , jsonObject
   , jsonStr
+  , ledgerPredictions
   , loadState
   , orchestratorRuleText
   , padChunkNumber
@@ -341,6 +342,11 @@ cmdRecord opts = do
                 , stEntryRecords = entryRecords'
                 , stCuratedMemory = curated'
                 , stPredictions = preds'
+                , stRejectedPredictions =
+                    [ (pr, n)
+                    | (pr, n) <- stRejectedPredictions st
+                    , prOriginChunk pr /= curIdx
+                    ]
                 , stPendingRetirements = pendingRetires
                 , stPendingLinterWarnings = linterWarnings
                 , stPredictionAuditWarnings = auditBlocks
@@ -402,13 +408,13 @@ cmdRecord opts = do
           , ("rotate_critic_recommended", jsonBool rotateCritic)
           , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
           , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
-          , ("active_predictions_count", jsonInt (countActivePredictions (stPredictions st')))
+          , ("active_predictions_count", jsonInt (countActivePredictions (ledgerPredictions st')))
           , ("pending_retirements_count", jsonInt (length pendingRetires))
           , ("linter_warnings_count", jsonInt (length linterWarnings))
           , ("reader_read_prev_chunk", maybe "null" jsonBool mReadPrevChunk)
           , ("reader_callback_reads_count", jsonInt callbackReadsCnt)
           , ("reader_callback_audit_warnings_count", jsonInt (length readerCallbackWarns))
-          , ("total_predictions_count", jsonInt (length (stPredictions st')))
+          , ("total_predictions_count", jsonInt (length (ledgerPredictions st')))
           , ("prediction_audit_warnings_count", jsonInt (length auditBlocks))
           , ("memory_compaction_needed", jsonBool needsCompaction)
           , ("curated_memory_lines", jsonInt curLines)

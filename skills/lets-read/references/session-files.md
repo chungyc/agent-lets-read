@@ -102,11 +102,13 @@ Judge rulings, and final session scoreboard.
 
 #### `<session_dir>/predictions/pred_XXXX.md`
 
-Full record for the prediction logged on `Chunk XXXX`, including origin
+Full record for an accepted prediction staked on `Chunk XXXX`, including origin
 chapter/part metadata, topic tags, structured clauses, status (`ACTIVE`,
-`CONFIRMED`, `DEBUNKED`, `SUBVERTED`, `RETIRED`), Judge screening note while
+`CONFIRMED`, `DEBUNKED`, `SUBVERTED`, `RETIRED`), Judge admission note while
 unresolved, and Judge outcome explanation with origin and resolution chunk links
-once resolved.
+once resolved. Proposals screened out as `NOT ADDED` are returned as reader
+feedback only and do not create `predictions/pred_XXXX.md` files or index
+entries.
 
 #### `<session_dir>/predictions/by_chronology.md` & `by_topic.md`
 

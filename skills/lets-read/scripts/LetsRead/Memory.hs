@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module LetsRead.Memory
   ( defaultCuratedMemory
@@ -23,6 +24,7 @@ module LetsRead.Memory
   , rebuildMasterLog
   ) where
 
+import Control.Exception (IOException, catch)
 import Control.Monad (forM_, when)
 import qualified Data.ByteString as BS
 import Data.Char (isAlphaNum)
@@ -62,6 +64,7 @@ import LetsRead.Types
   , emptyParsedChunkSummaries
   , formatChapLabel
   , jsonInt
+  , ledgerPredictions
   , padChunkNumber
   , readTextFileSafe
   , stripAfterClosingBracket
@@ -70,7 +73,7 @@ import LetsRead.Types
   , wrapMarkdownParagraph
   , wrapMarkdownQuote
   )
-import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory)
+import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory, removeFile)
 import System.FilePath (takeFileName, (</>))
 
 defaultCuratedMemory :: [(Text, Text)]
@@ -359,8 +362,14 @@ formatPeerFactCheckQuote msg =
 syncPredictionsDirectory :: FilePath -> SessionState -> IO ()
 syncPredictionsDirectory sessionDir st = do
   let predDir = sessionDir </> "predictions"
-      preds = stPredictions st
+      preds = ledgerPredictions st
+      validNames = ["pred_" ++ padChunkNumber (prOriginChunk pr) ++ ".md" | pr <- preds]
   createDirectoryIfMissing True predDir
+
+  existingNames <- listDirectory predDir
+  forM_ existingNames $ \f ->
+    when ("pred_" `isPrefixOf` f && ".md" `isSuffixOf` f && f `notElem` validNames) $
+      removeFile (predDir </> f) `catch` (\(_ :: IOException) -> pure ())
 
   forM_ preds $ \pr -> do
     let fName = "pred_" ++ padChunkNumber (prOriginChunk pr) ++ ".md"
@@ -371,7 +380,7 @@ syncPredictionsDirectory sessionDir st = do
   let isFinished = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
   when isFinished $ do
     let hofPath = predDir </> "hall_of_fame.md"
-    TIO.writeFile hofPath (renderHallOfFameMarkdown sessionDir st)
+    TIO.writeFile hofPath (renderHallOfFameMarkdown sessionDir (st {stPredictions = preds}))
 
 renderMemoryMarkdown :: FilePath -> SessionState -> Text
 renderMemoryMarkdown sessionDir st =
@@ -551,10 +560,11 @@ rebuildMasterLog sessionDir st = do
   entryContents <- mapM readTextFileSafe chunkFiles
   hasWrapup <- doesFileExist wrapupPath
   wrapupContent <- if hasWrapup then readTextFileSafe wrapupPath else pure ""
-  let isFinished = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
+  let ledgerPreds = ledgerPredictions st
+      isFinished = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
       hofSuffix =
-        if isFinished && not (null (stPredictions st))
-          then "\n" <> renderHallOfFameMarkdown sessionDir st <> "\n"
+        if isFinished && not (null ledgerPreds)
+          then "\n" <> renderHallOfFameMarkdown sessionDir (st {stPredictions = ledgerPreds}) <> "\n"
           else ""
       logHeader =
         "# Let's Read: "

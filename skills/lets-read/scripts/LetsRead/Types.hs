@@ -13,6 +13,7 @@ module LetsRead.Types
   , PredictionStatus (..)
   , PredictionRecord (..)
   , isPredActive
+  , ledgerPredictions
   , predActiveScreeningNote
   , predResolutionMeta
   , predStoryResolutionMeta
@@ -199,6 +200,13 @@ isPredActive pr =
     PredStatusActive _ -> True
     _ -> False
 
+ledgerPredictions :: SessionState -> [PredictionRecord]
+ledgerPredictions st =
+  [ pr
+  | pr <- stPredictions st
+  , not (stCurrentRecorded st && not (stCurrentJudged st) && prOriginChunk pr == stCurrentIndex st)
+  ]
+
 predActiveScreeningNote :: PredictionRecord -> Maybe Text
 predActiveScreeningNote pr =
   case prStatus pr of
@@ -239,6 +247,7 @@ data SessionState = SessionState
   , stEntryRecords :: ![EntryLogRecord]
   , stCuratedMemory :: ![(Text, Text)]
   , stPredictions :: ![PredictionRecord]
+  , stRejectedPredictions :: ![(PredictionRecord, Text)]
   , stPendingRetirements :: ![(Int, Text)]
   , stPendingLinterWarnings :: ![Text]
   , stLastJudgeSummary :: ![Text]
@@ -269,6 +278,11 @@ data ParsedPrediction
       }
   | PredValidKeepActive
       { ppKeepOrigChunk :: !Int
+      , ppRawLine :: !Text
+      , ppBodyAfterBracket :: !Text
+      }
+  | PredValidRejected
+      { ppRejOrigChunk :: !Int
       , ppRawLine :: !Text
       , ppBodyAfterBracket :: !Text
       }
@@ -472,8 +486,9 @@ renderStateJsonWithFiles sessionDir sfs st =
           && ( (stCurrentIndex st > 0 && not (stCurrentRecorded st) && hasReaderPrompt)
                  || (storyChunksDone && not hasWrapup && hasWrapupReaderPrompt)
              )
-      activeCnt = length [pr | pr <- stPredictions st, isPredActive pr]
-      totalPreds = length (stPredictions st)
+      ledgerPreds = ledgerPredictions st
+      activeCnt = length [pr | pr <- ledgerPreds, isPredActive pr]
+      totalPreds = length ledgerPreds
    in jsonObject
         [ ("title", jsonStr (stTitle st))
         , ("persona", jsonStr (stPersona st))

@@ -46,6 +46,7 @@ import LetsRead.Types
   ( EntryDiscussionRecord (..)
   , EntryLogRecord (..)
   , ParsedChunkSummaries (..)
+  , PredictionRecord (..)
   , SessionState (..)
   , StoryChunkRecord (..)
   , emptyParsedChunkSummaries
@@ -196,7 +197,7 @@ cmdDiscuss opts = do
   unless entryExists $
     die ("Error: Recorded entry file not found: " ++ entryFile)
 
-  let (curated', preds', _, auditBlocks, trackerUpdates) =
+  let (curated', rawPreds', _, auditBlocks, trackerUpdates) =
         resolveAndAuditTurn
           curIdx
           (stTotalChunks st)
@@ -211,6 +212,25 @@ cmdDiscuss opts = do
           (stPredictionAuditWarnings st)
           mParsedPredUpdates
           finalMem
+      curWasRejected =
+        stCurrentJudged st
+          && any (\(pr, _) -> prOriginChunk pr == curIdx) (stRejectedPredictions st)
+          && all (\pr -> prOriginChunk pr /= curIdx) (stPredictions st)
+      preds' =
+        if curWasRejected
+          then [pr | pr <- rawPreds', prOriginChunk pr /= curIdx]
+          else rawPreds'
+      rejected' =
+        if curWasRejected
+          then
+            [ if prOriginChunk pr == curIdx
+                then case [p | p <- rawPreds', prOriginChunk p == curIdx] of
+                  (newP : _) -> (newP, n)
+                  [] -> (pr, n)
+                else (pr, n)
+            | (pr, n) <- stRejectedPredictions st
+            ]
+          else stRejectedPredictions st
 
   existingEntry <- readTextFileSafe entryFile
   let baseEntry = stripTrailingEntryRule existingEntry
@@ -299,6 +319,7 @@ cmdDiscuss opts = do
             , stEntryRecords = entryRecords'
             , stCuratedMemory = curated'
             , stPredictions = preds'
+            , stRejectedPredictions = rejected'
             , stPredictionAuditWarnings = auditBlocks
             }
 

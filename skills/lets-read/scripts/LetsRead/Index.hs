@@ -50,6 +50,7 @@ import LetsRead.Types
   , formatChapLabel
   , isPredActive
   , jsonInt
+  , ledgerPredictions
   , padChunkNumber
   , predStoryResolutionMeta
   , readTextFileSafe
@@ -889,7 +890,7 @@ collectSessionTopicCounts st =
   let rawTags =
         concatMap scrTopics (stStoryRecords st)
           ++ concatMap allEntryTopics (stEntryRecords st)
-          ++ concatMap prTopics (stPredictions st)
+          ++ concatMap prTopics (ledgerPredictions st)
       counts =
         foldl'
           ( \acc rawT ->

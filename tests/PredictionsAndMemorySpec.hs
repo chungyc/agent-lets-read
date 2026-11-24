@@ -35,6 +35,7 @@ import LetsRead.Memory
   )
 import LetsRead.Predictions
   ( applyJudgeVerdicts
+  , applyJudgeVerdictsWithFeedback
   , auditAndApplyPredictionUpdates
   , checkPredictionConcisenessIssues
   , parsePredictionLine
@@ -271,7 +272,7 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
         (case prStatus p5Fallback of PredStatusRetired _ -> True; _ -> False)
     [] -> die "Expected pred 5 in afterFallbackRetire"
 
-  -- End-to-end cmdJudge test with === CONDITIONAL RETIREMENTS === + same-chunk flagged cap retirement
+  -- End-to-end cmdJudge test: flagged proposal on Chunk 11 is NOT ADDED (feedback-only), sparing all 10 active bets
   withTempDir "cmd-judge-retire" $ \sessTmp -> do
     createDirectoryIfMissing True (sessTmp </> "entries")
     createDirectoryIfMissing True (sessTmp </> "chunks")
@@ -291,9 +292,9 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
       (sessTmp </> "current_judge_response.md")
       ( T.unlines
           [ "=== PREDICTION JUDGMENTS ==="
-          , "- **[Predicted Chunk 0011 -> ACTIVE]** [DUPLICATE-THESIS] Duplicates Predicted Chunk 0004's lantern signal theory."
+          , "- **[Predicted Chunk 0011 -> NOT ADDED]** [DUPLICATE-THESIS] Duplicates Predicted Chunk 0004's lantern signal theory."
           , "=== CONDITIONAL RETIREMENTS ==="
-          , "- **[Predicted Chunk 0011 -> RETIRED Chunk 0011]** Retiring duplicate bet to keep overarching harbor mysteries active."
+          , "- **[Predicted Chunk 0005 -> RETIRED Chunk 0011]** Spare if Chunk 0011 is not added."
           ]
       )
     TIO.writeFile
@@ -304,27 +305,57 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
       "=== PERSONA & STYLE CRITIQUE ===\n- **[Persona & Lens]** Good.\n- **[What Worked Well]** Good.\n- **[Where the Voice Drifted or Felt Formulaic]** None.\n"
     cmdJudge (JudgeOptions sessTmp Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing)
     stAfterCmdJudge <- loadState sessTmp
+    pred11FileExists <- doesFileExist (sessTmp </> "predictions" </> "pred_0011.md")
     assertBool
-      "cmdJudge honors === CONDITIONAL RETIREMENTS === (retires Chunk 0011, keeps oldest unflagged Chunk 0001 active)"
-      ( any (\p -> prOriginChunk p == 1 && prStatus p == PredStatusActive Nothing) (stPredictions stAfterCmdJudge)
-          && any (\p -> prOriginChunk p == 11 && case prStatus p of PredStatusRetired _ -> True; _ -> False) (stPredictions stAfterCmdJudge)
+      "cmdJudge excludes flagged Chunk 0011 from stPredictions and predictions/pred_0011.md while sparing all 10 active bets"
+      ( length (stPredictions stAfterCmdJudge) == 10
+          && all (\p -> prOriginChunk p /= 11 && prStatus p == PredStatusActive Nothing) (stPredictions stAfterCmdJudge)
+          && length (stRejectedPredictions stAfterCmdJudge) == 1
+          && not pred11FileExists
       )
     p12Path <- writeCurrentPromptFile sessTmp (stAfterCmdJudge {stCurrentIndex = 12}) (dummyChunk 12 12 1 1)
     p12Norm <- normWs <$> TIO.readFile p12Path
     assertBool
-      "Same-chunk flagged + cap-retired bet still delivers ### Prediction Quality Note on Chunk 12"
+      "Flagged NOT ADDED bet delivers ### Prediction Quality Note as feedback on Chunk 12"
       ( "### Prediction Quality Note from Chunk 11" `T.isInfixOf` p12Norm
-          && "Predicted Chunk 0011 -> RETIRED (10-Cap)" `T.isInfixOf` p12Norm
+          && "Predicted Chunk 0011 -> NOT ADDED" `T.isInfixOf` p12Norm
           && "[DUPLICATE-THESIS] Duplicates Predicted Chunk 0004's lantern signal theory." `T.isInfixOf` p12Norm
       )
     chron11Txt <- TIO.readFile (sessTmp </> "predictions" </> "by_chronology.md")
     topic11Txt <- TIO.readFile (sessTmp </> "predictions" </> "by_topic.md")
     let hof11Txt = renderHallOfFameMarkdown sessTmp (stAfterCmdJudge {stCurrentIndex = 15, stCurrentRecorded = True, stCurrentJudged = True})
     assertBool
-      "Retired bet strips leading [DUPLICATE-THESIS] flag in by_chronology.md, by_topic.md, and hall_of_fame.md"
-      ( not ("[DUPLICATE-THESIS]" `T.isInfixOf` chron11Txt)
-          && not ("[DUPLICATE-THESIS]" `T.isInfixOf` topic11Txt)
-          && not ("[DUPLICATE-THESIS]" `T.isInfixOf` hof11Txt)
+      "Screened-out bet never appears in by_chronology.md, by_topic.md, or hall_of_fame.md"
+      ( not ("pred_0011" `T.isInfixOf` chron11Txt)
+          && not ("pred_0011" `T.isInfixOf` topic11Txt)
+          && not ("pred_0011" `T.isInfixOf` hof11Txt)
+      )
+
+    -- Re-run cmdJudge on Chunk 11 when Chunk 11 IS accepted: === CONDITIONAL RETIREMENTS === retires Chunk 0005
+    TIO.writeFile
+      (sessTmp </> "current_judge_response.md")
+      ( T.unlines
+          [ "=== PREDICTION JUDGMENTS ==="
+          , "- **[Predicted Chunk 0011 -> ACTIVE]** Non-obvious catch on the hidden alcove."
+          , "=== CONDITIONAL RETIREMENTS ==="
+          , "- **[Predicted Chunk 0005 -> RETIRED Chunk 0011]** Retiring narrower alcove bet to keep central harbor mysteries."
+          ]
+      )
+    TIO.writeFile
+      (sessTmp </> "current_fact_check_response.md")
+      "<!-- TOOLS: read_file(current_chunk.md, entries/chunk_0011.md, memory.md) -->\n=== VERIFIED CLAIMS LOG ===\n- [OK | Source: current_chunk.md] Checked.\n\n=== DISPUTED FACTS & MEMORY CHECKS ===\n- PASS\n"
+    TIO.writeFile
+      (sessTmp </> "current_critic_response.md")
+      "=== PERSONA & STYLE CRITIQUE ===\n- **[Persona & Lens]** Good.\n- **[What Worked Well]** Good.\n- **[Where the Voice Drifted or Felt Formulaic]** None.\n"
+    cmdJudge (JudgeOptions sessTmp Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing)
+    stAfterAccept11 <- loadState sessTmp
+    pred11ExistsAfterAccept <- doesFileExist (sessTmp </> "predictions" </> "pred_0011.md")
+    assertBool
+      "Idempotent cmdJudge re-run restores accepted Chunk 0011, clears stRejectedPredictions, and retires nominated Chunk 0005"
+      ( pred11ExistsAfterAccept
+          && null (stRejectedPredictions stAfterAccept11)
+          && any (\p -> prOriginChunk p == 11 && prStatus p == PredStatusActive (Just "Non-obvious catch on the hidden alcove.")) (stPredictions stAfterAccept11)
+          && any (\p -> prOriginChunk p == 5 && case prStatus p of PredStatusRetired _ -> True; _ -> False) (stPredictions stAfterAccept11)
       )
 
 testRec5ArcRollupsFinalMysteriesAndHallOfFame :: IO ()
@@ -984,32 +1015,38 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
       bet1 = mkBet 1 1 ["Mara", "Harbor"] "Mara hid the tide chart in the boathouse"
       bet2 = mkBet 2 2 ["Inspector Lin", "Harbor"] "Lin arrives at Pier 2 after breakfast"
 
-      -- Chunk 1 initial screening (unflagged sharp note) + same-chunk re-run check
-      (after1Draft, _, _) =
-        applyJudgeVerdicts
+      -- Chunk 1 initial screening: flagged proposal is NOT ADDED, whereas unflagged re-run enters the active ledger
+      (after1Draft, rejs1Draft, _, summary1Draft) =
+        applyJudgeVerdictsWithFeedback
           1
           (1, "Chapter 1: Harbor", 1, 1)
           [bet1]
           []
-          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0001 -> ACTIVE]** [UNINTERESTING] Initial mistaken flag.\n"
-      (after1ReRun, _, _) =
-        applyJudgeVerdicts
+          "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0001 -> NOT ADDED]** [UNINTERESTING] Initial mistaken flag.\n"
+      (after1ReRun, rejs1ReRun, _, _) =
+        applyJudgeVerdictsWithFeedback
           1
           (1, "Chapter 1: Harbor", 1, 1)
-          after1Draft
+          [bet1]
           []
           "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0001 -> ACTIVE]** Sharp catch linking Mara's wet boots to the tide chart!\n"
+  assertEq "Flagged Chunk 1 proposal is excluded from active ledger" 0 (length after1Draft)
+  assertEq "Flagged Chunk 1 proposal is returned in rejected feedback list" 1 (length rejs1Draft)
+  assertBool
+    "Judge callout summary marks screened-out proposal as -> NOT ADDED"
+    (any ("Predicted Chunk 0001 -> NOT ADDED" `T.isInfixOf`) summary1Draft)
+  assertEq "Unflagged Chunk 1 re-run produces 0 rejections" 0 (length rejs1ReRun)
   case after1ReRun of
     (p1 : _) ->
       assertEq
-        "Same-chunk Judge re-run replaces flagged note with updated unflagged screening note"
+        "Unflagged Chunk 1 prediction enters active ledger with Judge note"
         (Just "Sharp catch linking Mara's wet boots to the tide chart!")
         (predActiveScreeningNote p1)
     [] -> die "Expected bet1 after Chunk 1 judge"
 
-  -- Chunk 2: bet2 gets [UNINTERESTING]; bet1 gets routine 'Still unresolved' mentioning [DUPLICATE-THESIS] mid-sentence
-  let (after2, _, _) =
-        applyJudgeVerdicts
+  -- Chunk 2: bet2 gets [UNINTERESTING] (even if Judge wrote -> ACTIVE [UNINTERESTING]); bet1 stays active untouched
+  let (after2, rejs2, _, _) =
+        applyJudgeVerdictsWithFeedback
           2
           (2, "Chapter 2: Harbor", 1, 1)
           (after1ReRun ++ [bet2])
@@ -1023,22 +1060,22 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
   case [p | p <- after2, prOriginChunk p == 1] of
     (p1After2 : _) ->
       assertEq
-        "Later-chunk 'Still unresolved' mentioning [DUPLICATE-THESIS] mid-sentence does not clobber bet1's screening note"
+        "Later-chunk 'Still unresolved' mentioning [DUPLICATE-THESIS] mid-sentence does not clobber bet1's note"
         (Just "Sharp catch linking Mara's wet boots to the tide chart!")
         (predActiveScreeningNote p1After2)
     [] -> die "Expected bet1 after Chunk 2"
-  case [p | p <- after2, prOriginChunk p == 2] of
-    (p2After2 : _) ->
-      assertEq
-        "Newly logged bet2 records [UNINTERESTING] screening note"
-        (Just "[UNINTERESTING] Routine morning itinerary already stated on page.")
-        (predActiveScreeningNote p2After2)
-    [] -> die "Expected bet2 after Chunk 2"
+  assertBool
+    "Flagged bet2 (even with -> ACTIVE [UNINTERESTING]) is NOT added to active ledger"
+    (all (\p -> prOriginChunk p /= 2) after2)
+  assertEq
+    "Flagged bet2 is captured as feedback-only rejection"
+    [(bet2, "[UNINTERESTING] Routine morning itinerary already stated on page.")]
+    rejs2
 
-  -- Chunk 3: explicit prefix flag [DUPLICATE-THESIS] on older bet2 updates it; rendering checks
+  -- Chunk 3: bet3 resolves same-chunk CONFIRMED; check rendering & non-active thesis visibility
   let bet3 = mkBet 3 3 ["Mara"] "Mara's lantern signal summons the cutter"
-      (after3, _, _) =
-        applyJudgeVerdicts
+      (after3, _, _, _) =
+        applyJudgeVerdictsWithFeedback
           3
           (3, "Chapter 3: Harbor", 1, 1)
           (after2 ++ [bet3])
@@ -1046,17 +1083,9 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
           ( T.unlines
               [ "=== PREDICTION JUDGMENTS ==="
               , "- **[Predicted Chunk 0001 -> ACTIVE]** Still unresolved in Chunk 0003."
-              , "- **[Predicted Chunk 0002 -> ACTIVE]** [DUPLICATE-THESIS] Redundant restatement of stated dock schedule."
               , "- **[Predicted Chunk 0003 -> CONFIRMED Chunk 0003]** Cutter answers Mara's lantern immediately."
               ]
           )
-  case [p | p <- after3, prOriginChunk p == 2] of
-    (p2After3 : _) ->
-      assertEq
-        "Explicit prefix flag [DUPLICATE-THESIS] on older active bet updates its screening note"
-        (Just "[DUPLICATE-THESIS] Redundant restatement of stated dock schedule.")
-        (predActiveScreeningNote p2After3)
-    [] -> die "Expected bet2 after Chunk 3"
 
   let stRender =
         (baseDummyState 10)
@@ -1064,10 +1093,12 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
           , stCurrentRecorded = True
           , stCurrentJudged = True
           , stPredictions = after3
+          , stRejectedPredictions = rejs2
           }
   syncPredictionsDirectory tmp stRender
   let memTxt = renderMemoryMarkdown tmp stRender
-  pred2FileTxt <- TIO.readFile (tmp </> "predictions" </> "pred_0002.md")
+  pred1FileTxt <- TIO.readFile (tmp </> "predictions" </> "pred_0001.md")
+  pred2Exists <- doesFileExist (tmp </> "predictions" </> "pred_0002.md")
   byChronTxt <- TIO.readFile (tmp </> "predictions" </> "by_chronology.md")
   byTopicTxt <- TIO.readFile (tmp </> "predictions" </> "by_topic.md")
   jpPersistPath <- writeCurrentJudgePromptFile tmp (stRender {stCurrentIndex = 4})
@@ -1080,42 +1111,39 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
         && "predictions/by_topic.md" `T.isInfixOf` memTxt
     )
   assertBool
-    "Judge prompt retains both earlier active screening notes across subsequent turns"
+    "Judge prompt retains accepted active screening note and lists prior NOT ADDED / resolved theses against recycling"
     ( "*Prior screening*: Sharp catch linking Mara's wet boots to the tide chart!" `T.isInfixOf` jpPersistNorm
-        && "*Prior screening*: [DUPLICATE-THESIS] Redundant restatement of stated dock schedule." `T.isInfixOf` jpPersistNorm
+        && "## Prior Non-Active Theses" `T.isInfixOf` jpPersistNorm
+        && "Chunk 0002 (NOT ADDED): Lin arrives at Pier 2 after breakfast" `T.isInfixOf` jpPersistNorm
     )
   assertBool
-    "pred_0002.md renders - **Judge Screening**: while unresolved"
-    ("- **Judge Screening**: [DUPLICATE-THESIS] Redundant restatement of stated dock schedule." `T.isInfixOf` normWs pred2FileTxt)
+    "pred_0001.md renders - **Judge Screening**: while unresolved, and rejected pred_0002.md does not exist"
+    ( "- **Judge Screening**: Sharp catch linking Mara's wet boots to the tide chart!" `T.isInfixOf` normWs pred1FileTxt
+        && not pred2Exists
+    )
   assertBool
-    "by_chronology.md and by_topic.md omit internal [DUPLICATE-THESIS] screening notes"
-    (not ("[DUPLICATE-THESIS]" `T.isInfixOf` byChronTxt) && not ("[DUPLICATE-THESIS]" `T.isInfixOf` byTopicTxt))
+    "by_chronology.md and by_topic.md omit rejected pred_0002 completely"
+    (not ("pred_0002" `T.isInfixOf` byChronTxt) && not ("pred_0002" `T.isInfixOf` byTopicTxt))
 
-  -- Event-only turn prompts check: quiet turn vs. verdict + flagged + syntax-warning turn
+  -- Event-only turn prompts check: quiet turn vs. verdict + rejected-proposal feedback + syntax-warning turn
   let stQuietTurn2 = (baseDummyState 10) {stCurrentIndex = 2, stPredictions = after1ReRun}
       chk2 = dummyChunk 2 2 1 1
   quietPromptPath <- writeCurrentPromptFile tmp stQuietTurn2 chk2
   quietPromptTxt <- TIO.readFile quietPromptPath
   assertBool
-    "Quiet turn (unflagged active bet on Chunk 1, 0 resolutions, 0 warnings) emits zero prediction event subsections"
+    "Quiet turn (accepted bet on Chunk 1, 0 resolutions, 0 rejections, 0 warnings) emits zero prediction event subsections"
     ( not ("### Prediction Verdicts" `T.isInfixOf` quietPromptTxt)
         && not ("### Prediction Quality Note" `T.isInfixOf` quietPromptTxt)
         && not ("### Prediction Format and Length Warnings" `T.isInfixOf` quietPromptTxt)
         && not ("Sharp catch linking Mara's wet boots" `T.isInfixOf` quietPromptTxt)
     )
 
-  let stEventTurn4 =
+  let bet3DupRej = mkBet 3 3 ["Harbor"] "Lin arrives at Pier 2 right after breakfast"
+      stEventTurn4 =
         (baseDummyState 10)
           { stCurrentIndex = 4
-          , stPredictions =
-              [ if prOriginChunk p == 2
-                  then p {prOriginChunk = 3}
-                  else
-                    if prOriginChunk p == 3
-                      then p {prOriginChunk = 2}
-                      else p
-              | p <- after3
-              ]
+          , stPredictions = after3
+          , stRejectedPredictions = [(bet3DupRej, "[DUPLICATE-THESIS] Duplicates prior dock schedule bet.")]
           , stPredictionAuditWarnings = ["- **[INVALID PREDICTION TAG OR FORMAT]** Sample syntax warning."]
           }
       chk4 = dummyChunk 4 4 1 1
@@ -1124,28 +1152,30 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
   evScriptPath <- writeCurrentScriptPromptFile tmp stEventTurn4 chk4
   evScriptNorm <- normWs <$> TIO.readFile evScriptPath
   assertBool
-    "Reader prompt surfaces CONFIRMED verdict + original Theory, flagged [DUPLICATE-THESIS] note, and syntax warnings"
+    "Reader prompt surfaces CONFIRMED verdict + original Theory, NOT ADDED feedback note, and syntax warnings"
     ( "### Prediction Verdicts from Chunk 3" `T.isInfixOf` evReaderNorm
         && "Original prediction — **Clue/Anomaly**: Clue 3 -> **Theory**: Mara's lantern signal summons the cutter" `T.isInfixOf` evReaderNorm
         && "### Prediction Quality Note from Chunk 3" `T.isInfixOf` evReaderNorm
+        && "Predicted Chunk 0003 -> NOT ADDED" `T.isInfixOf` evReaderNorm
         && "### Prediction Format and Length Warnings" `T.isInfixOf` evReaderNorm
     )
   assertBool
-    "Script-writer prompt surfaces verdicts and quality flag while omitting syntax warnings"
+    "Script-writer prompt surfaces verdicts and NOT ADDED quality feedback while omitting syntax warnings"
     ( "### Prediction Verdicts from Chunk 3" `T.isInfixOf` evReaderNorm
         && "### Prediction Verdicts from Chunk 3" `T.isInfixOf` evScriptNorm
         && "### Prediction Quality Note from Chunk 3" `T.isInfixOf` evScriptNorm
+        && "Predicted Chunk 0003 -> NOT ADDED" `T.isInfixOf` evScriptNorm
         && not ("### Prediction Format and Length Warnings" `T.isInfixOf` evScriptNorm)
     )
 
-  (_, fcDiscPath) <- writeFactCheckDiscussionPromptFile tmp (stRender {stCurrentIndex = 2}) ["- **[Peer Verification Query]** Check timeline."]
+  (_, fcDiscPath) <- writeFactCheckDiscussionPromptFile tmp (stRender {stCurrentIndex = 1}) ["- **[Peer Verification Query]** Check timeline."]
   fcDiscTxt <- TIO.readFile fcDiscPath
-  (_, uDiscPath) <- writeUserDiscussionPromptFile tmp (stRender {stCurrentIndex = 2}) "What about Pier 2?"
+  (_, uDiscPath) <- writeUserDiscussionPromptFile tmp (stRender {stCurrentIndex = 1}) "What about Pier 2?"
   uDiscTxt <- TIO.readFile uDiscPath
   assertBool
-    "Fact-check and user discussion prompts include Chunk N's logged prediction as a clean single bullet"
-    ( "- **[Predicted Chunk 0002" `T.isInfixOf` fcDiscTxt
-        && "- **[Predicted Chunk 0002" `T.isInfixOf` uDiscTxt
+    "Fact-check and user discussion prompts include Chunk N's accepted prediction as a clean single bullet"
+    ( "- **[Predicted Chunk 0001" `T.isInfixOf` fcDiscTxt
+        && "- **[Predicted Chunk 0001" `T.isInfixOf` uDiscTxt
         && not ("- `- **[Predicted" `T.isInfixOf` fcDiscTxt)
         && not ("- `- **[Predicted" `T.isInfixOf` uDiscTxt)
     )
@@ -1169,11 +1199,11 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
   -- Parser guard: copying active prediction + indented '*Judge screening*:' sub-bullet from memory.md into === PREDICTION UPDATES ===
   let copiedSlateWithNewBet =
         T.unlines
-          [ "- **[Predicted Chunk 0002 | Topics: Inspector Lin, Harbor]** **Clue/Anomaly**: Clue 2 -> **Theory**: Lin arrives at Pier 2 after breakfast (vs. **Plausible Rival**: Rival 2) ([details](predictions/pred_0002.md))"
+          [ "- **[Predicted Chunk 0001 | Topics: Mara, Harbor]** **Clue/Anomaly**: Clue 1 -> **Theory**: Mara hid the tide chart in the boathouse (vs. **Plausible Rival**: Rival 1) ([details](predictions/pred_0001.md))"
           , "  - *Judge screening*: [DUPLICATE-THESIS] Redundant restatement of stated dock schedule."
           , "  - `Judge screening`: [UNINTERESTING] Backtick-formatted screening label."
           , "  - *Prior screening*: [DUPLICATE-THESIS] Prior screening label."
-          , "  - Original prediction — **Clue/Anomaly**: Clue 2 -> **Theory**: Lin arrives at Pier 2 after breakfast"
+          , "  - Original prediction — **Clue/Anomaly**: Clue 1 -> **Theory**: Mara hid the tide chart in the boathouse"
           , "  - Previous prediction — **Clue/Anomaly**: Clue 4 -> **Theory**: Patrol cutter"
           , "- **[Predicted Chunk 0005 | Topics: Mara, Beacon]** **Clue/Anomaly**: Mara oils the shutter hinge -> **Theory**: Mara will flash a shuttered signal at midnight (vs. **Plausible Rival**: Routine maintenance before rain)"
           ]
@@ -1193,4 +1223,4 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
     "Copying active prediction + '*Judge screening*: [DUPLICATE-THESIS] ...' from memory.md produces 0 audit warnings"
     0
     (length auditWarns5)
-  assertEq "Records new Chunk 5 prediction cleanly alongside existing bets" 4 (length recs5)
+  assertEq "Records new Chunk 5 prediction cleanly alongside existing bets" 3 (length recs5)

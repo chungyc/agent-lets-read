@@ -56,8 +56,11 @@ with a 1-line `[Tools: ...]` notice.
 ### `prediction-judge`
 
 Reads `current_judge_prompt.md`, evaluates all active predictions against
-`current_chunk.md` (plus conditional 10-cap retirements when `> 10` are active),
-and writes verdicts to `current_judge_response.md`.
+`current_chunk.md`, screens newly proposed predictions so flagged
+uninteresting/hedged/duplicate/ungrounded proposals return strictly as reader
+feedback rather than entering the active ledger (plus conditional 10-cap
+retirements when `> 10` remain active), and writes verdicts to
+`current_judge_response.md`.
 
 ### `fact-checker`
 

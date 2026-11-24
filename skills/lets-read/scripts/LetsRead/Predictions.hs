@@ -19,6 +19,7 @@ module LetsRead.Predictions
   , extractJudgeSection
   , extractJudgeRetirementsSection
   , applyJudgeVerdicts
+  , applyJudgeVerdictsWithFeedback
   , countActivePredictions
   , predStatusBadge
   , predShortStatusTag
@@ -356,28 +357,48 @@ parsePredictionLine rawLine =
                           PredInvalidNotation l afterBracket
                 else
                   let hasArrow = "->" `T.isInfixOf` inside || "→" `T.isInfixOf` inside
+                      isRejected =
+                        hasArrow
+                          && any
+                            (`T.isInfixOf` inside)
+                            [ "not added"
+                            , "not-added"
+                            , "reject"
+                            , "screened"
+                            , "skip"
+                            , "drop"
+                            , "disqualif"
+                            , "feedback"
+                            ]
                       isKeepActive =
                         hasArrow
+                          && not isRejected
                           && ( "active" `T.isInfixOf` inside
                                  || "unresolv" `T.isInfixOf` inside
                                  || "pending" `T.isInfixOf` inside
+                                 || "accept" `T.isInfixOf` inside
+                                 || "added" `T.isInfixOf` inside
                              )
                       isActiveTag =
                         ("predicted" `T.isInfixOf` inside || "active" `T.isInfixOf` inside)
                           && not hasArrow
-                   in if isKeepActive
+                   in if isRejected
                         then case nums of
-                          (c1 : _) | c1 > 0 -> PredValidKeepActive c1 l afterBracket
+                          (c1 : _) | c1 > 0 -> PredValidRejected c1 l afterBracket
                           _ -> PredInvalidNotation l afterBracket
-                        else case nums of
-                          [c1]
-                            | isActiveTag && c1 > 0 && not (T.null (T.strip afterBracket)) ->
-                                let topics = parseTopicsFromBracket insideRaw afterBracket
-                                    (clue, theory, rival) = splitPredictionComponents afterBracket
-                                    canonL = canonicalizeActiveLine c1 topics afterBracket
-                                 in PredValidActive c1 topics clue theory rival canonL afterBracket
-                          _ ->
-                            PredInvalidNotation l afterBracket
+                        else if isKeepActive
+                          then case nums of
+                            (c1 : _) | c1 > 0 -> PredValidKeepActive c1 l afterBracket
+                            _ -> PredInvalidNotation l afterBracket
+                          else case nums of
+                            [c1]
+                              | isActiveTag && c1 > 0 && not (T.null (T.strip afterBracket)) ->
+                                  let topics = parseTopicsFromBracket insideRaw afterBracket
+                                      (clue, theory, rival) = splitPredictionComponents afterBracket
+                                      canonL = canonicalizeActiveLine c1 topics afterBracket
+                                   in PredValidActive c1 topics clue theory rival canonL afterBracket
+                            _ ->
+                              PredInvalidNotation l afterBracket
 
 renderRecordActiveLine :: PredictionRecord -> Text
 renderRecordActiveLine pr =
@@ -763,7 +784,19 @@ applyJudgeVerdicts
   -> [(Int, Text)]
   -> Text
   -> ([PredictionRecord], [Text], [Text])
-applyJudgeVerdicts curIdx (chapNum, chapTitle, partNum, partsTotal) prevRecords pendingRetires rawJudgeTxt =
+applyJudgeVerdicts curIdx chapMeta prevRecords pendingRetires rawJudgeTxt =
+  let (finalRecords, _, warns, summaryLines) =
+        applyJudgeVerdictsWithFeedback curIdx chapMeta prevRecords pendingRetires rawJudgeTxt
+   in (finalRecords, warns, summaryLines)
+
+applyJudgeVerdictsWithFeedback
+  :: Int
+  -> (Int, Text, Int, Int)
+  -> [PredictionRecord]
+  -> [(Int, Text)]
+  -> Text
+  -> ([PredictionRecord], [(PredictionRecord, Text)], [Text], [Text])
+applyJudgeVerdictsWithFeedback curIdx (chapNum, chapTitle, partNum, partsTotal) prevRecords pendingRetires rawJudgeTxt =
   let judgeBody = extractJudgeSection rawJudgeTxt
       retireSecBody = extractJudgeRetirementsSection rawJudgeTxt
       parseBulletsFrom txt =
@@ -789,6 +822,10 @@ applyJudgeVerdicts curIdx (chapNum, chapTitle, partNum, partsTotal) prevRecords 
       keepActiveVerdicts =
         [ k
         | k@(PredValidKeepActive {}) <- parsedLines
+        ]
+      rejectedVerdicts =
+        [ r
+        | r@(PredValidRejected {}) <- parsedLines
         ]
 
       existingResKind :: PredictionStatus -> Maybe ResolutionKind
@@ -824,11 +861,44 @@ applyJudgeVerdicts curIdx (chapNum, chapTitle, partNum, partsTotal) prevRecords 
           , Just targetPr <- [findJudgeTarget r]
           , not (isUnchangedPriorEcho targetPr r)
           ]
+      resolvedOriginSet = [origC | (origC, _) <- matchedResolutions]
+
+      normalizeRejectionNote :: Text -> Text
+      normalizeRejectionNote rawN =
+        let n = T.strip rawN
+         in if T.null n
+              then "[UNINTERESTING] Not added to the active predictions ledger."
+              else
+                if startsWithScreeningFlag n
+                  then n
+                  else "[UNINTERESTING] " <> n
+
+      mCurRejectionNote :: Int -> Maybe Text
+      mCurRejectionNote origC
+        | origC /= curIdx || origC `elem` resolvedOriginSet = Nothing
+        | otherwise =
+            case [normalizeRejectionNote note | PredValidRejected rOrig _ note <- rejectedVerdicts, rOrig == origC] of
+              (n : _) -> Just n
+              [] ->
+                listToMaybe
+                  [ T.strip note
+                  | PredValidKeepActive kOrig _ note <- keepActiveVerdicts
+                  , kOrig == origC
+                  , startsWithScreeningFlag (T.strip note)
+                  ]
+
+      rejectedCurPairs =
+        [ (pr {prStatus = PredStatusActive Nothing}, rejNote)
+        | pr <- prevRecords
+        , Just rejNote <- [mCurRejectionNote (prOriginChunk pr)]
+        ]
+      rejectedOrigins = [prOriginChunk pr | (pr, _) <- rejectedCurPairs]
 
       reopenedOrigins =
         [ origC
         | PredValidKeepActive origC _ noteTxt <- keepActiveVerdicts
         , not (T.null (T.strip noteTxt))
+        , not (startsWithScreeningFlag (T.strip noteTxt))
         , pr <- prevRecords
         , prOriginChunk pr == origC
         , not (isPredActive pr)
@@ -884,7 +954,8 @@ applyJudgeVerdicts curIdx (chapNum, chapTitle, partNum, partsTotal) prevRecords 
                      in pr {prStatus = PredStatusActive updatedNote}
                   _ -> pr
 
-      recordsAfterJudge = map applySingleJudgeVerdict prevRecords
+      keptPrevRecords = [pr | pr <- prevRecords, prOriginChunk pr `notElem` rejectedOrigins]
+      recordsAfterJudge = map applySingleJudgeVerdict keptPrevRecords
 
       activeAfterJudge = [pr | pr <- recordsAfterJudge, isPredActive pr]
       neededRetires = max 0 (length activeAfterJudge - 10)
@@ -980,6 +1051,13 @@ applyJudgeVerdicts curIdx (chapNum, chapTitle, partNum, partsTotal) prevRecords 
         | pr <- finalRecords
         , prOriginChunk pr `elem` reopenedOrigins
         ]
+      rejectedCurLines =
+        [ "- **[Predicted Chunk "
+            <> T.pack (padChunkNumber (prOriginChunk pr))
+            <> " -> NOT ADDED]** "
+            <> rejNote
+        | (pr, rejNote) <- rejectedCurPairs
+        ]
       newCurLine =
         [ let origC = prOriginChunk pr
               mJudgeNote =
@@ -1019,11 +1097,15 @@ applyJudgeVerdicts curIdx (chapNum, chapTitle, partNum, partsTotal) prevRecords 
       sparedRetireLines =
         [ "- *Conditional Retirement Not Needed*: **[Predicted Chunk "
             <> T.pack (padChunkNumber origC)
-            <> "]** remains **ACTIVE** because merit resolutions kept the active slate at "
+            <> "]** remains **ACTIVE** because the active slate stayed at "
             <> jsonInt finalActiveCount
             <> "/10."
         | (origC, _, _) <- sparedRetires
         ]
+      notAddedTallySuffix =
+        if null rejectedCurPairs
+          then ""
+          else ", " <> jsonInt (length rejectedCurPairs) <> " not added"
       tallyLine =
         "- *Slate Status After Judge*: **"
           <> jsonInt finalActiveCount
@@ -1031,16 +1113,19 @@ applyJudgeVerdicts curIdx (chapNum, chapTitle, partNum, partsTotal) prevRecords 
           <> jsonInt (length resolvedLines)
           <> " resolved by Judge, "
           <> jsonInt (length appliedRetires)
-          <> " retired for cap)."
+          <> " retired for cap"
+          <> notAddedTallySuffix
+          <> ")."
       judgeSummaryLines =
         resolvedLines
           ++ reopenedLines
           ++ overriddenLines
           ++ appliedRetireLines
           ++ sparedRetireLines
+          ++ rejectedCurLines
           ++ newCurLine
           ++ [tallyLine]
-   in (finalRecords, [], judgeSummaryLines)
+   in (finalRecords, rejectedCurPairs, [], judgeSummaryLines)
 
 countActivePredictions :: [PredictionRecord] -> Int
 countActivePredictions preds =

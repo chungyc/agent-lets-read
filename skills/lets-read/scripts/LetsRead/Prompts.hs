@@ -25,7 +25,7 @@ module LetsRead.Prompts
 
 import Control.Exception (IOException, catch)
 import Data.Char (isDigit, isSpace)
-import Data.List (find)
+import Data.List (find, sortOn)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -37,7 +37,8 @@ import LetsRead.Index
   , partitionVettedTopics
   )
 import LetsRead.Predictions
-  ( renderOriginalPredictionSummary
+  ( predShortStatusTag
+  , renderOriginalPredictionSummary
   , renderRecordActiveLine
   , renderRecordResolvedLine
   , startsWithScreeningFlag
@@ -259,31 +260,37 @@ renderTurnPredictionSection isDraftTurn includeSyntaxWarnings curIdx totalChunks
                 , T.intercalate "\n\n" items
                 ]
       flaggedPrevNew =
-        [ (pr, sNote, isCapRetired)
-        | curIdx > 1
-        , pr <- stPredictions st
-        , prOriginChunk pr == prevIdx
-        , (sNote, isCapRetired) <-
-            case prStatus pr of
-              PredStatusActive (Just n)
-                | startsWithScreeningFlag n -> [(n, False)]
-              PredStatusRetired rm
-                | rmChunk rm == prevIdx && startsWithScreeningFlag (rmNote rm) -> [(rmNote rm, True)]
-              _ -> []
-        ]
+        case [ (pr, sNote, " -> NOT ADDED")
+             | curIdx > 1
+             , (pr, sNote) <- stRejectedPredictions st
+             , prOriginChunk pr == prevIdx
+             ] of
+          (hit : _) -> [hit]
+          [] ->
+            [ (pr, sNote, if isCapRetired then " -> RETIRED (10-Cap)" else " -> NOT ADDED")
+            | curIdx > 1
+            , pr <- stPredictions st
+            , prOriginChunk pr == prevIdx
+            , (sNote, isCapRetired) <-
+                case prStatus pr of
+                  PredStatusActive (Just n)
+                    | startsWithScreeningFlag n -> [(n, False)]
+                  PredStatusRetired rm
+                    | rmChunk rm == prevIdx && startsWithScreeningFlag (rmNote rm) -> [(rmNote rm, True)]
+                  _ -> []
+            ]
       screeningSection =
         case flaggedPrevNew of
           [] -> []
-          ((pr, sNote, isCapRetired) : _) ->
-            let statusArrow = if isCapRetired then " -> RETIRED (10-Cap)" else " -> ACTIVE"
-                topLine = wrapMarkdownBullet 78 ("- **[Predicted Chunk " <> prevPad <> statusArrow <> "]** " <> sNote)
+          ((pr, sNote, statusArrow) : _) ->
+            let topLine = wrapMarkdownBullet 78 ("- **[Predicted Chunk " <> prevPad <> statusArrow <> "]** " <> sNote)
                 origLine = wrapMarkdownBullet 78 ("  - Previous prediction — " <> renderOriginalPredictionSummary pr)
              in [ ""
                 , "### Prediction Quality Note from Chunk " <> jsonInt prevIdx
                 , ""
                 , wrapMarkdownParagraph
                     78
-                    "Apply this calibration silently when staking your new prediction on this turn—never mention screening flags in commentary:"
+                    "Your previous prediction was not added to the active predictions ledger. Apply this calibration silently when staking your new prediction on this turn—never mention screening flags or rejected predictions in commentary:"
                 , ""
                 , topLine <> "\n" <> origLine
                 ]
@@ -976,7 +983,12 @@ writeCurrentJudgePromptFile sessionDir st = do
                   let origIdx = prOriginChunk pr
                       origPad = padChunkNumber origIdx
                       pPath = T.pack ("predictions" </> ("pred_" ++ origPad ++ ".md"))
-                      baseLine = wrapMarkdownBullet 78 (renderRecordActiveLine pr <> " ([details](" <> pPath <> "))")
+                      isUnjudgedProposal = stCurrentRecorded st && not (stCurrentJudged st) && origIdx == curIdx
+                      detailSuffix =
+                        if isUnjudgedProposal
+                          then ""
+                          else " ([details](" <> pPath <> "))"
+                      baseLine = wrapMarkdownBullet 78 (renderRecordActiveLine pr <> detailSuffix)
                    in case predActiveScreeningNote pr of
                         Nothing -> baseLine
                         Just sNote ->
@@ -984,6 +996,43 @@ writeCurrentJudgePromptFile sessionDir st = do
                             <> "\n"
                             <> wrapMarkdownBullet 78 ("  - *Prior screening*: " <> sNote)
              in T.intercalate sep (map renderOne activePreds)
+      priorNonActive =
+        let ledgerClosed =
+              [ (prOriginChunk pr, predShortStatusTag pr, if T.null (prTheory pr) then prRawBody pr else prTheory pr)
+              | pr <- preds
+              , not (isPredActive pr)
+              , prOriginChunk pr < curIdx
+              ]
+            priorRejected =
+              [ (prOriginChunk pr, "NOT ADDED", if T.null (prTheory pr) then prRawBody pr else prTheory pr)
+              | (pr, _) <- stRejectedPredictions st
+              , prOriginChunk pr < curIdx
+              ]
+            combined = sortOn (\(o, _, _) -> o) (ledgerClosed ++ priorRejected)
+         in drop (max 0 (length combined - 12)) combined
+      priorThesesSection =
+        if null priorNonActive
+          then []
+          else
+            [ ""
+            , "## Prior Non-Active Theses (Do Not Re-Admit Recycled Variations)"
+            , ""
+            , wrapMarkdownParagraph
+                78
+                "Use `[DUPLICATE-THESIS]` (`-> NOT ADDED`) if the new prediction recycles a previously resolved, retired, or rejected thesis below without a genuinely new mechanism:"
+            , ""
+            ]
+              ++ [ wrapMarkdownBullet
+                     78
+                     ( "- Chunk "
+                         <> T.pack (padChunkNumber origIdx)
+                         <> " ("
+                         <> tagTxt
+                         <> "): "
+                         <> theoryTxt
+                     )
+                 | (origIdx, tagTxt, theoryTxt) <- priorNonActive
+                 ]
       conditionalRetireSection =
         if needRetire <= 0
           then []
@@ -995,11 +1044,13 @@ writeCurrentJudgePromptFile sessionDir st = do
                 78
                 ( "Because "
                     <> jsonInt (length activePreds)
-                    <> " predictions are currently active (above the 10-slot cap), first evaluate EVERY active prediction strictly on the merits in `=== PREDICTION JUDGMENTS ===` (never use `RETIRED` as a substitute for `DEBUNKED` when a stated trigger expired), and then append `=== CONDITIONAL RETIREMENTS ===` nominating "
-                    <> jsonInt needRetire
-                    <> " candidate(s) using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
+                    <> " predictions are currently listed (above the 10-slot cap), first evaluate EVERY prediction strictly on the merits in `=== PREDICTION JUDGMENTS ===` (using `-> NOT ADDED` if Chunk "
                     <> curPad
-                    <> "]** <1-line reason, <= 200 chars>`. Strictly prioritize `[DUPLICATE-THESIS]` bets first, then `[UNINTERESTING]` / `[UNGROUNDED]` / `[VAGUE]` / `[HEDGED]` flagged bets, then narrow local-scene bets—never retire unflagged central-mystery or core-arc theories while flagged or narrow bets remain (`LetsRead` applies conditional retirements only if >10 remain `ACTIVE` after your merit rulings)."
+                    <> "'s new proposal fails screening, and never using `RETIRED` as a substitute for `DEBUNKED` when a stated trigger expired), and then append `=== CONDITIONAL RETIREMENTS ===` nominating "
+                    <> jsonInt needRetire
+                    <> " candidate(s) from the remaining active bets using `- **[Predicted Chunk XXXX -> RETIRED Chunk "
+                    <> curPad
+                    <> "]** <1-line reason, <= 200 chars>`. Prioritize mooted/overtaken subplot bets, narrower local-scene bets, or legacy `[DUPLICATE-THESIS]` / `[UNINTERESTING]` bets—never retire central-mystery or core-arc theories while narrower or mooted bets remain (`LetsRead` applies conditional retirements only if >10 remain `ACTIVE` after merit rulings and `NOT ADDED` exclusions)."
                 )
             ]
       recentLines =
@@ -1032,9 +1083,9 @@ writeCurrentJudgePromptFile sessionDir st = do
                         <> jsonInt (metaPartInChapter m)
                         <> " of "
                         <> jsonInt (metaPartsInChapter m)
-                        <> " of its chapter. Flag routine, predictable next-part continuations on `Predicted Chunk "
+                        <> " of its chapter. Reject routine, predictable next-part continuations on `Predicted Chunk "
                         <> curPad
-                        <> " -> ACTIVE` as `[UNINTERESTING]` (do not flag genuinely surprising or non-obvious predictions solely because they could resolve soon)."
+                        <> " -> NOT ADDED` with `[UNINTERESTING]` (do not reject genuinely surprising or non-obvious predictions solely because they could resolve soon)."
                     )
                 ]
           _ -> []
@@ -1046,7 +1097,7 @@ writeCurrentJudgePromptFile sessionDir st = do
           , ""
           , wrapMarkdownParagraph
               78
-              ( "Please evaluate all currently active predictions against Chunk "
+              ( "Please evaluate all currently active predictions (and screen any newly proposed prediction) against Chunk "
                   <> jsonInt curIdx
                   <> " of "
                   <> jsonInt totalChunks
@@ -1064,17 +1115,22 @@ writeCurrentJudgePromptFile sessionDir st = do
           ]
             ++ midSplitSection
             ++ [ ""
-               , "## Active Predictions to Judge on Chunk " <> curPad <> " (" <> jsonInt (length activePreds) <> " Active)"
+               , "## Active Predictions to Judge on Chunk " <> curPad <> " (" <> jsonInt (length activePreds) <> " Listed)"
                , ""
                , activeBlock
                ]
             ++ recentLines
+            ++ priorThesesSection
             ++ [ ""
                , "## Turn Output Contract"
                , ""
                , wrapMarkdownParagraph
                    78
-                   ( "Read `current_chunk.md` and `memory.md`, and write `=== PREDICTION JUDGMENTS ===` with one bullet per active prediction (`[Predicted Chunk XXXX -> ACTIVE]`, `CONFIRMED Chunk "
+                   ( "Read `current_chunk.md` and `memory.md`, and write `=== PREDICTION JUDGMENTS ===` with one bullet per listed prediction (`[Predicted Chunk XXXX -> ACTIVE]`, `[Predicted Chunk "
+                       <> curPad
+                       <> " -> NOT ADDED]` when screening out Chunk "
+                       <> curPad
+                       <> "'s new proposal, `CONFIRMED Chunk "
                        <> curPad
                        <> "`, `DEBUNKED Chunk "
                        <> curPad
@@ -1094,13 +1150,15 @@ writeCurrentJudgePromptFile sessionDir st = do
                        <> "` promptly rather than holding it `ACTIVE`."
                    )
                , ""
-               , "### Interestingness and Quality Screening on Newly Logged Predictions"
+               , "### Interestingness and Admission Screening on Newly Logged Predictions"
                , ""
                , wrapMarkdownParagraph
                    78
-                   ( "On `Predicted Chunk "
+                   ( "Admit `Predicted Chunk "
                        <> curPad
-                       <> " -> ACTIVE` (`<= 200 chars`), weigh both why the prediction might fail to be interesting (openly telegraphed, routine, generic placeholder, or arbitrary non-sequitur) and why it might be interesting (perceptive cue/tell + specific, non-obvious, story-coherent bet, including bold long-shots and canon hooks in derivative works) strictly from unlocked text and `memory.md`, then write 1 decisive sentence: prefix `[UNINTERESTING]` (obvious/telegraphed/generic—never flagging a clever call just for coming from one scene or resolving soon), `[UNGROUNDED]` (true non-sequitur—never penalizing coherent long-shots or canon hooks), `[DUPLICATE-THESIS]` (when >= 2 active predictions stake near-identical variations of the same mechanism and outcome—naming the duplicated `Predicted Chunk XXXX`), or `[HEDGED]` / `[VAGUE]` when applicable; note plainly without a flag if passable yet safe/expected; and praise only genuinely sharp, non-obvious calls."
+                       <> "` to the active ledger (`-> ACTIVE`) ONLY if it stakes a genuinely non-obvious, specific, falsifiable claim strictly from unlocked text and `memory.md`—with NO unflagged pass for safe, expected, or telegraphed bets. Whenever a defect applies, output `- **[Predicted Chunk "
+                       <> curPad
+                       <> " -> NOT ADDED]** <flag> <reason>` (`<= 200 chars`, returned to `blind-reader` as feedback only and excluded from active predictions): `[UNINTERESTING]` for expected, telegraphed, or default-trajectory bets—completing a character's stated plan, project, itinerary, or expressed wish; relabeling an ability, anomaly, or dynamic already shown on-page; routine scene/cliffhanger continuations; generic placeholders; or stock genre/relationship/career reflexes (such as a secrecy pact being breached, initial pushback before embrace, a partner tribute, an estranged figure resurfacing, or routine healing/atonement), even when packaged by pairing two explicit facts across chunks (never rejecting a genuinely surprising call solely because it comes from one subtle tell or could resolve soon); `[UNGROUNDED]` for arbitrary non-sequiturs (never penalizing story-coherent long-shots or external-canon hooks); `[DUPLICATE-THESIS]` when duplicating an active or prior thesis (naming `Chunk XXXX`); or `[HEDGED]` / `[VAGUE]` for probability hedging, multi-option menu bets (`X, Y, or Z` covering distinct actors, channels, or payoffs), or Barnum vagueness."
                    )
                ]
             ++ conditionalRetireSection

@@ -128,6 +128,7 @@ cmdInit opts = do
           , stEntryRecords = []
           , stCuratedMemory = defaultCuratedMemory
           , stPredictions = []
+          , stRejectedPredictions = []
           , stPendingRetirements = []
           , stPendingLinterWarnings = []
           , stLastJudgeSummary = []

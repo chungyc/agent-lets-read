@@ -17,6 +17,7 @@ module LetsRead.Command.Judge
   ) where
 
 import Control.Monad (unless, when)
+import Data.List (sortOn)
 import Data.Maybe (isJust)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -37,14 +38,16 @@ import LetsRead.Memory
   , syncMemoryAndArchives
   )
 import LetsRead.Predictions
-  ( applyJudgeVerdicts
+  ( applyJudgeVerdictsWithFeedback
   , countActivePredictions
   , formatAuditEntryCallout
   , formatJudgeCallout
   , stripExistingJudgeCallout
   )
 import LetsRead.Types
-  ( SessionState (..)
+  ( PredictionRecord (..)
+  , PredictionStatus (..)
+  , SessionState (..)
   , jsonBool
   , jsonInt
   , jsonObject
@@ -169,13 +172,24 @@ cmdJudge opts = do
   (criticFeedbackWritten, criticNotesCount, factCheckPending, factQueriesCount, rejectedCriticQuotesCount, factCheckAuditWarningsCount) <-
     processCriticFeedbackWithAudit sessionDir st curIdx factAudit (stPendingLinterWarnings st) (Just rawFactCheck) (Just rawCritic)
 
-  let (preds', judgeAuditBlocks, judgeSummaryLines) =
-        applyJudgeVerdicts
+  let restoredFromRej =
+        [ pr {prStatus = PredStatusActive Nothing}
+        | (pr, _) <- stRejectedPredictions st
+        , prOriginChunk pr == curIdx
+        , all (\p -> prOriginChunk p /= curIdx) (stPredictions st)
+        ]
+      prevPool = sortOn prOriginChunk (stPredictions st ++ restoredFromRej)
+      (preds', newRejs, judgeAuditBlocks, judgeSummaryLines) =
+        applyJudgeVerdictsWithFeedback
           curIdx
           (currentChunkMetaTuple st)
-          (stPredictions st)
+          prevPool
           (stPendingRetirements st)
           rawJudge
+      rejected' =
+        sortOn
+          (prOriginChunk . fst)
+          ([ (pr, n) | (pr, n) <- stRejectedPredictions st, prOriginChunk pr /= curIdx ] ++ newRejs)
       entriesDir = sessionDir </> "entries"
       entryFile = entriesDir </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")
 
@@ -195,6 +209,7 @@ cmdJudge opts = do
         st
           { stCurrentJudged = True
           , stPredictions = preds'
+          , stRejectedPredictions = rejected'
           , stPendingRetirements = []
           , stPendingLinterWarnings = []
           , stLastJudgeSummary = judgeSummaryLines
