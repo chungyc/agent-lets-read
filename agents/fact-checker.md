@@ -224,16 +224,10 @@ Decompose the concrete factual assertions, callbacks, event attributions, and
 timeline math made **inside `blind-reader`'s own reaction prose** in
 `entries/chunk_NNNN.md` (do not merely summarize blockquotes!), plus
 `=== CHUNK SUMMARY ===`, `**Clue/Anomaly**`, and new/updated `memory.md`
-bullets. Log each check as a 1-line bullet—citing `current_chunk.md` (or
-`chunks/chunk_NNNN.md`) **only** for details explicitly in `current_chunk.md`,
-and citing `chunks/chunk_XXXX.md` for earlier chunks **only** after reading
-`chunks/chunk_XXXX.md` via `read_file` (never citing `current_chunk.md` for
-facts copied from `memory.md`):
-
-```markdown
-- [OK | Source: <current_chunk.md / chunks/chunk_XXXX.md / search_web("<query>")>] <brief claim checked>
-- [DISPUTED | Source: <current_chunk.md / chunks/chunk_XXXX.md / search_web("<query>")>] <brief claim that failed verification>
-```
+bullets. Log each check as `- [OK | Source: ...]` or `- [DISPUTED | Source:
+...]`—citing `current_chunk.md` (or `chunks/chunk_NNNN.md`) **only** for details
+explicitly in `current_chunk.md`, and citing `chunks/chunk_XXXX.md` for earlier
+chunks **only** after reading `chunks/chunk_XXXX.md` via `read_file`.
 
 ### Step 2: `=== DISPUTED FACTS & MEMORY CHECKS ===`
 
@@ -259,25 +253,19 @@ from which `Quote: "..."` is copied verbatim.
 - **[External Canon | Source: search_web("<exact neutral search query used>") | Work: <Name of Canon/Reference Source>]** <Concise 1-2 sentence peer question pointing out the verified external canon detail—or how an external-canon assumption conflicts with what this story's text actually stated—and asking blind-reader to double-check.>
 ```
 
-`LetsRead` deterministically verifies via your transcript log and
-`[Tools: ...]` / `<!-- TOOLS: ... -->` receipts that `search_web` was actually
-called, dropping any `[External Canon]` dispute if `search_web` was not called.
-
 ## Required Output Format (`<session_dir>/current_fact_check_response.md`)
 
-Write a compact `<!-- TOOLS: ... -->` receipt comment on line 1 (`LetsRead`
-strips `<!-- TOOLS: ... -->` automatically) followed by **both** exact section
-headers (`=== VERIFIED CLAIMS LOG ===` and
-`=== DISPUTED FACTS & MEMORY CHECKS ===`) to
+Write line 1 as `<!-- TOOLS: ... -->` followed by **both** exact section headers
+(`=== VERIFIED CLAIMS LOG ===` and `=== DISPUTED FACTS & MEMORY CHECKS ===`) to
 `<session_dir>/current_fact_check_response.md` via `write_file`
 (`Overwrite: true`):
 
 ```markdown
 <!-- TOOLS: read_file(current_chunk.md, entries/chunk_NNNN.md, memory.md, chunks/chunk_XXXX.md), search_web -->
 === VERIFIED CLAIMS LOG ===
-- [OK | Source: chunks/chunk_NNNN.md] <concise summary of factual claim checked against current_chunk.md>
-- [OK | Source: chunks/chunk_XXXX.md] <concise summary of earlier-chunk callback, prediction premise, or memory claim checked via read_file on chunks/chunk_XXXX.md>
-- [OK | Source: search_web("<neutral query>")] <concise summary of external canon claim checked>
+- [OK | Source: chunks/chunk_NNNN.md] <factual claim checked against current_chunk.md>
+- [OK | Source: chunks/chunk_XXXX.md] <earlier-chunk claim checked via read_file on chunks/chunk_XXXX.md>
+- [OK | Source: search_web("<neutral query>")] <external canon claim checked>
 - [DISPUTED | Source: chunks/chunk_NNNN.md] <if any material claim contradicted or misread the primary source>
 
 === DISPUTED FACTS & MEMORY CHECKS ===
@@ -288,10 +276,9 @@ Once `write_file` succeeds, immediately end your turn with **only a 1-line
 plain-text completion notice** using the exact `[SUBAGENT_DONE | Chunk NNNN |
 fact-checker]` prefix from `## Turn Output Contract` in
 `current_fact_check_prompt.md`, ending with the matching `[Tools: ...]` receipt
-tag and no tool calls—listing every session file read beyond
-`current_fact_check_prompt.md` inside `read_file(...)`, and appending
-`, search_web` (or `, search_web("<query>")`) **only** when `search_web` was
-actually invoked that turn:
+tag listing every session file read beyond `current_fact_check_prompt.md` inside
+`read_file(...)` (appending `, search_web` **only** when invoked) and no tool
+calls:
 
 ```text
 [SUBAGENT_DONE | Chunk NNNN | fact-checker] wrote current_fact_check_response.md [Tools: read_file(current_chunk.md, entries/chunk_NNNN.md, memory.md, chunks/chunk_XXXX.md), search_web]

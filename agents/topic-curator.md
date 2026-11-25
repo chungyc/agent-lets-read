@@ -72,9 +72,9 @@ Merge tags that describe the exact same recurring mechanic or mystery thread
 
 ### Prefer Established Recurring Topic Names
 
-Whenever an appropriate topic already exists in `## Established / Previously
-Vetted Topics` (or has a higher occurrence count), use that exact established
-topic name as the left-hand `<Canonical Topic>` target.
+Whenever an appropriate topic already exists in `## Established Topics` (or has
+a higher occurrence count), use that exact established topic name as the
+left-hand `<Canonical Topic>` target.
 
 ### Never Over-Merge Into Broad Setting, Protagonist, or Meta Umbrellas
 

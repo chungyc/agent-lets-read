@@ -194,76 +194,37 @@ elements touched by the draft.
   purely inside `current_chunk.md` with no earlier callbacks, predictions,
   session-entry threads, or external canon/reference claims to check.
 
-### Mandatory Verifiable Receipt Headers
+### Mandatory Verifiable Receipt Headers & Required Output Format
 
 `LetsRead` deterministically validates every `Quote: "..."` against the cited
 file on disk (and checks your `read_file` and `search_web` receipts), dropping
 any paraphrased quote or unverified citation. Always call `read_file` in **this
-turn** on every file you cite (listing all read files in `<!-- TOOLS: ... -->`)
-and copy `Quote: "..."` **verbatim** (you may use `[...]` inside the single
-`Quote: "..."` string to bridge two verbatim phrases from the same file).
+turn** on every file you cite and copy `Quote: "..."` **verbatim** (you may use
+`[...]` inside `Quote: "..."` to bridge two verbatim phrases from the same
+file).
 
-#### Earlier Story Passages
-
-Cite `<session_dir>/chunks/chunk_XXXX.md` with an exact verbatim substring:
-
-```markdown
-- **[Earlier Story Passage | Source: chunks/chunk_XXXX.md | Quote: "<exact verbatim substring from chunks/chunk_XXXX.md>"]** <1-2 neutral sentences noting chapter/part, speaker, and authoritative in-story factual/chronological context.>
-```
-
-#### Prior Session Entries, Discussions, and Memory Snapshots
-
-Cite `<session_dir>/entries/chunk_XXXX.md` (or
-`<session_dir>/archive/memory/curated_XXXX.md`) with an exact verbatim
-substring, making clear this reflects prior reader commentary, discussion, or
-notes rather than primary story text:
-
-```markdown
-- **[Prior Session Entry | Source: entries/chunk_XXXX.md | Quote: "<exact verbatim substring from entries/chunk_XXXX.md>"]** <1-2 neutral sentences summarizing the prior liveblog reaction, running gag, or user discussion exchange (noting any contrast if story text in chunks/ differs).>
-```
-
-#### Prior Predictions
-
-Cite `<session_dir>/predictions/pred_XXXX.md` (or
-`predictions/hall_of_fame.md` on Wrapup) with an exact verbatim substring:
-
-```markdown
-- **[Prior Prediction | Source: predictions/pred_XXXX.md | Quote: "<exact verbatim substring from predictions/pred_XXXX.md>"]** <1-2 neutral sentences giving the prediction's exact original Clue/Anomaly, Theory, and current status/verdict (distinguishing unconfirmed/debunked bets from established story fact).>
-```
-
-#### External Canon and Reference Material
-
-Cite the exact neutral `search_web` query used and the reference work:
-
-```markdown
-- **[External Canon / Reference | Source: search_web("<exact neutral search query used>") | Work: <Name of Canon/Reference Source>]** <1-2 neutral sentences stating what the external canon or reference work itself establishes (explicit in-story text in current_chunk.md, chunks/chunk_XXXX.md, and Bullet 1 of memory.md always takes precedence for what is true inside this story).>
-```
-
-## Required Output Format
-
-Write line 1 as a compact `<!-- TOOLS: ... -->` receipt comment (`LetsRead`
-strips `<!-- TOOLS: ... -->` automatically) followed by `=== RESEARCH NOTES ===`
-(containing your verified bullets, or `- NONE` if no prior/external material is
-needed) to `<session_dir>/current_research_response.md` via `write_file`
+Write line 1 as `<!-- TOOLS: ... -->` followed by `=== RESEARCH NOTES ===`
+(containing your verified bullets using the exact category headers below, or
+`- NONE` if no prior/external material is needed) to
+`<session_dir>/current_research_response.md` via `write_file`
 (`Overwrite: true`):
 
 ```markdown
 <!-- TOOLS: read_file(current_chunk.md, memory.md, chunks/by_topic.md, chunks/chunk_0004.md, entries/chunk_0003.md, predictions/pred_0002.md), search_web -->
 === RESEARCH NOTES ===
-- **[Earlier Story Passage | Source: chunks/chunk_0004.md | Quote: "<verbatim excerpt>"]** <Authoritative in-story chapter/part and scene context.>
-- **[Prior Session Entry | Source: entries/chunk_0003.md | Quote: "<verbatim excerpt>"]** <Prior liveblog gag or discussion context.>
-- **[Prior Prediction | Source: predictions/pred_0002.md | Quote: "<verbatim excerpt>"]** <Original bet wording and current status/verdict.>
-- **[External Canon / Reference | Source: search_web("<neutral query>") | Work: <Work Name>]** <Verified external canon/reference context, subordinate to explicit in-story text.>
+- **[Earlier Story Passage | Source: chunks/chunk_0004.md | Quote: "<exact verbatim substring from chunks/chunk_XXXX.md>"]** <1-2 neutral sentences giving chapter/part, speaker, and authoritative in-story factual/chronological context.>
+- **[Prior Session Entry | Source: entries/chunk_0003.md | Quote: "<exact verbatim substring from entries/chunk_XXXX.md or archive/memory/curated_XXXX.md>"]** <1-2 neutral sentences summarizing the prior liveblog reaction, running gag, or discussion (noting any contrast if story text in chunks/ differs).>
+- **[Prior Prediction | Source: predictions/pred_0002.md | Quote: "<exact verbatim substring from predictions/pred_XXXX.md or predictions/hall_of_fame.md>"]** <1-2 neutral sentences giving exact original Clue/Anomaly, Theory, and current status/verdict.>
+- **[External Canon / Reference | Source: search_web("<exact neutral search query used>") | Work: <Name of Canon/Reference Source>]** <1-2 neutral sentences stating what the external work establishes (subordinate to explicit in-story text).>
 ```
 
 Once `write_file` succeeds, immediately end your turn with **only a 1-line
 plain-text completion notice** using the exact `[SUBAGENT_DONE | <round> |
 researcher]` prefix from `## Turn Output Contract` in
 `current_research_prompt.md` (`Chunk NNNN` or `Wrapup`), ending with the
-matching `[Tools: ...]` receipt tag and no tool calls—listing every session file
-read beyond `current_research_prompt.md` inside `read_file(...)`, and appending
-`, search_web` (or `, search_web("<query>")`) **only** when `search_web` was
-invoked that turn:
+matching `[Tools: ...]` receipt tag listing every session file read beyond
+`current_research_prompt.md` inside `read_file(...)` (appending `, search_web`
+**only** when invoked) and no tool calls:
 
 ```text
 [SUBAGENT_DONE | Chunk NNNN | researcher] wrote current_research_response.md [Tools: read_file(current_chunk.md, memory.md, chunks/by_topic.md, chunks/chunk_0004.md, entries/chunk_0003.md, predictions/pred_0002.md), search_web]

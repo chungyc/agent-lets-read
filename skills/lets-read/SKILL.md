@@ -19,71 +19,28 @@ compatibility: >-
 # Let's Read Skill (Spoiler-Free Architecture)
 
 This skill conducts an unspoiled **Let's Read** of a story or book in `.txt`,
-`.md`, `.markdown`, `.html`, or `.epub` format by combining a **Haskell
-Gatekeeper** ([LetsRead.hs](./scripts/LetsRead.hs)) with seven isolated leaf
-subagents that exchange data via `<session_dir>` files.
+`.md`, `.markdown`, `.html`, or `.epub` format by combining a compiled **Haskell
+Gatekeeper** (`<skill_dir>/.bin/lets-read`, where `<skill_dir>` is the directory
+containing this `SKILL.md`) with seven isolated leaf subagents that exchange
+data strictly via `<session_dir>` files:
 
-## Subagent Architecture
-
-### `script-writer`
-
-Stateless one-shot subagent dispatched after `lets-read next` (on every chunk
-`1..N` and on the Final Wrapup Round). Reads `current_script_prompt.md` and its
-listed turn inputs, writes an unresearched in-persona draft to
-`current_script_response.md`, and ends with a 1-line `[Tools: ...]` notice.
-`lets-read script` embeds the draft into `current_research_prompt.md` and
-deletes all script files immediately so `blind-reader` stays completely blind to
-it.
-
-### `researcher`
-
-Stateless one-shot subagent dispatched after `lets-read script`. Reads
-`current_research_prompt.md`, pulls verbatim excerpts from
-`chunks/chunk_XXXX.md`, `entries/chunk_XXXX.md`, and `predictions/pred_XXXX.md`
-plus verified external canon notes via neutral `search_web` queries relevant to
-the draft (never mentioning the draft), and writes
-`current_research_response.md` (with a `[Tools: ...]` receipt) for
-`lets-read research` to verify into `current_research.md`.
-
-### `blind-reader`
-
-Reads `current_prompt.md`, `current_chunk.md`, `memory.md`, and
-`current_research.md` (blind to `script-writer`'s draft), reacts in the Active
-Persona, stakes 1 specific, non-obvious prediction per non-final chunk, writes
-`current_reader_response.md` (or `current_discussion_response.md`), and ends
-with a 1-line `[Tools: ...]` notice.
-
-### `prediction-judge`
-
-Reads `current_judge_prompt.md`, evaluates all active predictions against
-`current_chunk.md`, screens newly proposed predictions so flagged
-uninteresting/hedged/duplicate/ungrounded proposals return strictly as reader
-feedback rather than entering the active ledger (plus conditional 10-cap
-retirements when `> 10` remain active), and writes verdicts to
-`current_judge_response.md`.
-
-### `fact-checker`
-
-Runs in parallel with `prediction-judge` and `commentary-critic`. Reads
-`current_fact_check_prompt.md`, audits factual and chronological claims against
-primary sources (`current_chunk.md`, `chunks/chunk_XXXX.md`, and neutral
-`search_web`), and writes `current_fact_check_response.md` (with a
-`[Tools: ...]` receipt). Verified disputes set
-`"fact_check_discussion_pending": true` and gate `lets-read next` until
-resolved via `lets-read discuss`.
-
-### `commentary-critic`
-
-Runs in parallel with `prediction-judge` and `fact-checker`. Reads
-`current_critic_prompt.md` and evaluates how well the entry inhabited the Active
-Persona and user style directives, writing notes to `current_critic_response.md`
-for silent uptake on the next chunk.
-
-### `topic-curator`
-
-Dispatched in parallel when `record` returns `"topic_curation_needed": true`.
-Reads `current_topic_prompt.md` and writes synonym or alias merges
-(`=== TOPIC MERGES ===`) to `current_topic_response.md` for `lets-read judge`.
+- **`script-writer`** *(one-shot)*: Dispatched after `lets-read next` (chunks
+  `1..N` and Wrapup) to write an unresearched draft to
+  `current_script_response.md`; `lets-read script` embeds it for `researcher`
+  and deletes all script files so `blind-reader` stays completely blind to it.
+- **`researcher`** *(one-shot)*: Dispatched after `lets-read script` to pull
+  verbatim story, entry, and prediction excerpts plus neutral `search_web` canon
+  notes into `current_research_response.md` for `lets-read research`.
+- **`blind-reader`** *(persistent across ~6–9 chunks)*: Reacts in the Active
+  Persona from `current_prompt.md`, `current_chunk.md`, `memory.md`, and
+  `current_research.md`, stakes 1 prediction per non-final chunk, and writes
+  `current_reader_response.md` (or `current_discussion_response.md`).
+- **`prediction-judge`**, **`fact-checker`**, and **`commentary-critic`**
+  *(parallel post-`record` reviewers)*: Judge active/proposed predictions, audit
+  factual claims (gating `next` via `discuss` when a verified dispute sets
+  `"fact_check_discussion_pending": true`), and critique persona/style.
+- **`topic-curator`** *(one-shot, on-demand)*: Dispatched in parallel with the
+  three reviewers when `record` returns `"topic_curation_needed": true`.
 
 In **Batch Mode**, the host delegates sequential slices of ~7–8 chunks to fresh
 instances of the built-in **`self`** subagent (`Role: "Batch Read-Through
@@ -106,32 +63,15 @@ chunks. Treat `.bin/lets-read` as a black-box CLI tool.
 Always let `lets-read init` use its built-in default unless the user explicitly
 asks for a custom chunk size.
 
-### Strict Subagent Isolation & Sandbox-Safe Tool Receipts
+### Subagent Isolation & `[SUBAGENT_DONE | ...]` Completion Notices
 
-#### File-Based Data Exchange
-
-The seven leaf subagents in [agents/](../../agents/) run with `subagent: true`,
-`mainAgent: false`, and explicit `tools` lists (`write_file` + `read_file`, plus
-`search_web` only for `researcher`, `blind-reader`, and `fact-checker`). Leaf
-subagents read only inside `<session_dir>` (plus
-[references/session-files.md](./references/session-files.md)), write only to
-their designated `<session_dir>/current_*_response.md` via `write_file`
-(`Overwrite: true`), never call `run_command`, `edit_file`, or `send_message`,
-and use `search_web` solely for neutral background lore or reference checks
-(never for the story being read).
-
-#### Sandbox-Compatible Tool Receipts (`[SUBAGENT_DONE | ...]` & `<!-- TOOLS: ... -->`)
-
-Because Standard Sandbox isolates sibling `<brain>/<child_id>/` subagent
-transcripts from `run_command`, all leaf subagents emit a round-tagged
-`[SUBAGENT_DONE | <round> | <role>] wrote <response_file>` 1-line completion
-notice (`Chunk NNNN`, `Chunk NNNN (Discuss)`, or `Wrapup` / `Wrapup (Discuss)`),
-and `script-writer`, `researcher`, `blind-reader`, and `fact-checker` also
-record compact tool receipts in two places: a `<!-- TOOLS: ... -->` comment on
-line 1 of their `current_*_response.md` file (stripped automatically by
-`LetsRead`), plus a `[Tools: ...]` suffix on their `[SUBAGENT_DONE | ...]`
-notice. `LetsRead` uses `--*-log` parsing when accessible and falls back
-automatically to these receipts in Standard Sandbox.
+Leaf subagents read and write only their designated `<session_dir>` files and
+never call `run_command`, `edit_file`, or `send_message`. Every leaf subagent
+ends its turn with a round-tagged 1-line completion notice
+(`[SUBAGENT_DONE | <round> | <role>] wrote <response_file>`, where `<round>` is
+`Chunk NNNN`, `Chunk NNNN (Discuss)`, `Wrapup`, or `Wrapup (Discuss)`). Always
+pass each subagent's `--*-log` URI to `lets-read` CLI commands (`LetsRead`
+handles transcript and sandbox receipt verification automatically).
 
 ### 1-Line Notifications, `[HOST_WAIT | ...]` Turn Token & No Polling
 
@@ -205,36 +145,6 @@ indexing, and state management in compiled Haskell. Use strictly
 `grep` to inspect `<session_dir>` or `<session_dir>/state.json`, and never
 guess binary paths. To check session state, run
 `<skill_dir>/.bin/lets-read status --session "<session_dir>"`.
-
-## Directory & Resource Layout
-
-Let `<skill_dir>` denote the directory containing this `SKILL.md` file:
-
-- Gatekeeper CLI: [LetsRead.hs](./scripts/LetsRead.hs) (`scripts/LetsRead/`)
-
-- Build script: [prepare.sh](./scripts/prepare.sh)
-
-- Script Writer: [script-writer.md](../../agents/script-writer.md)
-
-- Researcher: [researcher.md](../../agents/researcher.md)
-
-- Blind Reader: [blind-reader.md](../../agents/blind-reader.md)
-
-- Prediction Judge: [prediction-judge.md](../../agents/prediction-judge.md)
-
-- Fact-Checker: [fact-checker.md](../../agents/fact-checker.md)
-
-- Commentary Critic: [commentary-critic.md](../../agents/commentary-critic.md)
-
-- Topic Curator: [topic-curator.md](../../agents/topic-curator.md)
-
-- Wrapup: [wrapup_prompt_template.md](./resources/wrapup_prompt_template.md)
-
-- Banned jargon list: [banned_jargon.txt](./resources/banned_jargon.txt)
-
-- Persona presets: [personas.md](./references/personas.md)
-
-- Session & index layout: [session-files.md](./references/session-files.md)
 
 ## Workflow
 
@@ -569,39 +479,27 @@ the current batch so chunk `N/N` and the Final Wrapup finish together):
 
 ### Step 6: Dedicated Final Wrapup Round (When `"wrapup_pending": true`)
 
-- Run the same pre-`record` pipeline (`next` → `script` → `research`) to unlock
-  the **Final Wrapup Round**:
+- Run Step 4's pre-`record` pipeline (`next` → `script` → `research`, using
+  round tag `Wrapup` in `[HOST_WAIT | Wrapup | ...]` and waiting for each
+  `[SUBAGENT_DONE | Wrapup | <role>]` with `ZERO tool calls`):
 
   1. Run `<skill_dir>/.bin/lets-read next --session "<session_dir>"`
-     (`"status": "awaiting_script"`, `"is_wrapup": true`), call
-     `invoke_subagent` (`TypeName: "script-writer"`,
-     `Role: "Unresearched Script Writer"`) to read `current_script_prompt.md`
-     and write `current_script_response.md`, and park with `ZERO tool calls`
-     outputting `[HOST_WAIT | Wrapup | script | 0/1 idle | pending: script-writer]`
-     until `[SUBAGENT_DONE | Wrapup | script-writer]` arrives.
+     (`"is_wrapup": true`), dispatch `script-writer` via `invoke_subagent`, and
+     wait for `[SUBAGENT_DONE | Wrapup | script-writer]`.
 
-  2. Run `lets-read script` (passing `--session "<session_dir>"` and
-     `--subagent-log "<script_writer_logAbsoluteUri>"`), kill `script-writer`
-     via `manage_subagents(Action: "kill")`, invoke a fresh one-shot
-     `researcher` via `invoke_subagent` (`TypeName: "researcher"`,
-     `Role: "Continuity & Canon Researcher"`) to read
-     `current_research_prompt.md` and write `current_research_response.md`, and
-     park with `ZERO tool calls` outputting
-     `[HOST_WAIT | Wrapup | research | 0/1 idle | pending: researcher]` until
-     `[SUBAGENT_DONE | Wrapup | researcher]` arrives.
+  2. Run `lets-read script` (`--subagent-log`), kill `script-writer` via
+     `manage_subagents(Action: "kill")`, dispatch `researcher` via
+     `invoke_subagent`, and wait for `[SUBAGENT_DONE | Wrapup | researcher]`.
 
-  3. Run `lets-read research` (passing `--session "<session_dir>"` and
-     `--subagent-log "<researcher_logAbsoluteUri>"`, returning
-     `"status": "wrapup_unlocked"`), kill `researcher` via
-     `manage_subagents(Action: "kill")`, send a 1-line notification to
+  3. Run `lets-read research` (`--subagent-log`, `"status": "wrapup_unlocked"`),
+     kill `researcher` via `manage_subagents(Action: "kill")`, notify
      `blind-reader` (via `send_message`, or `invoke_subagent` if no
-     `blind-reader` is active in this conversation) to read `current_prompt.md`
-     and write `current_reader_response.md`, and park with `ZERO tool calls`
-     outputting `[HOST_WAIT | Wrapup | record | 0/1 idle | pending: blind-reader]`
-     until `[SUBAGENT_DONE | Wrapup | blind-reader]` arrives.
+     `blind-reader` is active) to read `current_prompt.md` and write
+     `current_reader_response.md`, and wait for
+     `[SUBAGENT_DONE | Wrapup | blind-reader]`.
 
-- Only after `[SUBAGENT_DONE | Wrapup | blind-reader]` arrives, record the Final
-  Wrapup (no `judge` or `fact-checker` step runs after `"wrapup_recorded"`):
+- Once `[SUBAGENT_DONE | Wrapup | blind-reader]` arrives, record the Final
+  Wrapup (no `judge` step runs after `"wrapup_recorded"`):
 
   ```bash
   <skill_dir>/.bin/lets-read record \

@@ -81,12 +81,9 @@ Each active prediction has the structure:
 ### Judge Every Active Prediction on the Merits
 
 - Evaluate **every** active prediction listed in your prompt against
-  `current_chunk.md` on the merits first.
-
-- If `current_chunk.md` falsifies, subverts, or confirms a prediction, rule it
-  `DEBUNKED`, `SUBVERTED`, or `CONFIRMED`. Never use `RETIRED` as a substitute
-  for `DEBUNKED` when a stated trigger or bounded window has expired without the
-  predicted outcome occurring.
+  `current_chunk.md` on the merits (`ACTIVE`, `CONFIRMED`, `DEBUNKED`, or
+  `SUBVERTED`, plus `NOT ADDED` when Chunk `NNNN`'s new proposal fails
+  screening).
 
 ### The Four Verdicts (`ACTIVE`, `CONFIRMED`, `DEBUNKED`, `SUBVERTED`)
 
@@ -272,32 +269,13 @@ future knowledge).
 
 ## Conditional 10-Cap Retirement (When Prompted for > 10 Listed)
 
-Whenever `current_judge_prompt.md` includes `### Conditional 10-Cap Retirement`
-because more than 10 predictions entered the turn:
-
-1. Judge **every** listed prediction on the merits under
-   `=== PREDICTION JUDGMENTS ===` first (`ACTIVE`, `NOT ADDED` on Chunk `NNNN`
-   if it fails screening, `CONFIRMED`, `DEBUNKED`, or `SUBVERTED`). Never use
-   `RETIRED` to dodge a `DEBUNKED` call on an expired trigger.
-
-2. Append a separate `=== CONDITIONAL RETIREMENTS ===` section nominating the
-   requested number of overflow candidates from the remaining active bets
-   (`LetsRead` applies them only if `> 10` remain `ACTIVE` after merit rulings
-   and `NOT ADDED` exclusions):
-
-   ```markdown
-   === CONDITIONAL RETIREMENTS ===
-   - **[Predicted Chunk XXXX -> RETIRED Chunk NNNN]** <1-line reason, <= 200 chars>
-   ```
-
-3. **Do NOT default to mechanical oldest-first FIFO.** Prioritize retiring:
-
-   - Mooted or overtaken subplot bets whose premise the story has clearly moved
-     past without triggering a formal `DEBUNKED` call first;
-
-   - Narrower local-scene or lower-stakes bets (and any legacy flagged or
-     duplicate bets) second—**never** retiring central-mystery or overarching
-     character-arc theories while mooted or narrower bets remain.
+Whenever `current_judge_prompt.md` includes `### Conditional 10-Cap Retirement`,
+judge every listed prediction strictly on the merits in
+`=== PREDICTION JUDGMENTS ===` first (never using `RETIRED` to dodge `DEBUNKED`
+on an expired trigger), then append `=== CONDITIONAL RETIREMENTS ===` nominating
+the requested overflow count (`- **[Predicted Chunk XXXX -> RETIRED Chunk NNNN]**
+<1-line reason, <= 200 chars>`), prioritizing mooted subplot or narrow
+local-scene bets over central-mystery or core-arc theories.
 
 ## Required Output Format (Write to `<session_dir>/current_judge_response.md`)
 

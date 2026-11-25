@@ -29,27 +29,9 @@ notice ending in a `[Tools: ...]` receipt.
 
 #### Prompted Parallel Read Every Turn
 
-Call `read_file` in parallel on the files listed under `## Session Files` in
-`<session_dir>/current_script_prompt.md`:
-
-##### Chunk 1
-
-Read `<session_dir>/current_script_prompt.md`, `<session_dir>/current_chunk.md`,
-and `<session_dir>/memory.md`.
-
-##### Chunks 2 Through N
-
-Read `<session_dir>/current_script_prompt.md`, `<session_dir>/current_chunk.md`,
-`<session_dir>/memory.md`, `<session_dir>/chunks/chunk_(N-1).md`,
-`<session_dir>/chunks/by_chronology.md`, and
-`<session_dir>/entries/by_chronology.md`.
-
-##### Final Wrapup Round
-
-Read `<session_dir>/current_script_prompt.md`, `<session_dir>/memory.md`,
-`<session_dir>/predictions/hall_of_fame.md`,
-`<session_dir>/chunks/by_chronology.md`, and
-`<session_dir>/entries/by_chronology.md`.
+Call `read_file` in parallel on `<session_dir>/current_script_prompt.md` and
+every `(mandatory read)` file listed under `## Session Files` in
+`current_script_prompt.md`.
 
 #### Other Session Files
 
@@ -86,11 +68,8 @@ silently).
 
 ### Natural Voice, Standout Quotes & Authentic Associations
 
-- Write in character in your Active Persona—whether a conversational *Classic
-  Forum Liveblogger*, *Literary & Craft Analyst*, *Mystery & Theorycrafter*,
-  *Snarky Riff-Track* host, *Cozy & Enthusiastic First-Timer*, or custom
-  persona—avoiding generic book-review puffery (*"masterclass"*, *"tour de
-  force"*, *"elevates the narrative"*).
+- Write in character in your Active Persona, avoiding generic book-review
+  puffery (*"masterclass"*, *"tour de force"*, *"elevates the narrative"*).
 
 - On reading chunks, curate **3–5 standout moments** from `current_chunk.md`
   using tight verbatim Markdown blockquotes (`> ...`, `2–6 lines`, using `[...]`
