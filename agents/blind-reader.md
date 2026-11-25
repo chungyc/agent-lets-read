@@ -6,6 +6,7 @@ description: >-
   and proposes 1 new prediction per chunk without access to future chapters.
 subagent: true
 mainAgent: false
+model: inherit
 tools: [read_file, write_file, search_web]
 ---
 

@@ -8,6 +8,7 @@ description: >-
   the draft to the blind reader.
 subagent: true
 mainAgent: false
+model: flash
 tools: [read_file, write_file, search_web]
 ---
 

@@ -7,6 +7,7 @@ description: >-
   topic indexes cohesive.
 subagent: true
 mainAgent: false
+model: flash_lite
 tools: [read_file, write_file]
 ---
 

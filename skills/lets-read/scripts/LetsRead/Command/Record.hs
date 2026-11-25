@@ -391,13 +391,13 @@ cmdRecord opts = do
           nextHint =
             if curateTopics
               then
-                "Notify prediction-judge, fact-checker, commentary-critic, and topic-curator in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
+                "Notify prediction-judge, fact-checker, commentary-critic (Model: \"inherit\" when invoking), and one-shot topic-curator (Model: \"flash_lite\") in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
                   <> curPad
                   <> " | judge | 0/4 idle | pending: prediction-judge, fact-checker, commentary-critic, topic-curator]' (updating the idle count and pending list on intermediate wakeups) until ALL 4 '[SUBAGENT_DONE | Chunk "
                   <> curPad
                   <> " | <role>]' notices arrive; then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log> --topic-log <topic_log>'."
               else
-                "Notify prediction-judge, fact-checker, and commentary-critic in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
+                "Notify prediction-judge, fact-checker, and commentary-critic (Model: \"inherit\" when invoking) in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
                   <> curPad
                   <> " | judge | 0/3 idle | pending: prediction-judge, fact-checker, commentary-critic]' (updating the idle count and pending list on intermediate wakeups) until ALL 3 '[SUBAGENT_DONE | Chunk "
                   <> curPad

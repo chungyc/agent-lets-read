@@ -112,16 +112,19 @@ testRec1OrchestratorGuardrails mBinPath = do
     Just binPath -> withTempDir "rec1-cli" $ \tmp -> do
       let repoDir = takeDirectory (takeDirectory (takeDirectory (takeDirectory binPath)))
           agentFiles =
-            [ "script-writer.md"
-            , "researcher.md"
-            , "blind-reader.md"
-            , "prediction-judge.md"
-            , "fact-checker.md"
-            , "commentary-critic.md"
-            , "topic-curator.md"
+            [ ("script-writer.md", "model: flash")
+            , ("researcher.md", "model: flash")
+            , ("blind-reader.md", "model: inherit")
+            , ("prediction-judge.md", "model: inherit")
+            , ("fact-checker.md", "model: inherit")
+            , ("commentary-critic.md", "model: inherit")
+            , ("topic-curator.md", "model: flash_lite")
             ]
-      forM_ agentFiles $ \af -> do
+      forM_ agentFiles $ \(af, expectedModel) -> do
         agentTxt <- TIO.readFile (repoDir </> "agents" </> af)
+        assertBool
+          (af ++ " declares expected frontmatter " ++ T.unpack expectedModel)
+          (("\n" <> expectedModel <> "\n") `T.isInfixOf` agentTxt)
         assertBool
           (af ++ " forbids run_command, edit_file, and send_message concisely")
           ("- Never call `run_command`, `edit_file`, or `send_message`." `T.isInfixOf` agentTxt)
@@ -157,9 +160,10 @@ testRec1OrchestratorGuardrails mBinPath = do
       (ecNext, outNext, _) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
       assertEq "CLI next exit 0" ExitSuccess ecNext
       assertBool
-        "next unlocks awaiting_script with [HOST_WAIT | Chunk 0001 | script] and [SUBAGENT_DONE | Chunk 0001 | script-writer]"
+        "next unlocks awaiting_script with Model: \"flash\", [HOST_WAIT | Chunk 0001 | script], and [SUBAGENT_DONE | Chunk 0001 | script-writer]"
         ( "\"status\": \"awaiting_script\"" `isInfixOf` outNext
             && "\"is_wrapup\": false" `isInfixOf` outNext
+            && "Model: \\\"flash\\\"" `isInfixOf` outNext
             && "ZERO tool calls" `isInfixOf` outNext
             && "[HOST_WAIT | Chunk 0001 | script | 0/1 idle | pending: script-writer]" `isInfixOf` outNext
             && "[SUBAGENT_DONE | Chunk 0001 | script-writer]" `isInfixOf` outNext
@@ -199,9 +203,10 @@ testRec1OrchestratorGuardrails mBinPath = do
       (ecScr1, outScr1, errScr1) <- readProcessWithExitCode binPath ["script", "--session", sessDir] ""
       assertEq ("CLI script chunk 1/2 exit 0 (" ++ errScr1 ++ ")") ExitSuccess ecScr1
       assertBool
-        "script transitions to awaiting_research and reminds host to kill script-writer"
+        "script transitions to awaiting_research with Model: \"flash\" and reminds host to kill script-writer"
         ( "\"status\": \"awaiting_research\"" `isInfixOf` outScr1
             && "script-writer" `isInfixOf` outScr1
+            && "Model: \\\"flash\\\"" `isInfixOf` outScr1
             && "manage_subagents" `isInfixOf` outScr1
             && "ZERO tool calls" `isInfixOf` outScr1
         )

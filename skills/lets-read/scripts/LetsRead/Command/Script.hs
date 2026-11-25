@@ -136,7 +136,7 @@ cmdScript opts = do
   saveState sessionDir st
 
   let dispatchResearcherHint =
-        "Kill the finished one-shot script-writer immediately via manage_subagents(Action: \"kill\"), invoke a fresh one-shot researcher subagent via invoke_subagent with a 1-line notification to read research_prompt_file and write research_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | "
+        "Kill the finished one-shot script-writer immediately via manage_subagents(Action: \"kill\"), invoke a fresh one-shot researcher subagent via invoke_subagent (Model: \"flash\") with a 1-line notification to read research_prompt_file and write research_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | "
           <> roundTag
           <> " | research | 0/1 idle | pending: researcher]'; once '[SUBAGENT_DONE | "
           <> roundTag

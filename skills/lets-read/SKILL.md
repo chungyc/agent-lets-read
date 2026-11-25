@@ -205,28 +205,35 @@ Or inspect/resume an existing session:
 ### Step 3: Verify the Seven Subagents Are Available
 
 When the `lets-read` plugin is installed and enabled, its seven leaf subagents
-are registered in `<subagents>`:
+are registered in `<subagents>`. Always pass each subagent's designated `Model`
+tier whenever calling `invoke_subagent`:
 
 1. [script-writer.md](../../agents/script-writer.md)
-   (`Name: "script-writer"`, `Role: "Unresearched Script Writer"`)
+   (`Name: "script-writer"`, `Role: "Unresearched Script Writer"`,
+   `Model: "flash"`)
 
 2. [researcher.md](../../agents/researcher.md)
-   (`Name: "researcher"`, `Role: "Continuity & Canon Researcher"`)
+   (`Name: "researcher"`, `Role: "Continuity & Canon Researcher"`,
+   `Model: "flash"`)
 
 3. [blind-reader.md](../../agents/blind-reader.md)
-   (`Name: "blind-reader"`, `Role: "Blind Story Reader"`)
+   (`Name: "blind-reader"`, `Role: "Blind Story Reader"`, `Model: "inherit"`)
 
 4. [prediction-judge.md](../../agents/prediction-judge.md)
-   (`Name: "prediction-judge"`, `Role: "Impartial Prediction Judge"`)
+   (`Name: "prediction-judge"`, `Role: "Impartial Prediction Judge"`,
+   `Model: "inherit"`)
 
 5. [fact-checker.md](../../agents/fact-checker.md)
-   (`Name: "fact-checker"`, `Role: "Commentary Fact-Checker"`)
+   (`Name: "fact-checker"`, `Role: "Commentary Fact-Checker"`,
+   `Model: "inherit"`)
 
 6. [commentary-critic.md](../../agents/commentary-critic.md)
-   (`Name: "commentary-critic"`, `Role: "Commentary Critic"`)
+   (`Name: "commentary-critic"`, `Role: "Commentary Critic"`,
+   `Model: "inherit"`)
 
 7. [topic-curator.md](../../agents/topic-curator.md)
-   (`Name: "topic-curator"`, `Role: "Topic Index Curator"`)
+   (`Name: "topic-curator"`, `Role: "Topic Index Curator"`,
+   `Model: "flash_lite"`)
 
 If running from an uninstalled checkout where they do not yet appear in
 `<subagents>`, read each file under [agents/](../../agents/) and call
@@ -248,8 +255,8 @@ Writes `current_chunk.md`, `chunks/chunk_XXXX.md`, and
 `current_script_prompt.md`, returning `"status": "awaiting_script"`.
 
 - After `next` exits `0`, call `invoke_subagent` (`TypeName: "script-writer"`,
-  `Role: "Unresearched Script Writer"`) with a **1-line notification** to read
-  `<session_dir>/current_script_prompt.md` and write
+  `Role: "Unresearched Script Writer"`, `Model: "flash"`) with a **1-line
+  notification** to read `<session_dir>/current_script_prompt.md` and write
   `<session_dir>/current_script_response.md` (`Overwrite: true`).
 
 - Park with **ZERO tool calls** outputting **only**
@@ -276,9 +283,10 @@ deletes `current_script_prompt.md` and `current_script_response.md`**.
      `manage_subagents` (`Action: "kill"`).
 
   2. Invoke a fresh one-shot `researcher` via `invoke_subagent`
-     (`TypeName: "researcher"`, `Role: "Continuity & Canon Researcher"`) with a
-     **1-line notification** to read `current_research_prompt.md` and write
-     `current_research_response.md` (`Overwrite: true`).
+     (`TypeName: "researcher"`, `Role: "Continuity & Canon Researcher"`,
+     `Model: "flash"`) with a **1-line notification** to read
+     `current_research_prompt.md` and write `current_research_response.md`
+     (`Overwrite: true`).
 
 - Park with **ZERO tool calls** outputting **only**
   `[HOST_WAIT | Chunk NNNN | research | 0/1 idle | pending: researcher]` until
@@ -308,8 +316,9 @@ Verifies verbatim quotes and `search_web` receipts, **deletes
   2. On the first chunk of a session/batch or when
      `"rotate_reader_recommended": true` (killing any prior `blind-reader` via
      `manage_subagents` with `Action: "kill"`), call `invoke_subagent`
-     (`TypeName: "blind-reader"`, `Role: "Blind Story Reader"`). Otherwise call
-     `send_message` to the active `blind-reader` `conversationId`.
+     (`TypeName: "blind-reader"`, `Role: "Blind Story Reader"`,
+     `Model: "inherit"`). Otherwise call `send_message` to the active
+     `blind-reader` `conversationId`.
 
 - Send **only a 1-line notification** to read `current_prompt.md` and write
   `current_reader_response.md` (`Overwrite: true`), then park with **ZERO tool
@@ -338,14 +347,15 @@ and returns `"rotate_*_recommended"` and `"topic_curation_needed"`.
   notifications:
 
   - For `prediction-judge`, `fact-checker`, and `commentary-critic`, call
-    `invoke_subagent` on the first chunk of a session/batch or when
-    `"rotate_<role>_recommended": true` (killing the prior instance via
+    `invoke_subagent` (`Model: "inherit"`) on the first chunk of a session/batch
+    or when `"rotate_<role>_recommended": true` (killing the prior instance via
     `manage_subagents` with `Action: "kill"`); otherwise call `send_message` to
     the active `conversationId`.
 
   - When `"topic_curation_needed": true`, also call `invoke_subagent` for
-    one-shot `topic-curator` (`Role: "Topic Index Curator"`) to read
-    `current_topic_prompt.md` and write `current_topic_response.md`.
+    one-shot `topic-curator` (`Role: "Topic Index Curator"`,
+    `Model: "flash_lite"`) to read `current_topic_prompt.md` and write
+    `current_topic_response.md`.
 
 - Obey the **Hard Anti-Race Barrier**: end the post-dispatch turn—and any
   staggered wakeup turn where `< 3` reviewers (or `< 4` with `topic-curator`)
@@ -443,23 +453,28 @@ Delegate long read-throughs in sequential batches of **~7–8 chunks** (`1..8`,
 the current batch so chunk `N/N` and the Final Wrapup finish together):
 
 1. Call `invoke_subagent` (`TypeName: "self"`,
-   `Role: "Batch Read-Through Driver"`), passing `<skill_dir>`,
-   `<skill_dir>/.bin/lets-read`, `<skill_dir>/SKILL.md`, `<session_dir>`, and
-   `<start_chunk>..<end_chunk>`, and instruct the driver to:
+   `Role: "Batch Read-Through Driver"`, `Model: "inherit"`), passing
+   `<skill_dir>`, `<skill_dir>/.bin/lets-read`, `<skill_dir>/SKILL.md`,
+   `<session_dir>`, and `<start_chunk>..<end_chunk>`, and instruct the driver
+   to:
 
    - Read `<skill_dir>/SKILL.md` in full first; check state via
      `<skill_dir>/.bin/lets-read status --session "<session_dir>"` (**never**
      `ls`, `cat state.json`, `head`, `tail`, or guessed binary paths).
 
    - Execute **Step 4** for each assigned chunk (plus **Step 6** Final Wrapup if
-     completing chunk `N/N`), strictly honoring the **Hard Anti-Race Barrier**
-     (`< 1` `script-writer`, `researcher`, or `blind-reader` or `< 3` / `< 4`
-     reviewers reporting `[SUBAGENT_DONE | <round> | <role>]` means **ZERO tool
-     calls** outputting **only** `[HOST_WAIT | <round> | <phase> | <k>/<total>
-     idle | pending: <roles>]`) and killing one-shot `script-writer` after
-     `lets-read script`, one-shot `researcher` after `lets-read research`, and
-     one-shot `topic-curator` after `lets-read judge` via
-     `manage_subagents(Action: "kill")`.
+     completing chunk `N/N`), passing each leaf subagent's designated `Model`
+     tier (`"flash"` for `script-writer` and `researcher`, `"flash_lite"` for
+     `topic-curator`, and `"inherit"` for `blind-reader`, `prediction-judge`,
+     `fact-checker`, and `commentary-critic`), strictly honoring the **Hard
+     Anti-Race Barrier** (`< 1` `script-writer`, `researcher`, or
+     `blind-reader` or `< 3` / `< 4` reviewers reporting
+     `[SUBAGENT_DONE | <round> | <role>]` means **ZERO tool calls** outputting
+     **only**
+     `[HOST_WAIT | <round> | <phase> | <k>/<total> idle | pending: <roles>]`)
+     and killing one-shot `script-writer` after `lets-read script`, one-shot
+     `researcher` after `lets-read research`, and one-shot `topic-curator`
+     after `lets-read judge` via `manage_subagents(Action: "kill")`.
 
    - Before returning, call `manage_subagents` (`Action: "kill_all"`) to
      terminate all remaining leaf subagents spawned during its batch.
@@ -474,8 +489,8 @@ the current batch so chunk `N/N` and the Final Wrapup finish together):
    `manage_subagents` (`Action: "kill"`).
 
 3. If more chunks remain before the user's target or `"is_finished": true`,
-   invoke a **new** `self` subagent (`Role: "Batch Read-Through Driver"`) for
-   the next ~7–8-chunk batch.
+   invoke a **new** `self` subagent (`Role: "Batch Read-Through Driver"`,
+   `Model: "inherit"`) for the next ~7–8-chunk batch.
 
 ### Step 6: Dedicated Final Wrapup Round (When `"wrapup_pending": true`)
 
@@ -484,18 +499,20 @@ the current batch so chunk `N/N` and the Final Wrapup finish together):
   `[SUBAGENT_DONE | Wrapup | <role>]` with `ZERO tool calls`):
 
   1. Run `<skill_dir>/.bin/lets-read next --session "<session_dir>"`
-     (`"is_wrapup": true`), dispatch `script-writer` via `invoke_subagent`, and
-     wait for `[SUBAGENT_DONE | Wrapup | script-writer]`.
+     (`"is_wrapup": true`), dispatch `script-writer` via `invoke_subagent`
+     (`Model: "flash"`), and wait for
+     `[SUBAGENT_DONE | Wrapup | script-writer]`.
 
   2. Run `lets-read script` (`--subagent-log`), kill `script-writer` via
      `manage_subagents(Action: "kill")`, dispatch `researcher` via
-     `invoke_subagent`, and wait for `[SUBAGENT_DONE | Wrapup | researcher]`.
+     `invoke_subagent` (`Model: "flash"`), and wait for
+     `[SUBAGENT_DONE | Wrapup | researcher]`.
 
   3. Run `lets-read research` (`--subagent-log`, `"status": "wrapup_unlocked"`),
      kill `researcher` via `manage_subagents(Action: "kill")`, notify
-     `blind-reader` (via `send_message`, or `invoke_subagent` if no
-     `blind-reader` is active) to read `current_prompt.md` and write
-     `current_reader_response.md`, and wait for
+     `blind-reader` (via `send_message`, or `invoke_subagent` with
+     `Model: "inherit"` if no `blind-reader` is active) to read
+     `current_prompt.md` and write `current_reader_response.md`, and wait for
      `[SUBAGENT_DONE | Wrapup | blind-reader]`.
 
 - Once `[SUBAGENT_DONE | Wrapup | blind-reader]` arrives, record the Final

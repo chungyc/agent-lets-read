@@ -8,6 +8,7 @@ description: >-
   10-cap retirements when needed.
 subagent: true
 mainAgent: false
+model: inherit
 tools: [read_file, write_file]
 ---
 

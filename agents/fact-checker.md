@@ -7,6 +7,7 @@ description: >-
   external reference material, raising receipt-backed peer verification queries.
 subagent: true
 mainAgent: false
+model: inherit
 tools: [read_file, write_file, search_web]
 ---
 

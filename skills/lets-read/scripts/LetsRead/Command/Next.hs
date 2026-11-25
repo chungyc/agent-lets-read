@@ -178,7 +178,7 @@ cmdNext rawSessionDir forceFlag = do
               , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
               , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
               , ("orchestrator_rule", jsonStr orchestratorRuleText)
-              , ("next_step_hint", jsonStr "Invoke a fresh one-shot script-writer subagent with a 1-line notification to read script_prompt_file and write script_response_file for the Final Wrapup draft, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Wrapup | script | 0/1 idle | pending: script-writer]'; once '[SUBAGENT_DONE | Wrapup | script-writer]' arrives, run 'lets-read script --session <dir> --subagent-log <script_log>'.")
+              , ("next_step_hint", jsonStr "Invoke a fresh one-shot script-writer subagent via invoke_subagent (Model: \"flash\") with a 1-line notification to read script_prompt_file and write script_response_file for the Final Wrapup draft, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Wrapup | script | 0/1 idle | pending: script-writer]'; once '[SUBAGENT_DONE | Wrapup | script-writer]' arrives, run 'lets-read script --session <dir> --subagent-log <script_log>'.")
               ]
         else
           TIO.putStrLn $
@@ -220,7 +220,7 @@ cmdNext rawSessionDir forceFlag = do
       let shouldRotate = computeShouldRotate (stStoryRecords st) chunk
           nextPad = T.pack (padChunkNumber nextIdx)
           unlockHint =
-            "Invoke a fresh one-shot script-writer subagent with a 1-line notification to read script_prompt_file and write script_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
+            "Invoke a fresh one-shot script-writer subagent via invoke_subagent (Model: \"flash\") with a 1-line notification to read script_prompt_file and write script_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
               <> nextPad
               <> " | script | 0/1 idle | pending: script-writer]'; once '[SUBAGENT_DONE | Chunk "
               <> nextPad
