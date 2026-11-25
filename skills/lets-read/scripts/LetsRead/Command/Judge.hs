@@ -119,6 +119,8 @@ cmdJudge opts = do
   sessionDir <- canonicalizePath (jdgSession opts)
   st <- loadState sessionDir
   let curIdx = stCurrentIndex st
+      curPadStr = padChunkNumber curIdx
+      curPad = T.pack curPadStr
   when (curIdx < 1) $
     die "Error: No chunk is currently unlocked. Run 'next' first."
   unless (stCurrentRecorded st) $
@@ -130,7 +132,12 @@ cmdJudge opts = do
       [sessionDir </> "current_judge_response.md"]
       (jdgSubagentLog opts)
       "Judge"
-      "Error: current_judge_response.md has not been written yet (prediction-judge is still running). Do not re-message working reviewers; end your turn with ZERO tool calls and wait for all completion notices before running 'judge'."
+      ( "Error: current_judge_response.md has not been written yet (prediction-judge is still running). Do not re-message working reviewers; end your turn with ZERO tool calls outputting a single '[HOST_WAIT | Chunk "
+          ++ curPadStr
+          ++ " | judge | ...]' line with the current idle count and remaining roles, and wait for all '[SUBAGENT_DONE | Chunk "
+          ++ curPadStr
+          ++ " | ...]' notices before running 'judge'."
+      )
 
   rawFactCheck <-
     resolveRequiredResponse
@@ -138,7 +145,12 @@ cmdJudge opts = do
       [sessionDir </> "current_fact_check_response.md"]
       (jdgFactCheckLog opts)
       "Fact-check"
-      "Error: current_fact_check_response.md has not been written yet (fact-checker is still running). Do not re-message working reviewers; end your turn with ZERO tool calls and wait for all completion notices before running 'judge'."
+      ( "Error: current_fact_check_response.md has not been written yet (fact-checker is still running). Do not re-message working reviewers; end your turn with ZERO tool calls outputting a single '[HOST_WAIT | Chunk "
+          ++ curPadStr
+          ++ " | judge | ...]' line with the current idle count and remaining roles, and wait for all '[SUBAGENT_DONE | Chunk "
+          ++ curPadStr
+          ++ " | ...]' notices before running 'judge'."
+      )
   factAudit <- resolveSubagentToolAudit (jdgFactCheckLog opts) (Just rawFactCheck)
 
   rawCritic <-
@@ -147,7 +159,12 @@ cmdJudge opts = do
       [sessionDir </> "current_critic_response.md"]
       (jdgCriticLog opts)
       "Critic"
-      "Error: current_critic_response.md has not been written yet (commentary-critic is still running). Do not re-message working reviewers; end your turn with ZERO tool calls and wait for all completion notices before running 'judge'."
+      ( "Error: current_critic_response.md has not been written yet (commentary-critic is still running). Do not re-message working reviewers; end your turn with ZERO tool calls outputting a single '[HOST_WAIT | Chunk "
+          ++ curPadStr
+          ++ " | judge | ...]' line with the current idle count and remaining roles, and wait for all '[SUBAGENT_DONE | Chunk "
+          ++ curPadStr
+          ++ " | ...]' notices before running 'judge'."
+      )
 
   let topicPromptPath = sessionDir </> "current_topic_prompt.md"
   hasTopicPrompt <- doesFileExist topicPromptPath
@@ -165,7 +182,14 @@ cmdJudge opts = do
           Just rawT -> pure (Just rawT)
           Nothing ->
             if hasTopicPrompt
-              then die "Error: current_topic_response.md has not been written yet (current_topic_prompt.md exists). If topic-curator is already dispatched, do not re-message it—end your turn with ZERO tool calls and wait for its completion notice; otherwise invoke topic-curator first."
+              then
+                die
+                  ( "Error: current_topic_response.md has not been written yet (current_topic_prompt.md exists). If topic-curator is already dispatched, do not re-message it—end your turn with ZERO tool calls outputting a single '[HOST_WAIT | Chunk "
+                      ++ curPadStr
+                      ++ " | judge | ...]' line with the current idle count and remaining roles, and wait for '[SUBAGENT_DONE | Chunk "
+                      ++ curPadStr
+                      ++ " | topic-curator]'; otherwise invoke topic-curator first."
+                  )
               else pure Nothing
       else pure Nothing
 
@@ -243,7 +267,11 @@ cmdJudge opts = do
               <> jsonInt factQueriesCount
               <> " peer verification query(ies) on Chunk "
               <> jsonInt curIdx
-              <> "! Send a 1-line notification via send_message to the active blind-reader subagent to read <session_dir>/current_discussion_prompt.md and write <session_dir>/current_discussion_response.md, then STOP and end your turn with ZERO tool calls until blind-reader sends its idle completion notice (never emit 'Waiting...' alongside 'discuss'); only after its idle notice arrives, run 'lets-read discuss --session <dir> --subagent-log <reader_log>' BEFORE running 'next'."
+              <> "! Send a 1-line notification via send_message to the active blind-reader subagent to read <session_dir>/current_discussion_prompt.md and write <session_dir>/current_discussion_response.md, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
+              <> curPad
+              <> " (Discuss) | discuss | 0/1 idle | pending: blind-reader]'; once '[SUBAGENT_DONE | Chunk "
+              <> curPad
+              <> " (Discuss) | blind-reader]' arrives, run 'lets-read discuss --session <dir> --subagent-log <reader_log>' BEFORE running 'next'."
         | storyChunksDone && not hasWrapup =
             "All story chunks have been judged! Run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round (or present the commentary to the user)."
         | otherwise =
@@ -284,5 +312,4 @@ cmdJudge opts = do
       , ("curated_memory_bytes", jsonInt curBytes)
       , ("orchestrator_rule", jsonStr orchestratorRuleText)
       , ("next_step_hint", jsonStr nextHint)
-      , ("discussion_command_hint", jsonStr "If fact_check_discussion_pending is true, notify blind-reader to read discussion_prompt_file and write discussion_response_file, wait for its idle notice (ZERO tool calls while waiting), then run 'lets-read discuss --session <dir> --subagent-log <reader_log>'. If the user replies with comments or questions, run 'lets-read discuss-prompt --session <dir> --user-message \"...\"' (or --user-file), notify blind-reader to read discussion_prompt_file, wait for its idle notice, and record with 'lets-read discuss'.")
       ]

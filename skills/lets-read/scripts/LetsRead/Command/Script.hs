@@ -34,6 +34,7 @@ import LetsRead.Types
   , jsonStr
   , loadState
   , orchestratorRuleText
+  , padChunkNumber
   , readSessionFileStatus
   , saveState
   , stripToolReceiptComments
@@ -102,13 +103,21 @@ cmdScript opts = do
       die "Error: 'script' and 'research' have already completed and current_prompt.md is active. Wait for blind-reader and run 'lets-read record' next."
     die "Error: No active current_script_prompt.md found. Run 'lets-read next --session <dir>' first."
 
+  let roundTag = if isWrapupTurn then "Wrapup" else "Chunk " <> T.pack (padChunkNumber curIdx)
+      roundTagStr = T.unpack roundTag
+
   rawScript <-
     resolveRequiredResponse
       (scrOptResponseFile opts)
       [scriptRespPath]
       (scrOptSubagentLog opts)
       "Script writer"
-      "Error: current_script_response.md has not been written yet (script-writer is still running). Do not re-message script-writer; end your turn with ZERO tool calls and wait for its completion notice before running 'script'."
+      ( "Error: current_script_response.md has not been written yet (script-writer is still running). Do not re-message script-writer; end your turn with ZERO tool calls outputting ONLY '[HOST_WAIT | "
+          ++ roundTagStr
+          ++ " | script | 0/1 idle | pending: script-writer]' and wait for '[SUBAGENT_DONE | "
+          ++ roundTagStr
+          ++ " | script-writer]' before running 'script'."
+      )
 
   let strippedDraft = T.strip (stripToolReceiptComments rawScript)
   when (T.null strippedDraft) $
@@ -127,7 +136,11 @@ cmdScript opts = do
   saveState sessionDir st
 
   let dispatchResearcherHint =
-        "Kill the finished one-shot script-writer immediately via manage_subagents(Action: \"kill\"), and invoke a fresh one-shot researcher subagent via invoke_subagent with a 1-line notification to read research_prompt_file and write research_response_file, then STOP and end your turn with ZERO tool calls until researcher sends its idle completion notice (never emit 'Waiting...' alongside 'research'); only after its idle notice arrives, run 'lets-read research --session <dir> --subagent-log <research_log>'."
+        "Kill the finished one-shot script-writer immediately via manage_subagents(Action: \"kill\"), invoke a fresh one-shot researcher subagent via invoke_subagent with a 1-line notification to read research_prompt_file and write research_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | "
+          <> roundTag
+          <> " | research | 0/1 idle | pending: researcher]'; once '[SUBAGENT_DONE | "
+          <> roundTag
+          <> " | researcher]' arrives, run 'lets-read research --session <dir> --subagent-log <research_log>'."
 
   TIO.putStrLn $
     jsonObject

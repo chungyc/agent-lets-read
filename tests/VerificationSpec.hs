@@ -34,6 +34,7 @@ import LetsRead.Verification
   , extractVerifiedResearchChunkRefs
   , parseResearchNotesSection
   , parseToolReceiptTag
+  , isCompletionNoticeOnly
   , renderCurrentResearchMarkdown
   , resolveSubagentToolAudit
   , verifyAndFilterCriticFactBullets
@@ -54,17 +55,24 @@ testRec2SandboxToolTelemetry :: IO ()
 testRec2SandboxToolTelemetry = withTempDir "rec2-sandbox" $ \tmp -> do
   putStrLn "== Rec #2: Sandbox-Compatible Subagent Tool-Verification Telemetry =="
   assertEq
-    "parseToolReceiptTag parses [Tools: read_file(...), search_web]"
+    "parseToolReceiptTag parses [SUBAGENT_DONE | ...] with [Tools: read_file(...), search_web]"
     (Just (True, ["current_chunk.md", "chunks/chunk_0002.md"], False))
-    (parseToolReceiptTag "Done: wrote response to /tmp/s/current_reader_response.md [Tools: read_file(current_chunk.md, chunks/chunk_0002.md), search_web(\"harbor lighthouse\")]")
+    (parseToolReceiptTag "[SUBAGENT_DONE | Chunk 0005 | blind-reader] wrote current_reader_response.md [Tools: read_file(current_chunk.md, chunks/chunk_0002.md), search_web(\"harbor lighthouse\")]")
   assertEq
-    "parseToolReceiptTag parses [Tools: none]"
+    "parseToolReceiptTag parses [SUBAGENT_DONE | Chunk NNNN (Discuss) | ...] with [Tools: none]"
     (Just (False, [], False))
-    (parseToolReceiptTag "Done: wrote discussion response to /tmp/s/current_discussion_response.md [Tools: none]")
+    (parseToolReceiptTag "[SUBAGENT_DONE | Chunk 0005 (Discuss) | blind-reader] wrote current_discussion_response.md [Tools: none]")
   assertEq
     "parseToolReceiptTag parses <!-- TOOLS: ... --> comment"
     (Just (False, ["chunks/chunk_0003.md"], False))
     (parseToolReceiptTag "<!-- TOOLS: read_file(chunks/chunk_0003.md) -->\n=== COMMENTARY ===\nHello!")
+  assertBool
+    "isCompletionNoticeOnly recognizes [SUBAGENT_DONE | ...], [HOST_WAIT | ...], and defensive off-template 1-liners, while rejecting delimiter responses"
+    ( isCompletionNoticeOnly "[SUBAGENT_DONE | Chunk 0005 | prediction-judge] wrote current_judge_response.md"
+        && isCompletionNoticeOnly "[HOST_WAIT | Chunk 0005 | judge | 2/3 idle | pending: fact-checker]"
+        && isCompletionNoticeOnly "Done: wrote current_judge_response.md"
+        && not (isCompletionNoticeOnly "=== PREDICTION JUDGMENTS ===\n- **[Predicted Chunk 0001 -> ACTIVE]** Still open.")
+    )
 
   let childId1 = "11111111-2222-3333-4444-555555555555"
       childLogDir1 = tmp </> "brain" </> childId1 </> ".system_generated" </> "logs"
@@ -75,7 +83,7 @@ testRec2SandboxToolTelemetry = withTempDir "rec2-sandbox" $ \tmp -> do
     ( T.unlines
         [ "{\"step_index\":0,\"type\":\"SYSTEM_MESSAGE\",\"content\":\"Read prompt\"}"
         , "{\"step_index\":1,\"type\":\"PLANNER_RESPONSE\",\"tool_calls\":[{\"name\":\"read_file\",\"args\":{\"Path\":\"\\\"/sess/current_discussion_prompt.md\\\"\"}},{\"name\":\"read_file\",\"args\":{\"Path\":\"\\\"/sess/chunks/chunk_0002.md\\\"\"}}]}"
-        , "{\"step_index\":2,\"type\":\"PLANNER_RESPONSE\",\"content\":\"Done: wrote discussion response to /sess/current_discussion_response.md\"}"
+        , "{\"step_index\":2,\"type\":\"PLANNER_RESPONSE\",\"content\":\"[SUBAGENT_DONE | Chunk 0002 (Discuss) | blind-reader] wrote current_discussion_response.md [Tools: read_file(chunks/chunk_0002.md)]\"}"
         ]
     )
   v1 <- checkSubagentLogUsedVerificationTools childLog1
@@ -112,17 +120,17 @@ testRec2SandboxToolTelemetry = withTempDir "rec2-sandbox" $ \tmp -> do
     ( T.unlines
         [ "{\"step_index\":10,\"type\":\"SYSTEM_MESSAGE\",\"created_at\":\"2026-11-17T10:00:01Z\",\"content\":\"<SYSTEM_MESSAGE>\\nSubagent "
             <> T.pack unmountedChildA
-            <> " has gone idle. This was the subagent's most recent response: Done: wrote discussion response to /sess/current_discussion_response.md [Tools: read_file(chunks/chunk_0004.md)]\\n</SYSTEM_MESSAGE>\"}"
+            <> " has gone idle. This was the subagent's most recent response: [SUBAGENT_DONE | Chunk 0004 (Discuss) | blind-reader] wrote current_discussion_response.md [Tools: read_file(chunks/chunk_0004.md)]\\n</SYSTEM_MESSAGE>\"}"
         , "{\"step_index\":11,\"type\":\"SYSTEM_MESSAGE\",\"created_at\":\"2026-11-17T10:00:02Z\",\"content\":\"<SYSTEM_MESSAGE>\\nSubagent "
             <> T.pack unmountedChildB
-            <> " has gone idle. This was the subagent's most recent response: Done: wrote discussion response to /sess/current_discussion_response.md [Tools: none]\\n</SYSTEM_MESSAGE>\"}"
+            <> " has gone idle. This was the subagent's most recent response: [SUBAGENT_DONE | Chunk 0004 (Discuss) | blind-reader] wrote current_discussion_response.md [Tools: none]\\n</SYSTEM_MESSAGE>\"}"
         ]
     )
   TIO.writeFile
     (callerMsgDir </> "msg1.json")
     ( "{\"sender\":\"system\",\"timestamp\":\"2026-11-17T10:00:05Z\",\"content\":\"Subagent "
         <> T.pack unmountedChildC
-        <> " has gone idle. This was the subagent's most recent response: Done: wrote fact-check audit to /sess/current_fact_check_response.md [Tools: read_file(current_chunk.md, memory.md), search_web]\"}"
+        <> " has gone idle. This was the subagent's most recent response: [SUBAGENT_DONE | Chunk 0004 | fact-checker] wrote current_fact_check_response.md [Tools: read_file(current_chunk.md, memory.md), search_web]\"}"
     )
 
   let unmountedPathA = sandboxBrain </> unmountedChildA </> ".system_generated" </> "logs" </> "transcript.jsonl"
@@ -181,9 +189,16 @@ testRec3CallbackAndFactCheckAudits = withTempDir "rec3-callbacks" $ \tmp -> do
     "Reader prompt has zero quarantine-leak ban phrasing"
     (not ("quarantine leak" `T.isInfixOf` T.toLower promptNorm))
 
+  assertBool
+    "Reader prompt interpolates literal [SUBAGENT_DONE | Chunk 0007 | blind-reader] notice"
+    ("[SUBAGENT_DONE | Chunk 0007 | blind-reader]" `T.isInfixOf` promptNorm)
+
   fcPromptPath <- writeCurrentFactCheckPromptFile tmp stRot "Story sum" "Entry sum"
   fcPromptTxt <- TIO.readFile fcPromptPath
   let fcNorm = normWs fcPromptTxt
+  assertBool
+    "Fact-check prompt interpolates literal [SUBAGENT_DONE | Chunk 0007 | fact-checker] notice"
+    ("[SUBAGENT_DONE | Chunk 0007 | fact-checker]" `T.isInfixOf` fcNorm)
   assertBool
     "Fact-check prompt forbids memory.md as proof & welcomes canon connections"
     ("Never treat `memory.md` as proof" `T.isInfixOf` fcNorm && "Connecting external canon" `T.isInfixOf` fcNorm)

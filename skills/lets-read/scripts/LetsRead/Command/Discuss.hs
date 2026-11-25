@@ -123,6 +123,9 @@ cmdDiscuss opts = do
   unless (stCurrentRecorded st) $
     die "Error: Current chunk commentary has not been recorded yet. Run 'record' before 'discuss'."
 
+  hasWrapupEarly <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
+  let discRoundStr = if hasWrapupEarly then "Wrapup (Discuss)" else "Chunk " ++ padChunkNumber curIdx ++ " (Discuss)"
+
   (rawDiscResp, mParsedUser, replyText, parsedSummaries, mParsedPredUpdates, mParsedMem) <-
     resolveCommentaryOrResponseWithRaw
       (discResponseFile opts)
@@ -130,7 +133,12 @@ cmdDiscuss opts = do
       [sessionDir </> "current_discussion_response.md"]
       (discSubagentLog opts)
       "Discussion"
-      "Error: current_discussion_response.md has not been written yet (blind-reader is still running). Do not re-message blind-reader; end your turn with ZERO tool calls and wait for its completion notice before running 'discuss'."
+      ( "Error: current_discussion_response.md has not been written yet (blind-reader is still running). Do not re-message blind-reader; end your turn with ZERO tool calls outputting ONLY '[HOST_WAIT | "
+          ++ discRoundStr
+          ++ " | discuss | 0/1 idle | pending: blind-reader]' and wait for '[SUBAGENT_DONE | "
+          ++ discRoundStr
+          ++ " | blind-reader]' before running 'discuss'."
+      )
 
   when (T.null replyText) $
     die "Error: Discussion reply content is empty."

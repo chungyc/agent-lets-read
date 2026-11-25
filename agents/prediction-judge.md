@@ -190,8 +190,7 @@ as the story's expected or default trajectory?** Check whether it merely
 completes a character's stated plan or wish, relabels an anomaly the scene
 already demonstrated, leans on a stock genre/relationship/career trope, hedges
 across a menu of options (`X, Y, or Z`), recycles a prior thesis, or leaps to an
-unmotivated non-sequitur. **Never let "multi-chunk packaging" (`Chunk X fact +
-Chunk N fact`) disguise an expected trajectory as a sharp insight.**
+unmotivated non-sequitur.
 
 ##### Why It Might Earn Admission (`-> ACTIVE`)
 
@@ -232,10 +231,6 @@ Expected, telegraphed, routine, or default-trajectory bet, including:
   over; a supportive partner gets honored with a tribute; an unresolved figure
   resurfaces for closure; a guilty character seeks atonement or heals*) without
   a subtle anomaly pointing to a non-obvious mechanism.
-
-- **Callback-packaging illusion**: pairing an earlier chunk's explicit setup
-  with a current chunk's explicit plan or cue when the combined outcome is still
-  the expected path forward.
 
 Do **not** reject a genuinely surprising, perceptive, non-obvious call merely
 because it comes from a single subtle tell or could pay off in the very next
@@ -315,11 +310,7 @@ Write your rulings to `<session_dir>/current_judge_response.md` using
 `write_file` (`Overwrite: true`) inside the exact `=== PREDICTION JUDGMENTS ===`
 section delimiter, with **one bullet per listed prediction** (plus any reversed
 recent resolutions, followed by `=== CONDITIONAL RETIREMENTS ===` when prompted
-for `> 10`). Once `write_file` succeeds, immediately end your turn with **only a
-1-line plain-text completion notice** and no tool calls (for example, `"Done:
-wrote judgments to <session_dir>/current_judge_response.md"`). Do not call
-`send_message` or re-read files after `write_file`, and never paste the
-judgments into your final message:
+for `> 10`):
 
 ```markdown
 === PREDICTION JUDGMENTS ===
@@ -330,3 +321,9 @@ judgments into your final message:
 - **[Predicted Chunk ZZZZ -> DEBUNKED Chunk NNNN]** <1-line explanation of how current_chunk.md falsified the primary Theory or proved the Plausible Rival instead (<= 200 chars)>
 - **[Predicted Chunk WWWW -> SUBVERTED Chunk NNNN]** <1-line explanation of how the story's twist paid off the clue in an unexpected third direction (<= 200 chars)>
 ```
+
+Once `write_file` succeeds, immediately end your turn with **only a 1-line
+plain-text completion notice** using the exact `[SUBAGENT_DONE | Chunk NNNN |
+prediction-judge]` line from `### Completion Notice` in `current_judge_prompt.md`
+and no tool calls (for example,
+`"[SUBAGENT_DONE | Chunk NNNN | prediction-judge] wrote current_judge_response.md"`).

@@ -26,6 +26,7 @@ import LetsRead.Types
   , jsonStr
   , loadState
   , orchestratorRuleText
+  , padChunkNumber
   , readTextFileSafe
   )
 import System.Directory
@@ -87,6 +88,14 @@ cmdDiscussPrompt opts = do
 
   removeFileIfExists (sessionDir </> "current_discussion_response.md")
   (userFile, promptFile) <- writeUserDiscussionPromptFile sessionDir st userMsg
+  hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
+  let discRoundTag = if hasWrapup then "Wrapup (Discuss)" else "Chunk " <> T.pack (padChunkNumber curIdx) <> " (Discuss)"
+      discHint =
+        "Send a 1-line notification to blind-reader (via send_message, or invoke_subagent if no blind-reader is active) to read discussion_prompt_file and write discussion_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | "
+          <> discRoundTag
+          <> " | discuss | 0/1 idle | pending: blind-reader]'; once '[SUBAGENT_DONE | "
+          <> discRoundTag
+          <> " | blind-reader]' arrives, run 'lets-read discuss --session <dir> --user-file <user_file> --subagent-log <reader_log>'."
   TIO.putStrLn $
     jsonObject
       [ ("status", jsonStr "discussion_prompt_ready")
@@ -95,5 +104,5 @@ cmdDiscussPrompt opts = do
       , ("discussion_response_file", jsonStr (T.pack (sessionDir </> "current_discussion_response.md")))
       , ("user_file", jsonStr (T.pack userFile))
       , ("orchestrator_rule", jsonStr orchestratorRuleText)
-      , ("next_step_hint", jsonStr "Send a 1-line notification to blind-reader (via send_message, or invoke_subagent if no blind-reader is active) to read discussion_prompt_file and write discussion_response_file, then STOP and end your turn with ZERO tool calls until blind-reader sends its idle completion notice (never emit 'Waiting...' alongside 'discuss'); only after its idle notice arrives, run 'lets-read discuss --session <dir> --user-file <user_file> --subagent-log <reader_log>'.")
+      , ("next_step_hint", jsonStr discHint)
       ]

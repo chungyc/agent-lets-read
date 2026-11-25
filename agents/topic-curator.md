@@ -98,12 +98,7 @@ topic name as the left-hand `<Canonical Topic>` target.
 
 Write your merge rules under the exact header `=== TOPIC MERGES ===` using
 `- <Canonical Topic> <= <Alias 1>, <Alias 2>` to
-`<session_dir>/current_topic_response.md` via `write_file` (`Overwrite: true`).
-Once `write_file` succeeds, immediately end your turn with **only a 1-line
-plain-text completion notice** and no tool calls (for example,
-`"Done: wrote topic merges to <session_dir>/current_topic_response.md"`). Do not
-call `send_message` or re-read files after `write_file`, and never paste the
-merge list into your final message:
+`<session_dir>/current_topic_response.md` via `write_file` (`Overwrite: true`):
 
 ```markdown
 === TOPIC MERGES ===
@@ -119,3 +114,9 @@ output:
 === TOPIC MERGES ===
 - NONE
 ```
+
+Once `write_file` succeeds, immediately end your turn with **only a 1-line
+plain-text completion notice** using the exact `[SUBAGENT_DONE | Chunk NNNN |
+topic-curator]` line from `## Turn Output Contract` in `current_topic_prompt.md`
+and no tool calls (for example,
+`"[SUBAGENT_DONE | Chunk NNNN | topic-curator] wrote current_topic_response.md"`).

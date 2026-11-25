@@ -120,17 +120,20 @@ their designated `<session_dir>/current_*_response.md` via `write_file`
 and use `search_web` solely for neutral background lore or reference checks
 (never for the story being read).
 
-#### Sandbox-Compatible Tool Receipts (`[Tools: ...]` & `<!-- TOOLS: ... -->`)
+#### Sandbox-Compatible Tool Receipts (`[SUBAGENT_DONE | ...]` & `<!-- TOOLS: ... -->`)
 
 Because Standard Sandbox isolates sibling `<brain>/<child_id>/` subagent
-transcripts from `run_command`, `script-writer`, `researcher`, `blind-reader`,
-and `fact-checker` record compact tool receipts in two places: a
-`<!-- TOOLS: ... -->` comment on line 1 of their `current_*_response.md` file
-(stripped automatically by `LetsRead`), plus a `[Tools: ...]` suffix on their
-1-line completion notice. `LetsRead` uses `--*-log` parsing when accessible and
-falls back automatically to these receipts in Standard Sandbox.
+transcripts from `run_command`, all leaf subagents emit a round-tagged
+`[SUBAGENT_DONE | <round> | <role>] wrote <response_file>` 1-line completion
+notice (`Chunk NNNN`, `Chunk NNNN (Discuss)`, or `Wrapup` / `Wrapup (Discuss)`),
+and `script-writer`, `researcher`, `blind-reader`, and `fact-checker` also
+record compact tool receipts in two places: a `<!-- TOOLS: ... -->` comment on
+line 1 of their `current_*_response.md` file (stripped automatically by
+`LetsRead`), plus a `[Tools: ...]` suffix on their `[SUBAGENT_DONE | ...]`
+notice. `LetsRead` uses `--*-log` parsing when accessible and falls back
+automatically to these receipts in Standard Sandbox.
 
-### 1-Line Notifications, Step Boundaries & No Polling
+### 1-Line Notifications, `[HOST_WAIT | ...]` Turn Token & No Polling
 
 - Act strictly as the **session host and gatekeeper relay**. Never answer story
   questions in your own voice, and never call `edit_file` or `write_file`
@@ -150,8 +153,14 @@ falls back automatically to these receipts in Standard Sandbox.
   `send_message` in the same step. Always wait for the CLI command to exit `0`
   before dispatching subagents.
 
-- Once `invoke_subagent` or `send_message` returns, end your turn immediately
-  with **ZERO tool calls**. Never re-send duplicate notifications or poll with
+- Once `invoke_subagent` or `send_message` returns, immediately park your turn
+  with **ZERO tool calls**, outputting **only** the canonical host wait line:
+
+  ```text
+  [HOST_WAIT | <round> | <phase> | <k>/<total> idle | pending: <roles>]
+  ```
+
+  Never re-send duplicate notifications or poll with
   `manage_subagents(Action: "list")`.
 
 - When relaying `blind-reader`'s commentary or discussion reply in chat, read
@@ -162,19 +171,25 @@ falls back automatically to these receipts in Standard Sandbox.
   > **Let's Read Host** — Relaying from `blind-reader` (Chunk XXXX/YYYY):
   ```
 
-### Hard Anti-Race Barrier (Zero Tool Calls While Waiting)
+### Hard Anti-Race Barrier (`[HOST_WAIT | ...]` With Zero Tool Calls)
 
 **NEVER** emit `run_command` (`lets-read script`, `lets-read research`,
-`lets-read record`, `lets-read judge`, or `lets-read discuss`) in the same
-response where you state you are waiting for a subagent (never output
-`"Waiting for <subagent>..."` alongside a tool call).
+`lets-read record`, `lets-read judge`, or `lets-read discuss`) before all
+dispatched subagents for the **current** `<round>` (`Chunk NNNN`,
+`Chunk NNNN (Discuss)`, or `Wrapup`) have delivered their matching
+`[SUBAGENT_DONE | <round> | <role>]` completion notice.
 
-Count delivered idle completion notices strictly before advancing: if **fewer
-than all** dispatched subagents for the current phase have sent their idle
-completion notice (`< 1` `script-writer` before `script`, `< 1` `researcher`
-before `research`, `< 1` `blind-reader` before `record` or `discuss`, `< 3`
-reviewers before `judge`, or `< 4` when `topic-curator` was dispatched), **end
-your turn immediately with ZERO tool calls**.
+Count delivered `[SUBAGENT_DONE | <round> | <role>]` notices for the current
+round strictly before advancing: if **fewer than all** dispatched subagents for
+the current phase have reported (`< 1` `script-writer` before `script`, `< 1`
+`researcher` before `research`, `< 1` `blind-reader` before `record` or
+`discuss`, `< 3` reviewers before `judge`, or `< 4` when `topic-curator` was
+dispatched), **end your turn immediately with ZERO tool calls** outputting
+**only**:
+
+```text
+[HOST_WAIT | <round> | <phase> | <k>/<total> idle | pending: <remaining_roles>]
+```
 
 ### CLI Whitelist Only — No `python`, `ls`/`cat`, or Ad-Hoc Shell Commands
 
@@ -327,12 +342,14 @@ Writes `current_chunk.md`, `chunks/chunk_XXXX.md`, and
   `<session_dir>/current_script_prompt.md` and write
   `<session_dir>/current_script_response.md` (`Overwrite: true`).
 
-- End your turn with **ZERO tool calls** until `script-writer` sends its idle
-  notice (`1/1`).
+- Park with **ZERO tool calls** outputting **only**
+  `[HOST_WAIT | Chunk NNNN | script | 0/1 idle | pending: script-writer]` until
+  `[SUBAGENT_DONE | Chunk NNNN | script-writer]` arrives (`1/1`).
 
 #### 2. Quarantine Draft (`script`), Kill `script-writer` & Invoke `researcher`
 
-Run `script` **only after** `script-writer`'s idle notice arrives:
+Run `script` **only after** `[SUBAGENT_DONE | Chunk NNNN | script-writer]`
+arrives:
 
 ```bash
 <skill_dir>/.bin/lets-read script \
@@ -353,12 +370,14 @@ deletes `current_script_prompt.md` and `current_script_response.md`**.
      **1-line notification** to read `current_research_prompt.md` and write
      `current_research_response.md` (`Overwrite: true`).
 
-- End your turn with **ZERO tool calls** until `researcher` sends its idle
-  notice (`1/1`).
+- Park with **ZERO tool calls** outputting **only**
+  `[HOST_WAIT | Chunk NNNN | research | 0/1 idle | pending: researcher]` until
+  `[SUBAGENT_DONE | Chunk NNNN | researcher]` arrives (`1/1`).
 
 #### 3. Verify Research (`research`), Kill `researcher` & Notify `blind-reader`
 
-Run `research` **only after** `researcher`'s idle notice arrives:
+Run `research` **only after** `[SUBAGENT_DONE | Chunk NNNN | researcher]`
+arrives:
 
 ```bash
 <skill_dir>/.bin/lets-read research \
@@ -383,12 +402,15 @@ Verifies verbatim quotes and `search_web` receipts, **deletes
      `send_message` to the active `blind-reader` `conversationId`.
 
 - Send **only a 1-line notification** to read `current_prompt.md` and write
-  `current_reader_response.md` (`Overwrite: true`), then end your turn with
-  **ZERO tool calls** until `blind-reader`'s idle notice (`1/1`) arrives.
+  `current_reader_response.md` (`Overwrite: true`), then park with **ZERO tool
+  calls** outputting **only**
+  `[HOST_WAIT | Chunk NNNN | record | 0/1 idle | pending: blind-reader]` until
+  `[SUBAGENT_DONE | Chunk NNNN | blind-reader]` (`1/1`) arrives.
 
 #### 4. Record `blind-reader`'s Turn (`record`)
 
-Run `record` **only after** `blind-reader`'s idle notice arrives:
+Run `record` **only after** `[SUBAGENT_DONE | Chunk NNNN | blind-reader]`
+arrives:
 
 ```bash
 <skill_dir>/.bin/lets-read record \
@@ -417,12 +439,14 @@ and returns `"rotate_*_recommended"` and `"topic_curation_needed"`.
 
 - Obey the **Hard Anti-Race Barrier**: end the post-dispatch turn—and any
   staggered wakeup turn where `< 3` reviewers (or `< 4` with `topic-curator`)
-  have sent idle notices—with **ZERO tool calls**.
+  have sent `[SUBAGENT_DONE | Chunk NNNN | <role>]`—with **ZERO tool calls**,
+  outputting **only**
+  `[HOST_WAIT | Chunk NNNN | judge | <k>/<total> idle | pending: <remaining_roles>]`.
 
 #### 6. Apply Verdicts, Fact-Check, Persona Critique & Topic Merges (`judge`)
 
 Run `judge` **only after** all `3/3` dispatched reviewers (or `4/4` with
-`topic-curator`) have delivered idle completion notices:
+`topic-curator`) have delivered `[SUBAGENT_DONE | Chunk NNNN | <role>]`:
 
 ```bash
 <skill_dir>/.bin/lets-read judge \
@@ -447,9 +471,11 @@ Whenever `judge` returns `"fact_check_discussion_pending": true`
 1. Send a 1-line notification to `blind-reader` (via `send_message`, or
    `invoke_subagent` if resuming without an active `blind-reader`) to read
    `current_discussion_prompt.md` and write `current_discussion_response.md`
-   (`Overwrite: true`), then end your turn with **ZERO tool calls**.
+   (`Overwrite: true`), then park with **ZERO tool calls** outputting **only**
+   `[HOST_WAIT | Chunk NNNN (Discuss) | discuss | 0/1 idle | pending: blind-reader]`.
 
-2. Only after `blind-reader`'s idle notice arrives, record the reply:
+2. Only after `[SUBAGENT_DONE | Chunk NNNN (Discuss) | blind-reader]` arrives,
+   record the reply:
 
    ```bash
    <skill_dir>/.bin/lets-read discuss \
@@ -481,10 +507,13 @@ If the user replies with comments, questions, or non-spoiler discussion:
 2. Send a 1-line notification to `blind-reader` (via `send_message`, or
    `invoke_subagent` if no `blind-reader` is active in this conversation) to
    read `current_discussion_prompt.md` and write
-   `current_discussion_response.md`, then end your turn with **ZERO tool
-   calls**.
+   `current_discussion_response.md`, then park with **ZERO tool calls**
+   outputting **only**
+   `[HOST_WAIT | Chunk NNNN (Discuss) | discuss | 0/1 idle | pending: blind-reader]`
+   (or `Wrapup (Discuss)` after wrapup).
 
-3. Only after `blind-reader`'s idle notice arrives, record the response:
+3. Only after `[SUBAGENT_DONE | Chunk NNNN (Discuss) | blind-reader]` (or
+   `Wrapup (Discuss)`) arrives, record the response:
 
    ```bash
    <skill_dir>/.bin/lets-read discuss \
@@ -515,8 +544,9 @@ the current batch so chunk `N/N` and the Final Wrapup finish together):
    - Execute **Step 4** for each assigned chunk (plus **Step 6** Final Wrapup if
      completing chunk `N/N`), strictly honoring the **Hard Anti-Race Barrier**
      (`< 1` `script-writer`, `researcher`, or `blind-reader` or `< 3` / `< 4`
-     reviewers idle means **ZERO tool calls**; never emit `"Waiting for..."`
-     alongside `run_command`) and killing one-shot `script-writer` after
+     reviewers reporting `[SUBAGENT_DONE | <round> | <role>]` means **ZERO tool
+     calls** outputting **only** `[HOST_WAIT | <round> | <phase> | <k>/<total>
+     idle | pending: <roles>]`) and killing one-shot `script-writer` after
      `lets-read script`, one-shot `researcher` after `lets-read research`, and
      one-shot `topic-curator` after `lets-read judge` via
      `manage_subagents(Action: "kill")`.
@@ -546,8 +576,9 @@ the current batch so chunk `N/N` and the Final Wrapup finish together):
      (`"status": "awaiting_script"`, `"is_wrapup": true`), call
      `invoke_subagent` (`TypeName: "script-writer"`,
      `Role: "Unresearched Script Writer"`) to read `current_script_prompt.md`
-     and write `current_script_response.md`, and wait for its idle notice
-     (`ZERO tool calls`).
+     and write `current_script_response.md`, and park with `ZERO tool calls`
+     outputting `[HOST_WAIT | Wrapup | script | 0/1 idle | pending: script-writer]`
+     until `[SUBAGENT_DONE | Wrapup | script-writer]` arrives.
 
   2. Run `lets-read script` (passing `--session "<session_dir>"` and
      `--subagent-log "<script_writer_logAbsoluteUri>"`), kill `script-writer`
@@ -555,7 +586,9 @@ the current batch so chunk `N/N` and the Final Wrapup finish together):
      `researcher` via `invoke_subagent` (`TypeName: "researcher"`,
      `Role: "Continuity & Canon Researcher"`) to read
      `current_research_prompt.md` and write `current_research_response.md`, and
-     wait for its idle notice (`ZERO tool calls`).
+     park with `ZERO tool calls` outputting
+     `[HOST_WAIT | Wrapup | research | 0/1 idle | pending: researcher]` until
+     `[SUBAGENT_DONE | Wrapup | researcher]` arrives.
 
   3. Run `lets-read research` (passing `--session "<session_dir>"` and
      `--subagent-log "<researcher_logAbsoluteUri>"`, returning
@@ -563,11 +596,12 @@ the current batch so chunk `N/N` and the Final Wrapup finish together):
      `manage_subagents(Action: "kill")`, send a 1-line notification to
      `blind-reader` (via `send_message`, or `invoke_subagent` if no
      `blind-reader` is active in this conversation) to read `current_prompt.md`
-     and write `current_reader_response.md`, and wait for its idle notice
-     (`ZERO tool calls`).
+     and write `current_reader_response.md`, and park with `ZERO tool calls`
+     outputting `[HOST_WAIT | Wrapup | record | 0/1 idle | pending: blind-reader]`
+     until `[SUBAGENT_DONE | Wrapup | blind-reader]` arrives.
 
-- Only after `blind-reader`'s idle notice arrives, record the Final Wrapup (no
-  `judge` or `fact-checker` step runs after `"wrapup_recorded"`):
+- Only after `[SUBAGENT_DONE | Wrapup | blind-reader]` arrives, record the Final
+  Wrapup (no `judge` or `fact-checker` step runs after `"wrapup_recorded"`):
 
   ```bash
   <skill_dir>/.bin/lets-read record \

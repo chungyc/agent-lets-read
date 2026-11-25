@@ -270,21 +270,7 @@ strips `<!-- TOOLS: ... -->` automatically) followed by **both** exact section
 headers (`=== VERIFIED CLAIMS LOG ===` and
 `=== DISPUTED FACTS & MEMORY CHECKS ===`) to
 `<session_dir>/current_fact_check_response.md` via `write_file`
-(`Overwrite: true`).
-
-Once `write_file` succeeds, immediately end your turn with **only a 1-line
-plain-text completion notice** ending with the matching `[Tools: ...]` receipt
-tag and no tool calls—listing every session file read beyond
-`current_fact_check_prompt.md` inside `read_file(...)`, and appending
-`, search_web` (or `, search_web("<query>")`) **only** when `search_web` was
-actually invoked that turn:
-
-```text
-Done: wrote fact-check audit to <session_dir>/current_fact_check_response.md [Tools: read_file(current_chunk.md, entries/chunk_NNNN.md, memory.md, chunks/chunk_XXXX.md), search_web]
-```
-
-Do not call `send_message` or re-read files after `write_file`, and never paste
-the claims log or disputed checks into your final message:
+(`Overwrite: true`):
 
 ```markdown
 <!-- TOOLS: read_file(current_chunk.md, entries/chunk_NNNN.md, memory.md, chunks/chunk_XXXX.md), search_web -->
@@ -296,4 +282,17 @@ the claims log or disputed checks into your final message:
 
 === DISPUTED FACTS & MEMORY CHECKS ===
 - PASS
+```
+
+Once `write_file` succeeds, immediately end your turn with **only a 1-line
+plain-text completion notice** using the exact `[SUBAGENT_DONE | Chunk NNNN |
+fact-checker]` prefix from `## Turn Output Contract` in
+`current_fact_check_prompt.md`, ending with the matching `[Tools: ...]` receipt
+tag and no tool calls—listing every session file read beyond
+`current_fact_check_prompt.md` inside `read_file(...)`, and appending
+`, search_web` (or `, search_web("<query>")`) **only** when `search_web` was
+actually invoked that turn:
+
+```text
+[SUBAGENT_DONE | Chunk NNNN | fact-checker] wrote current_fact_check_response.md [Tools: read_file(current_chunk.md, entries/chunk_NNNN.md, memory.md, chunks/chunk_XXXX.md), search_web]
 ```

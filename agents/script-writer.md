@@ -108,34 +108,18 @@ silently).
 
 On every reading chunk except the final story chunk (`Chunk N < Total`), include
 **1 specific, non-obvious candidate prediction** under
-`=== DRAFT PREDICTION ===` (`<= 550 chars` after bracket tag; omit
-`=== DRAFT PREDICTION ===` on the final story chunk and on the Final Wrapup
-Round):
+`=== DRAFT PREDICTION ===` (`<= 550 chars` after bracket tag):
 
 ```markdown
 - **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise detail or tell, <= 150 chars, no inline quotes> -> **Theory**: <concrete falsifiable primary bet, <= 220 chars> (vs. **Plausible Rival**: <competing reading in roman text, <= 150 chars>)
 ```
-
-Do **not** emit `=== CHUNK SUMMARY ===` or `=== UPDATED MEMORY ===`.
 
 ## Required Output Format
 
 Write line 1 as `<!-- TOOLS: read_file(...) -->` followed by
 `=== DRAFT COMMENTARY ===` (and `=== DRAFT PREDICTION ===` on non-final reading
 chunks) to `<session_dir>/current_script_response.md` via `write_file`
-(`Overwrite: true`).
-
-Once `write_file` succeeds, immediately end your turn with **only a 1-line
-plain-text completion notice** ending with the matching `[Tools: ...]` receipt
-tag (listing every session file read beyond `current_script_prompt.md` inside
-`read_file(...)`) and no tool calls:
-
-```text
-Done: wrote draft script to <session_dir>/current_script_response.md [Tools: read_file(current_chunk.md, memory.md, chunks/by_chronology.md, entries/by_chronology.md, chunks/chunk_XXXX.md)]
-```
-
-Do not call `send_message` or re-read files after `write_file`, and never paste
-your draft commentary or prediction into your final message:
+(`Overwrite: true`):
 
 ```markdown
 <!-- TOOLS: read_file(current_chunk.md, memory.md, chunks/by_chronology.md, entries/by_chronology.md, chunks/chunk_XXXX.md) -->
@@ -147,4 +131,15 @@ earlier story moments, running gags, predictions, or external canon hooks.>
 
 === DRAFT PREDICTION ===
 - **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete primary bet, <= 220 chars> (vs. **Plausible Rival**: <competing reading, <= 150 chars>)
+```
+
+Once `write_file` succeeds, immediately end your turn with **only a 1-line
+plain-text completion notice** using the exact `[SUBAGENT_DONE | <round> |
+script-writer]` prefix from `## Turn Output Contract` in `current_script_prompt.md`
+(`Chunk NNNN` or `Wrapup`), ending with the matching `[Tools: ...]` receipt tag
+(listing every session file read beyond `current_script_prompt.md` inside
+`read_file(...)`) and no tool calls:
+
+```text
+[SUBAGENT_DONE | Chunk NNNN | script-writer] wrote current_script_response.md [Tools: read_file(current_chunk.md, memory.md, chunks/by_chronology.md, entries/by_chronology.md, chunks/chunk_XXXX.md)]
 ```

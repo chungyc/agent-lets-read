@@ -17,6 +17,7 @@ module LetsRead.Verification
   , renderCurrentResearchMarkdown
   , extractVerifiedResearchChunkRefs
   , parseToolReceiptTag
+  , isCompletionNoticeOnly
   , resolveSubagentToolAudit
   , auditReaderToolUsage
   , auditReaderToolUsageWithResearch
@@ -1381,7 +1382,9 @@ isCompletionNoticeOnly raw =
       hasDelimiter = any isDelimiterHeaderLine ls
    in not hasDelimiter
         && length ls <= 2
-        && ( "done:" `T.isPrefixOf` low
+        && ( "[subagent_done |" `T.isPrefixOf` low
+               || "[host_wait |" `T.isPrefixOf` low
+               || "done:" `T.isPrefixOf` low
                || "completed:" `T.isPrefixOf` low
                || ("wrote " `T.isInfixOf` low && "_response.md" `T.isInfixOf` low)
            )

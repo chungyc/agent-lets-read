@@ -245,21 +245,7 @@ Write line 1 as a compact `<!-- TOOLS: ... -->` receipt comment (`LetsRead`
 strips `<!-- TOOLS: ... -->` automatically) followed by `=== RESEARCH NOTES ===`
 (containing your verified bullets, or `- NONE` if no prior/external material is
 needed) to `<session_dir>/current_research_response.md` via `write_file`
-(`Overwrite: true`).
-
-Once `write_file` succeeds, immediately end your turn with **only a 1-line
-plain-text completion notice** ending with the matching `[Tools: ...]` receipt
-tag and no tool calls—listing every session file read beyond
-`current_research_prompt.md` inside `read_file(...)`, and appending
-`, search_web` (or `, search_web("<query>")`) **only** when `search_web` was
-invoked that turn:
-
-```text
-Done: wrote research packet to <session_dir>/current_research_response.md [Tools: read_file(current_chunk.md, memory.md, chunks/by_topic.md, chunks/chunk_0004.md, entries/chunk_0003.md, predictions/pred_0002.md), search_web]
-```
-
-Do not call `send_message` or re-read files after `write_file`, and never paste
-the research notes into your final message:
+(`Overwrite: true`):
 
 ```markdown
 <!-- TOOLS: read_file(current_chunk.md, memory.md, chunks/by_topic.md, chunks/chunk_0004.md, entries/chunk_0003.md, predictions/pred_0002.md), search_web -->
@@ -268,4 +254,17 @@ the research notes into your final message:
 - **[Prior Session Entry | Source: entries/chunk_0003.md | Quote: "<verbatim excerpt>"]** <Prior liveblog gag or discussion context.>
 - **[Prior Prediction | Source: predictions/pred_0002.md | Quote: "<verbatim excerpt>"]** <Original bet wording and current status/verdict.>
 - **[External Canon / Reference | Source: search_web("<neutral query>") | Work: <Work Name>]** <Verified external canon/reference context, subordinate to explicit in-story text.>
+```
+
+Once `write_file` succeeds, immediately end your turn with **only a 1-line
+plain-text completion notice** using the exact `[SUBAGENT_DONE | <round> |
+researcher]` prefix from `## Turn Output Contract` in
+`current_research_prompt.md` (`Chunk NNNN` or `Wrapup`), ending with the
+matching `[Tools: ...]` receipt tag and no tool calls—listing every session file
+read beyond `current_research_prompt.md` inside `read_file(...)`, and appending
+`, search_web` (or `, search_web("<query>")`) **only** when `search_web` was
+invoked that turn:
+
+```text
+[SUBAGENT_DONE | Chunk NNNN | researcher] wrote current_research_response.md [Tools: read_file(current_chunk.md, memory.md, chunks/by_topic.md, chunks/chunk_0004.md, entries/chunk_0003.md, predictions/pred_0002.md), search_web]
 ```

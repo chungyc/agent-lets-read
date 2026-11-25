@@ -451,7 +451,7 @@ renderMetaJson (Just m) =
 
 orchestratorRuleText :: Text
 orchestratorRuleText =
-  "Use messages ONLY as 1-line notifications pointing subagents to read <session_dir>/current_*_prompt.md and write <session_dir>/current_*_response.md; wait for lets-read CLI commands to exit 0 before messaging subagents, never send duplicate notifications or poll, NEVER call 'record', 'judge', or 'discuss' (or 'script' / 'research') while ANY dispatched subagent has not yet sent its idle completion notice (never emit 'Waiting...' text alongside a CLI tool call—if fewer than all dispatched subagents have reported idle, end your turn with ZERO tool calls), use 'lets-read status --session <dir>' (never ls/cat) to check state, and never read/paste prompt/chunk files into messages, run python/ad-hoc scripts, impersonate subagents, or edit memory.md directly."
+  "Send ONLY 1-line notifications pointing subagents to read <session_dir>/current_*_prompt.md and write <session_dir>/current_*_response.md (never read/paste prompt/chunk files into messages); wait for lets-read CLI commands to exit 0 before dispatching subagents, never re-message or poll, and NEVER call 'script', 'research', 'record', 'judge', or 'discuss' before ALL dispatched subagents for the current round emit '[SUBAGENT_DONE | <round> | <role>]': whenever waiting (< all idle), end your turn with ZERO tool calls outputting ONLY '[HOST_WAIT | <round> | <phase> | <k>/<total> idle | pending: <roles>]'. Use 'lets-read status --session <dir>' (never ls/cat/python), and never impersonate subagents or edit memory.md."
 
 renderStateJson :: FilePath -> Bool -> Bool -> Bool -> SessionState -> Text
 renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt =

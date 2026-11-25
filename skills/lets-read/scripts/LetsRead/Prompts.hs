@@ -477,7 +477,7 @@ writeCurrentScriptPromptFile sessionDir st chunk = do
                 78
                 ( "   - `=== DRAFT PREDICTION ===` (`- **[Predicted Chunk "
                     <> curPad
-                    <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars> (vs. **Plausible Rival**: <rival, <= 150 chars>)`; do not emit `=== CHUNK SUMMARY ===` or `=== UPDATED MEMORY ===`)"
+                    <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars> (vs. **Plausible Rival**: <rival, <= 150 chars>)`)"
                 )
             ]
       sessionFileBullets =
@@ -535,7 +535,10 @@ writeCurrentScriptPromptFile sessionDir st chunk = do
             ++ [ ""
                , wrapMarkdownBullet
                    78
-                   "3. Once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice ending with `[Tools: read_file(...)]` and no tool calls (do not call `send_message` or re-read files, and never paste your draft into your message)."
+                   ( "3. Once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice (listing every session file read beyond `current_script_prompt.md`) and no tool calls: `[SUBAGENT_DONE | Chunk "
+                       <> curPad
+                       <> " | script-writer] wrote current_script_response.md [Tools: read_file(...)]`"
+                   )
                ]
   TIO.writeFile scriptPromptPath promptText
   pure scriptPromptPath
@@ -599,14 +602,14 @@ writeWrapupScriptPromptFile sessionDir st = do
                , ""
                , wrapMarkdownBullet
                    78
-                   ( "2. Write line 1 as `<!-- TOOLS: read_file(memory.md, predictions/hall_of_fame.md, chunks/by_chronology.md, entries/by_chronology.md) -->` followed by `=== DRAFT COMMENTARY ===` (covering finale verdicts, whole-story & character retrospective, prediction scoreboard highlights/misses, and running gags/sign-off in your Active Persona; omit `=== DRAFT PREDICTION ===`, `=== CHUNK SUMMARY ===`, and `=== UPDATED MEMORY ===`) to `"
+                   ( "2. Write line 1 as `<!-- TOOLS: read_file(memory.md, predictions/hall_of_fame.md, chunks/by_chronology.md, entries/by_chronology.md) -->` followed by `=== DRAFT COMMENTARY ===` (covering finale verdicts, whole-story & character retrospective, prediction scoreboard highlights/misses, and running gags/sign-off in your Active Persona) to `"
                        <> T.pack scriptRespPath
                        <> "` via `write_file` (`Overwrite: true`)."
                    )
                , ""
                , wrapMarkdownBullet
                    78
-                   "3. Once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice ending with `[Tools: read_file(...)]` and no tool calls."
+                   "3. Once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice and no tool calls: `[SUBAGENT_DONE | Wrapup | script-writer] wrote current_script_response.md [Tools: read_file(...)]`"
                ]
   TIO.writeFile scriptPromptPath promptText
   pure scriptPromptPath
@@ -712,7 +715,10 @@ writeCurrentResearchPromptFile sessionDir st isWrapup strippedDraft = do
                , ""
                , wrapMarkdownBullet
                    78
-                   "3. Once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice ending with `[Tools: read_file(...)]` (adding `, search_web` only if invoked) and no tool calls (do not call `send_message` or re-read files)."
+                   ( "3. Once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice (adding `, search_web` inside `[Tools: ...]` only if invoked) and no tool calls: `[SUBAGENT_DONE | "
+                       <> (if isWrapup then "Wrapup" else "Chunk " <> curPadTxt)
+                       <> " | researcher] wrote current_research_response.md [Tools: read_file(...)]`"
+                   )
                ]
   TIO.writeFile researchPromptPath promptText
   pure researchPromptPath
@@ -836,7 +842,10 @@ writeCurrentPromptFile sessionDir st chunk = do
       step3Line =
         wrapMarkdownBullet
           78
-          "3. Once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice ending with `[Tools: read_file(current_chunk.md, memory.md, current_research.md, ...)]` (adding `, search_web` only if invoked) and no tool calls (do not call `send_message` or re-read files, and never paste the sections into your message)."
+          ( "3. Once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice (adding `, search_web` inside `[Tools: ...]` only if invoked) and no tool calls: `[SUBAGENT_DONE | Chunk "
+              <> curPad
+              <> " | blind-reader] wrote current_reader_response.md [Tools: read_file(current_chunk.md, memory.md, current_research.md, ...)]`"
+          )
       readerSessionBullets =
         [ "- Current Chunk File (mandatory read): " <> T.pack (absSession </> "current_chunk.md")
         , "- Reader Memory File (mandatory read): " <> T.pack (absSession </> "memory.md")
@@ -937,7 +946,7 @@ writeWrapupPromptFile sessionDir st = do
             , ""
             , "## Final Wrapup Instructions"
             , ""
-            , wrapMarkdownParagraph 78 "Read `memory.md`, `predictions/hall_of_fame.md`, and `current_research.md` (verifying exact original `**Clue/Anomaly**` and `**Theory**` wording and full-story timeline progression rather than reconstructing from memory), write line 1 as `<!-- TOOLS: read_file(...) -->` followed by `=== COMMENTARY ===` covering finale verdicts, whole-story retrospective, prediction scoreboard retrospective, and closing sign-off to `{{READER_RESPONSE_FILE}}` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice ending with `[Tools: read_file(memory.md, predictions/hall_of_fame.md, current_research.md, ...)]` and no tool calls (do not call `send_message` or re-read files)."
+            , wrapMarkdownParagraph 78 "Read `memory.md`, `predictions/hall_of_fame.md`, and `current_research.md` (verifying exact original `**Clue/Anomaly**` and `**Theory**` wording and full-story timeline progression rather than reconstructing from memory), write line 1 as `<!-- TOOLS: read_file(...) -->` followed by `=== COMMENTARY ===` covering finale verdicts, whole-story retrospective, prediction scoreboard retrospective, and closing sign-off to `{{READER_RESPONSE_FILE}}` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice and no tool calls: `[SUBAGENT_DONE | Wrapup | blind-reader] wrote current_reader_response.md [Tools: read_file(memory.md, predictions/hall_of_fame.md, current_research.md, ...)]`"
             ]
   let substitutions =
         [ ("{{TOTAL_CHUNKS}}", jsonInt totalChunks)
@@ -1171,7 +1180,7 @@ writeCurrentJudgePromptFile sessionDir st = do
                        <> curPad
                        <> "` to the active ledger (`-> ACTIVE`) ONLY if it stakes a genuinely non-obvious, specific, falsifiable claim strictly from unlocked text and `memory.md`—with NO unflagged pass for safe, expected, or telegraphed bets. Whenever a defect applies, output `- **[Predicted Chunk "
                        <> curPad
-                       <> " -> NOT ADDED]** <flag> <reason>` (`<= 200 chars`, returned to `blind-reader` as feedback only and excluded from active predictions): `[UNINTERESTING]` for expected, telegraphed, or default-trajectory bets—completing a character's stated plan, project, itinerary, or expressed wish; relabeling an ability, anomaly, or dynamic already shown on-page; routine scene/cliffhanger continuations; generic placeholders; or stock genre/relationship/career reflexes (such as a secrecy pact being breached, initial pushback before embrace, a partner tribute, an estranged figure resurfacing, or routine healing/atonement), even when packaged by pairing two explicit facts across chunks (never rejecting a genuinely surprising call solely because it comes from one subtle tell or could resolve soon); `[UNGROUNDED]` for arbitrary non-sequiturs (never penalizing story-coherent long-shots or external-canon hooks); `[DUPLICATE-THESIS]` when duplicating an active or prior thesis (naming `Chunk XXXX`); or `[HEDGED]` / `[VAGUE]` for probability hedging, multi-option menu bets (`X, Y, or Z` covering distinct actors, channels, or payoffs), or Barnum vagueness."
+                       <> " -> NOT ADDED]** <flag> <reason>` (`<= 200 chars`, returned to `blind-reader` as feedback only and excluded from active predictions): `[UNINTERESTING]` for expected, telegraphed, or default-trajectory bets—completing a character's stated plan, project, itinerary, or expressed wish; relabeling an ability, anomaly, or dynamic already shown on-page; routine scene/cliffhanger continuations; generic placeholders; or stock genre/relationship/career reflexes (such as a secrecy pact being breached, initial pushback before embrace, a partner tribute, an estranged figure resurfacing, or routine healing/atonement—while never rejecting a genuinely surprising call solely because it comes from one subtle tell or could resolve soon); `[UNGROUNDED]` for arbitrary non-sequiturs (never penalizing story-coherent long-shots or external-canon hooks); `[DUPLICATE-THESIS]` when duplicating an active or prior thesis (naming `Chunk XXXX`); or `[HEDGED]` / `[VAGUE]` for probability hedging, multi-option menu bets (`X, Y, or Z` covering distinct actors, channels, or payoffs), or Barnum vagueness."
                    )
                ]
             ++ conditionalRetireSection
@@ -1180,7 +1189,10 @@ writeCurrentJudgePromptFile sessionDir st = do
                , ""
                , wrapMarkdownParagraph
                    78
-                   "Once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice and no tool calls (do not call `send_message` or re-read files)."
+                   ( "Once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice and no tool calls: `[SUBAGENT_DONE | Chunk "
+                       <> curPad
+                       <> " | prediction-judge] wrote current_judge_response.md`"
+                   )
                ]
   TIO.writeFile judgePromptPath judgePromptText
   pure judgePromptPath
@@ -1237,9 +1249,11 @@ writeCurrentFactCheckPromptFile sessionDir st storySumTxt entrySumTxt = do
       step3 =
         wrapMarkdownBullet
           78
-          ( "3. Once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice ending with `[Tools: read_file(current_chunk.md, entries/chunk_"
+          ( "3. Once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice (adding `, search_web` inside `[Tools: ...]` only if invoked) and no tool calls: `[SUBAGENT_DONE | Chunk "
               <> curPadTxt
-              <> ".md, memory.md, ...)]` (adding `, search_web` only if invoked) and no tool calls (do not call `send_message` or re-read files)."
+              <> " | fact-checker] wrote current_fact_check_response.md [Tools: read_file(current_chunk.md, entries/chunk_"
+              <> curPadTxt
+              <> ".md, memory.md, ...)]`"
           )
       factPromptText =
         T.unlines
@@ -1338,7 +1352,9 @@ writeCurrentCriticPromptFile sessionDir st = do
                   <> curPadTxt
                   <> ".md`, and `memory.md`, write `=== PERSONA & STYLE CRITIQUE ===` (`~100-150 words`) with the three required bullets (`- **[Persona & Lens]**`, `- **[What Worked Well]**`, and `- **[Where the Voice Drifted or Felt Formulaic]**`) to `"
                   <> T.pack criticRespPath
-                  <> "` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice and no tool calls (do not call `send_message` or re-read files)."
+                  <> "` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice and no tool calls: `[SUBAGENT_DONE | Chunk "
+                  <> curPadTxt
+                  <> " | commentary-critic] wrote current_critic_response.md`"
               )
           ]
   TIO.writeFile criticPromptPath criticPromptText
@@ -1349,6 +1365,7 @@ writeCurrentTopicPromptFile sessionDir st = do
   absSession <- canonicalizePath sessionDir
   sessionFilesRefPath <- resolveSessionFilesRefPathIO
   let curIdx = stCurrentIndex st
+      curPadTxt = T.pack (padChunkNumber curIdx)
       totalChunks = stTotalChunks st
       topicPromptPath = sessionDir </> "current_topic_prompt.md"
       topicRespPath = absSession </> "current_topic_response.md"
@@ -1400,7 +1417,9 @@ writeCurrentTopicPromptFile sessionDir st = do
               78
               ( "Read `memory.md` (and any `by_topic.md` index if needed), write `=== TOPIC MERGES ===` with `- <Canonical Topic> <= <Alias 1>, <Alias 2>` for true synonyms, spelling variants, or overly narrow `<Entity> <Scene Action>` one-offs (preserving distinct recurring characters, factions, locations, and plot threads as separate tags, or `- NONE` if all new topics should remain distinct) to `"
                   <> T.pack topicRespPath
-                  <> "` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice and no tool calls (do not call `send_message` or re-read files)."
+                  <> "` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice and no tool calls: `[SUBAGENT_DONE | Chunk "
+                  <> curPadTxt
+                  <> " | topic-curator] wrote current_topic_response.md`"
               )
           ]
   TIO.writeFile topicPromptPath topicPromptText
@@ -1476,7 +1495,7 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
                , ""
                , wrapMarkdownBullet
                    78
-                   ( "2. Write line 1 as `<!-- TOOLS: read_file(...) -->` (adding `, search_web` only if invoked) followed by your in-character reply under `=== COMMENTARY ===` (conceding if your check confirms a misread, or holding your ground with primary-source quotes if your original reading/joke/baseline was right) and `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary, <= 250 chars>` "
+                   ( "2. Write line 1 as `<!-- TOOLS: ... -->` (listing `read_file(...)`, `search_web`, or both) followed by your in-character reply under `=== COMMENTARY ===` (conceding if your check confirms a misread, or holding your ground with primary-source quotes if your original reading/joke/baseline was right) and `=== CHUNK SUMMARY ===` with `- **[Discussion | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary, <= 250 chars>` "
                        <> fcPlusClause
                        <> " to `"
                        <> T.pack discRespPath
@@ -1485,7 +1504,10 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
                , ""
                , wrapMarkdownBullet
                    78
-                   "3. Once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice ending with `[Tools: read_file(...)]` (adding `, search_web` only if invoked) and no tool calls (do not call `send_message` or re-read files)."
+                   ( "3. Once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice (listing `read_file(...)`, `search_web`, or both inside `[Tools: ...]`) and no tool calls: `[SUBAGENT_DONE | Chunk "
+                       <> curPad
+                       <> " (Discuss) | blind-reader] wrote current_discussion_response.md [Tools: ...]`"
+                   )
                ]
   TIO.writeFile questionsPath questionsContent
   TIO.writeFile discPromptPath discPromptText
@@ -1495,8 +1517,10 @@ writeUserDiscussionPromptFile :: FilePath -> SessionState -> Text -> IO (FilePat
 writeUserDiscussionPromptFile sessionDir st userMsg = do
   absSession <- canonicalizePath sessionDir
   sessionFilesRefPath <- resolveSessionFilesRefPathIO
+  hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
   let curIdx = stCurrentIndex st
       curPad = T.pack (padChunkNumber curIdx)
+      discRoundTag = if hasWrapup then "Wrapup (Discuss)" else "Chunk " <> curPad <> " (Discuss)"
       totalChunks = stTotalChunks st
       userMsgPath = sessionDir </> "last_user_message.md"
       discPromptPath = sessionDir </> "current_discussion_prompt.md"
@@ -1572,7 +1596,10 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
                , ""
                , wrapMarkdownBullet
                    78
-                   "3. Once `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text completion notice ending with `[Tools: ...]` (`[Tools: read_file(...)]` or `[Tools: none]`) and no tool calls (do not call `send_message` or re-read files)."
+                   ( "3. Once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice (`[Tools: read_file(...)]` or `[Tools: none]`, adding `, search_web` only if invoked) and no tool calls: `[SUBAGENT_DONE | "
+                       <> discRoundTag
+                       <> " | blind-reader] wrote current_discussion_response.md [Tools: ...]`"
+                   )
                ]
   TIO.writeFile userMsgPath (T.strip userMsg <> "\n")
   TIO.writeFile discPromptPath discPromptText

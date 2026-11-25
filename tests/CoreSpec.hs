@@ -93,11 +93,16 @@ testRec1OrchestratorGuardrails :: Maybe FilePath -> IO ()
 testRec1OrchestratorGuardrails mBinPath = do
   putStrLn "== Rec #1: Orchestrator Anti-Race Guardrails & Topic-Curator Cleanup Hints =="
   assertBool
-    "orchestratorRuleText forbids calling record/judge/discuss before idle notices"
-    ("NEVER call 'record', 'judge', or 'discuss'" `T.isInfixOf` orchestratorRuleText)
+    "orchestratorRuleText forbids calling script/research/record/judge/discuss before [SUBAGENT_DONE"
+    ( "NEVER call 'script', 'research', 'record', 'judge', or 'discuss'" `T.isInfixOf` orchestratorRuleText
+        && "[SUBAGENT_DONE | <round> | <role>]" `T.isInfixOf` orchestratorRuleText
+    )
   assertBool
-    "orchestratorRuleText forbids emitting Waiting... alongside CLI calls"
-    ("Waiting..." `T.isInfixOf` orchestratorRuleText && "ZERO tool calls" `T.isInfixOf` orchestratorRuleText)
+    "orchestratorRuleText mandates [HOST_WAIT token with ZERO tool calls without priming prohibited tokens"
+    ( "[HOST_WAIT | <round> | <phase>" `T.isInfixOf` orchestratorRuleText
+        && "ZERO tool calls" `T.isInfixOf` orchestratorRuleText
+        && not ("never emit '[SUBAGENT_DONE'" `T.isInfixOf` orchestratorRuleText)
+    )
   assertBool
     "orchestratorRuleText directs status check via lets-read status"
     ("lets-read status --session <dir>" `T.isInfixOf` orchestratorRuleText)
@@ -121,8 +126,10 @@ testRec1OrchestratorGuardrails mBinPath = do
           (af ++ " forbids run_command, edit_file, and send_message concisely")
           ("- Never call `run_command`, `edit_file`, or `send_message`." `T.isInfixOf` agentTxt)
         assertBool
-          (af ++ " omits misleading 'reply to the host' phrasing")
-          (not ("reply to the host" `T.isInfixOf` T.toLower agentTxt))
+          (af ++ " omits misleading 'reply to the host' phrasing and uses [SUBAGENT_DONE |")
+          ( not ("reply to the host" `T.isInfixOf` T.toLower agentTxt)
+              && "[SUBAGENT_DONE |" `T.isInfixOf` agentTxt
+          )
       let srcPath = tmp </> "mini.md"
           sessDir = tmp </> "session"
       TIO.writeFile
@@ -150,11 +157,12 @@ testRec1OrchestratorGuardrails mBinPath = do
       (ecNext, outNext, _) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
       assertEq "CLI next exit 0" ExitSuccess ecNext
       assertBool
-        "next unlocks awaiting_script and forbids Waiting... race"
+        "next unlocks awaiting_script with [HOST_WAIT | Chunk 0001 | script] and [SUBAGENT_DONE | Chunk 0001 | script-writer]"
         ( "\"status\": \"awaiting_script\"" `isInfixOf` outNext
             && "\"is_wrapup\": false" `isInfixOf` outNext
             && "ZERO tool calls" `isInfixOf` outNext
-            && "Waiting..." `isInfixOf` outNext
+            && "[HOST_WAIT | Chunk 0001 | script | 0/1 idle | pending: script-writer]" `isInfixOf` outNext
+            && "[SUBAGENT_DONE | Chunk 0001 | script-writer]" `isInfixOf` outNext
         )
 
       (ecStatScript, outStatScript, _) <- readProcessWithExitCode binPath ["status", "--session", sessDir] ""
@@ -274,7 +282,12 @@ testRec1OrchestratorGuardrails mBinPath = do
         )
       (ecRec, outRec, _) <- readProcessWithExitCode binPath ["record", "--session", sessDir] ""
       assertEq "CLI record exit 0" ExitSuccess ecRec
-      assertBool "record hint enforces waiting for all reviewers with ZERO tool calls" ("ZERO tool calls" `isInfixOf` outRec && "Waiting..." `isInfixOf` outRec)
+      assertBool
+        "record hint enforces concrete initial [HOST_WAIT | Chunk 0001 | judge | 0/3 idle] and [SUBAGENT_DONE | Chunk 0001 | <role>] with ZERO tool calls"
+        ( "ZERO tool calls" `isInfixOf` outRec
+            && "[HOST_WAIT | Chunk 0001 | judge | 0/3 idle | pending: prediction-judge, fact-checker, commentary-critic]" `isInfixOf` outRec
+            && "[SUBAGENT_DONE | Chunk 0001 | <role>]" `isInfixOf` outRec
+        )
 
       TIO.writeFile
         (sessDir </> "current_judge_response.md")

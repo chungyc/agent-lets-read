@@ -131,6 +131,10 @@ cmdRecord opts = do
   when hasResearchPrompt $
     die "Error: researcher step has not completed yet (current_research_prompt.md is still active). Run 'lets-read research' before 'record'."
 
+  let isWrapupTurn = curIdx >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
+      curPad = T.pack (padChunkNumber curIdx)
+      roundTagStr = if isWrapupTurn then "Wrapup" else "Chunk " ++ padChunkNumber curIdx
+
   (rawResp, _, commText, parsedSummaries, mParsedPredUpdates, mParsedMem) <-
     resolveCommentaryOrResponseWithRaw
       (recResponseFile opts)
@@ -138,7 +142,12 @@ cmdRecord opts = do
       [sessionDir </> "current_reader_response.md"]
       (recSubagentLog opts)
       "Reader"
-      "Error: current_reader_response.md has not been written yet (blind-reader is still running). Do not re-message blind-reader; end your turn with ZERO tool calls and wait for its completion notice before running 'record'."
+      ( "Error: current_reader_response.md has not been written yet (blind-reader is still running). Do not re-message blind-reader; end your turn with ZERO tool calls outputting ONLY '[HOST_WAIT | "
+          ++ roundTagStr
+          ++ " | record | 0/1 idle | pending: blind-reader]' and wait for '[SUBAGENT_DONE | "
+          ++ roundTagStr
+          ++ " | blind-reader]' before running 'record'."
+      )
 
   when (T.null commText) $
     die "Error: Commentary content is empty."
@@ -150,7 +159,6 @@ cmdRecord opts = do
           Just m -> Just m
           Nothing -> mParsedMem
       cleanedCommText = stripLeadingChunkHeading commText
-      isWrapupTurn = curIdx >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
       entriesDir = sessionDir </> "entries"
 
   if isWrapupTurn
@@ -382,8 +390,18 @@ cmdRecord opts = do
           rotateJudge = curIdx > 1 && (curIdx - 1) `mod` 11 == 0
           nextHint =
             if curateTopics
-              then "Notify prediction-judge (judge_prompt_file), fact-checker (fact_check_prompt_file), commentary-critic (critic_prompt_file), and topic-curator (topic_prompt_file) in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then STOP and end your turn with ZERO tool calls until ALL 4 dispatched subagents have sent their idle completion notices (never emit 'Waiting...' text alongside 'judge'); only after all 4 idle notices arrive, run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log> --topic-log <topic_log>'."
-              else "Notify prediction-judge (judge_prompt_file), fact-checker (fact_check_prompt_file), and commentary-critic (critic_prompt_file) in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then STOP and end your turn with ZERO tool calls until ALL 3 dispatched reviewers have sent their idle completion notices (never emit 'Waiting...' text alongside 'judge'); only after all 3 idle notices arrive, run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log>'."
+              then
+                "Notify prediction-judge, fact-checker, commentary-critic, and topic-curator in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
+                  <> curPad
+                  <> " | judge | 0/4 idle | pending: prediction-judge, fact-checker, commentary-critic, topic-curator]' (updating the idle count and pending list on intermediate wakeups) until ALL 4 '[SUBAGENT_DONE | Chunk "
+                  <> curPad
+                  <> " | <role>]' notices arrive; then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log> --topic-log <topic_log>'."
+              else
+                "Notify prediction-judge, fact-checker, and commentary-critic in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
+                  <> curPad
+                  <> " | judge | 0/3 idle | pending: prediction-judge, fact-checker, commentary-critic]' (updating the idle count and pending list on intermediate wakeups) until ALL 3 '[SUBAGENT_DONE | Chunk "
+                  <> curPad
+                  <> " | <role>]' notices arrive; then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log>'."
       TIO.putStrLn $
         jsonObject
           [ ("status", jsonStr "awaiting_judge")

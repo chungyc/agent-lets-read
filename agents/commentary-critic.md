@@ -123,11 +123,7 @@ Evaluate `entries/chunk_NNNN.md` across three bullets:
 
 Write this exact section header and three-bullet structure to
 `<session_dir>/current_critic_response.md` using `write_file`
-(`Overwrite: true`). Once `write_file` succeeds, immediately end your turn with
-**only a 1-line plain-text completion notice** and no tool calls (e.g.,
-`"Done: wrote persona critique to <session_dir>/current_critic_response.md"`).
-Do not call `send_message` or re-read files after `write_file`, and never paste
-the critique into your final message:
+(`Overwrite: true`):
 
 ```markdown
 === PERSONA & STYLE CRITIQUE ===
@@ -135,3 +131,9 @@ the critique into your final message:
 - **[What Worked Well]** <1-2 sentences citing specific lines or moments in entries/chunk_NNNN.md where the persona's voice and engagement landed well.>
 - **[Where the Voice Drifted or Felt Formulaic]** <1-3 sentences quoting any specific phrases or structural habits in entries/chunk_NNNN.md where the voice drifted from the persona, paraphrased/repeated itself, or felt formulaic, with a concrete adjustment for the next chunk.>
 ```
+
+Once `write_file` succeeds, immediately end your turn with **only a 1-line
+plain-text completion notice** using the exact `[SUBAGENT_DONE | Chunk NNNN |
+commentary-critic]` line from `## Turn Output Contract` in
+`current_critic_prompt.md` and no tool calls (for example,
+`"[SUBAGENT_DONE | Chunk NNNN | commentary-critic] wrote current_critic_response.md"`).

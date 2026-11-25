@@ -106,6 +106,8 @@ Write line 1 as `<!-- TOOLS: read_file(...) -->` followed by
 `=== UPDATED MEMORY ===`; `=== PREDICTION UPDATES ===` is not needed) to
 `{{READER_RESPONSE_FILE}}` using `write_file` (`Overwrite: true`). Once
 `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text
-completion notice ending with
-`[Tools: read_file(memory.md, current_research.md, ...)]` and no tool calls (do
-not call `send_message` or re-read files).
+completion notice starting with
+`[SUBAGENT_DONE | Wrapup | blind-reader] wrote current_reader_response.md`
+followed by `[Tools: read_file(...)]` listing `memory.md`,
+`predictions/hall_of_fame.md`, `current_research.md`, and any other files read,
+with no tool calls.

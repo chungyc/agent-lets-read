@@ -275,9 +275,7 @@ routine scene continuations, stated plans/itineraries, generic `"X will matter /
 cause tension"` placeholders, throwaway `"just a coincidence"` rivals, and
 near-duplicate restatements of an already-active bet (`[DUPLICATE-THESIS]`;
 distinct theories exploring different mechanisms, suspects, or character
-trajectories are welcome). (`prediction-judge` manages the 10-prediction active
-cap automatically, so never emit `RETIRED` lines in
-`=== PREDICTION UPDATES ===`.)
+trajectories are welcome).
 
 ### Balanced Topic Tag Evolution
 
@@ -308,20 +306,7 @@ scene's local timeframe with the span of the whole work).
 On every reading or wrapup turn, write your structured response to
 `<session_dir>/current_reader_response.md` via `write_file` (`Overwrite: true`),
 starting line 1 with `<!-- TOOLS: ... -->` (stripped automatically by
-`LetsRead`) followed by the exact section delimiters below.
-
-Once `write_file` succeeds, immediately end your turn with **only a 1-line
-plain-text completion notice** ending with a matching `[Tools: ...]` receipt tag
-and no tool calls—listing every session file read beyond `current_prompt.md`
-inside `read_file(...)`, and appending `, search_web` (or
-`, search_web("<query>")`) **only** when `search_web` was invoked that turn:
-
-```text
-Done: wrote response to <session_dir>/current_reader_response.md [Tools: read_file(current_chunk.md, memory.md, current_research.md, chunks/chunk_XXXX.md)]
-```
-
-Do not call `send_message` or re-read files after `write_file`, and never paste
-your commentary, predictions, or updated memory into your final message:
+`LetsRead`) followed by the exact section delimiters below:
 
 ```markdown
 <!-- TOOLS: read_file(current_chunk.md, memory.md, current_research.md, chunks/chunk_XXXX.md) -->
@@ -362,6 +347,19 @@ or any `prediction-judge` rulings from the previous chunk.>
 ## Notable Quotes, Themes & Running Jokes
 - **Reader Craft Directives & Running Gags (Persistent)**: <1-line ledger (<= 350 chars) of active style/craft feedback from `Reader Discussion` and thread-wide running jokes; update in place, never delete during compaction>
 - Recurring motifs, foreshadowing suspects, and standout quotes from your commentary.
+```
+
+Once `write_file` succeeds, immediately end your turn with **only a 1-line
+plain-text completion notice** using the exact `[SUBAGENT_DONE | <round> |
+blind-reader]` prefix from `## Turn Output Contract` in `current_prompt.md`
+(`Chunk NNNN` on reading turns, or `Wrapup` on the Final Wrapup Round), ending
+with a matching `[Tools: ...]` receipt tag and no tool calls—listing every
+session file read beyond `current_prompt.md` inside `read_file(...)`, and
+appending `, search_web` (or `, search_web("<query>")`) **only** when
+`search_web` was invoked that turn:
+
+```text
+[SUBAGENT_DONE | Chunk NNNN | blind-reader] wrote current_reader_response.md [Tools: read_file(current_chunk.md, memory.md, current_research.md, chunks/chunk_XXXX.md)]
 ```
 
 ## Interactive Discussion (`Reader Discussion`) & Fact-Check Peer Query Protocol
@@ -429,13 +427,14 @@ Write your reply to `<session_dir>/current_discussion_response.md` via
 `=== PREDICTION UPDATES ===` / `=== UPDATED MEMORY ===`.
 
 Once `write_file` succeeds, immediately end your turn with **only a 1-line
-plain-text completion notice** ending with the matching `[Tools: ...]` tag and
-no tool calls:
+plain-text completion notice** using the exact `[SUBAGENT_DONE | <round> |
+blind-reader]` prefix from `## Turn Output Contract` in
+`current_discussion_prompt.md` (`Chunk NNNN (Discuss)` or `Wrapup (Discuss)`),
+ending with the matching `[Tools: ...]` tag and no tool calls:
 
 ```text
-Done: wrote discussion response to <session_dir>/current_discussion_response.md [Tools: read_file(chunks/chunk_XXXX.md)]
+[SUBAGENT_DONE | Chunk NNNN (Discuss) | blind-reader] wrote current_discussion_response.md [Tools: read_file(chunks/chunk_XXXX.md)]
 ```
 
 (Use `[Tools: none]` if no verification tool beyond reading
-`current_discussion_prompt.md` was invoked.) Do not call `send_message` or
-re-read files after `write_file`, and never paste the reply into your message.
+`current_discussion_prompt.md` was invoked.)
