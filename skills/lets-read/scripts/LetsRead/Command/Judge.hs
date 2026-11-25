@@ -42,7 +42,10 @@ import LetsRead.Predictions
   , countActivePredictions
   , formatAuditEntryCallout
   , formatJudgeCallout
+  , isPredictionMentionedInComm
+  , renderRecordActiveLine
   , stripExistingJudgeCallout
+  , stripTrackerProposalCallout
   )
 import LetsRead.Types
   ( PredictionRecord (..)
@@ -233,8 +236,14 @@ cmdJudge opts = do
     die ("Error: Recorded entry file not found: " ++ entryFile)
 
   existingEntry <- readTextFileSafe entryFile
-  let baseEntry = stripExistingJudgeCallout (stripTrailingEntryRule existingEntry)
-      judgeCallout = formatJudgeCallout curIdx judgeSummaryLines
+  let baseEntry = stripTrackerProposalCallout (stripExistingJudgeCallout (stripTrailingEntryRule existingEntry))
+      curProposalLines =
+        [ renderRecordActiveLine pr
+        | pr <- prevPool
+        , prOriginChunk pr == curIdx
+        , not (isPredictionMentionedInComm (T.toLower baseEntry) (renderRecordActiveLine pr))
+        ]
+      judgeCallout = formatJudgeCallout curIdx (curProposalLines ++ judgeSummaryLines)
       judgeAuditCallout = formatAuditEntryCallout judgeAuditBlocks
       updatedEntry = baseEntry <> judgeCallout <> judgeAuditCallout <> "\n\n---\n\n"
   TIO.writeFile entryFile updatedEntry

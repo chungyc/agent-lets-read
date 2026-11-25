@@ -186,7 +186,6 @@ data PredictionRecord = PredictionRecord
   , prTopics :: ![Text]
   , prClue :: !Text
   , prTheory :: !Text
-  , prRival :: !Text
   , prRawBody :: !Text
   , prStatus :: !PredictionStatus
   }
@@ -272,7 +271,6 @@ data ParsedPrediction
       , ppTopics :: ![Text]
       , ppClue :: !Text
       , ppTheory :: !Text
-      , ppRival :: !Text
       , ppRawLine :: !Text
       , ppBodyAfterBracket :: !Text
       }

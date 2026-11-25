@@ -203,9 +203,9 @@ renderPredictionSlateNote curIdx totalChunks
       let curPad = T.pack (padChunkNumber curIdx)
        in wrapMarkdownParagraph
             78
-            ( "Log 1 new specific, non-obvious prediction (`<= 550 chars` total; avoid routine continuations, stated plans, and generic placeholders) on this chunk using `- **[Predicted Chunk "
+            ( "Stake 1 new specific, non-obvious prediction (`<= 400 chars` total; avoid routine continuations, stated plans, and generic placeholders) in `=== PREDICTION UPDATES ===` using `- **[Predicted Chunk "
                 <> curPad
-                <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars> (vs. **Plausible Rival**: <rival explanation, <= 150 chars>)` at the end of `=== COMMENTARY ===` and in `=== PREDICTION UPDATES ===`."
+                <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars>`."
             )
 
 renderTurnPredictionSection :: Bool -> Bool -> Int -> Int -> SessionState -> [Text]
@@ -223,7 +223,7 @@ renderTurnPredictionSection isDraftTurn includeSyntaxWarnings curIdx totalChunks
               78
               ( "React naturally in `=== DRAFT COMMENTARY ===` to `current_chunk.md` (and any prediction verdicts below), and include 1 specific, non-obvious candidate prediction in `=== DRAFT PREDICTION ===` (`- **[Predicted Chunk "
                   <> curPad
-                  <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars> (vs. **Plausible Rival**: <rival explanation, <= 150 chars>)`)."
+                  <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars>`)."
               )
         | otherwise =
             renderPredictionSlateNote curIdx totalChunks
@@ -477,7 +477,7 @@ writeCurrentScriptPromptFile sessionDir st chunk = do
                 78
                 ( "   - `=== DRAFT PREDICTION ===` (`- **[Predicted Chunk "
                     <> curPad
-                    <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars> (vs. **Plausible Rival**: <rival, <= 150 chars>)`)"
+                    <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars>`)"
                 )
             ]
       sessionFileBullets =
@@ -792,14 +792,10 @@ writeCurrentPromptFile sessionDir st chunk = do
              in if shouldRotate || isMidChapter
                   then " Call `read_file` on `chunks/chunk_" <> prevPadTxt <> ".md` BEFORE writing your response."
                   else " If newly spawned in this conversation, also call `read_file` on `chunks/chunk_" <> prevPadTxt <> ".md` before writing."
-      commentaryPredictionSuffix =
-        if curIdx >= totalChunks
-          then "; since this is the final chunk, do not propose a new prediction"
-          else ", and end with `- **[Predicted Chunk " <> curPad <> " | Topics: Topic 1, Topic 2, Topic 3]** ...`"
       predictionUpdatesBody =
         if curIdx >= totalChunks
           then "Output `- None (story complete!).` on this final chunk (`prediction-judge` still evaluates prior predictions against this chunk)"
-          else "`- **[Predicted Chunk " <> curPad <> " | Topics: ...]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars> (vs. **Plausible Rival**: <rival, <= 150 chars>)` (`<= 550 chars` total)"
+          else "`- **[Predicted Chunk " <> curPad <> " | Topics: ...]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars>` (`<= 400 chars` total)"
       updatedMemoryBody =
         if curIdx >= totalChunks
           then "the 4 narrative sections only; keep Bullet 1 (`Core Premise, Timeline & Baseline Facts (Persistent)`) accurate, collapse completed `Arc K` rollups, and clear resolved mysteries in `Active Mysteries & Unanswered Questions` with `- None (story complete).` unless genuine open-ended mysteries remain"
@@ -833,7 +829,7 @@ writeCurrentPromptFile sessionDir st chunk = do
           "\n\n"
           ( map
               (wrapMarkdownBullet 78)
-              [ "   - `=== COMMENTARY ===` (react in your Active Persona with 3–5 tight `>` blockquotes, weaving reactions to any prediction verdicts shown above" <> commentaryPredictionSuffix <> ")"
+              [ "   - `=== COMMENTARY ===` (react in your Active Persona with 3–5 tight `>` blockquotes, weaving natural reactions, callbacks, and any prediction verdicts shown above in conversational prose)"
               , "   - `=== CHUNK SUMMARY ===` (`- **[Story | Topics: ...]** <1-line factual in-story summary, <= 250 chars>` and `- **[Entry | Topics: ...]** <1-line reaction/gag summary, <= 250 chars>`; reuse accurate `Established Topic Tags` and coin clean canonical tags only when genuinely distinct recurring characters, factions, locations, or plot threads emerge)"
               , "   - `=== PREDICTION UPDATES ===` (" <> predictionUpdatesBody <> ")"
               , "   - `=== UPDATED MEMORY ===` (" <> updatedMemoryBody <> ")"

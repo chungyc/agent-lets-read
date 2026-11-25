@@ -97,8 +97,8 @@ instead.
 
 ### Predictions, Verdicts & Scoreboard (`predictions/`)
 
-Structured `Clue/Anomaly -> Theory (vs. Plausible Rival)` prediction records,
-Judge rulings, and final session scoreboard.
+Structured `Clue/Anomaly -> Theory` prediction records, Judge rulings, and
+final session scoreboard.
 
 #### `<session_dir>/predictions/pred_XXXX.md`
 

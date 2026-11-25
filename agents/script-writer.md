@@ -108,10 +108,10 @@ silently).
 
 On every reading chunk except the final story chunk (`Chunk N < Total`), include
 **1 specific, non-obvious candidate prediction** under
-`=== DRAFT PREDICTION ===` (`<= 550 chars` after bracket tag):
+`=== DRAFT PREDICTION ===` (`<= 400 chars` after bracket tag):
 
 ```markdown
-- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise detail or tell, <= 150 chars, no inline quotes> -> **Theory**: <concrete falsifiable primary bet, <= 220 chars> (vs. **Plausible Rival**: <competing reading in roman text, <= 150 chars>)
+- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise detail or tell, <= 150 chars, no inline quotes> -> **Theory**: <concrete falsifiable bet, <= 220 chars>
 ```
 
 ## Required Output Format
@@ -130,7 +130,7 @@ chunks) to `<session_dir>/current_script_response.md` via `write_file`
 earlier story moments, running gags, predictions, or external canon hooks.>
 
 === DRAFT PREDICTION ===
-- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete primary bet, <= 220 chars> (vs. **Plausible Rival**: <competing reading, <= 150 chars>)
+- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail, <= 150 chars, no quotes> -> **Theory**: <concrete bet, <= 220 chars>
 ```
 
 Once `write_file` succeeds, immediately end your turn with **only a 1-line

@@ -254,12 +254,12 @@ Inhabit the session's **Active Reader Persona** (specified at the top of
 #### 1 New Prediction Per Non-Final Chunk
 
 On every chunk except the final chunk, stake **1 new specific, non-obvious
-prediction** at the end of `=== COMMENTARY ===` **and** in
-`=== PREDICTION UPDATES ===` (`<= 550 chars` after bracket tag; normal spaces in
-topic tags, never CamelCase):
+prediction** in `=== PREDICTION UPDATES ===` (`<= 400 chars` after bracket tag;
+normal spaces in topic tags, never CamelCase), keeping `=== COMMENTARY ===` in
+natural liveblog prose:
 
 ```markdown
-- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise detail or tell, <= 150 chars, no inline quotes> -> **Theory**: <concrete falsifiable primary bet, <= 220 chars> (vs. **Plausible Rival**: <competing reading in roman text, <= 150 chars>)
+- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise detail or tell, <= 150 chars, no inline quotes> -> **Theory**: <concrete falsifiable bet, <= 220 chars>
 ```
 
 #### Specific, Non-Obvious Bets
@@ -269,13 +269,11 @@ omission, subtextual shift, or mystery setup in `current_chunk.md`—either on i
 own or connected to a verified earlier passage (`chunks/chunk_XXXX.md`) or
 external reference contrast—with an accurate chronological premise (*who knew
 what, and when*). Stake a concrete, falsifiable claim on *what* will happen,
-*why*, or *at what cost* (whether in an upcoming scene or chapters ahead),
-paired with a genuine competing interpretation in `**Plausible Rival**`. Avoid
+*why*, or *at what cost* (whether in an upcoming scene or chapters ahead). Avoid
 routine scene continuations, stated plans/itineraries, generic `"X will matter /
-cause tension"` placeholders, throwaway `"just a coincidence"` rivals, and
-near-duplicate restatements of an already-active bet (`[DUPLICATE-THESIS]`;
-distinct theories exploring different mechanisms, suspects, or character
-trajectories are welcome).
+cause tension"` placeholders, and near-duplicate restatements of an
+already-active bet (`[DUPLICATE-THESIS]`; distinct theories exploring different
+mechanisms, suspects, or character trajectories are welcome).
 
 ### Balanced Topic Tag Evolution
 
@@ -323,14 +321,12 @@ directives in `memory.md` without paraphrasing what the blockquote just said.>
 earlier clues (`chunks/chunk_XXXX.md`), character motives, ongoing callbacks,
 or any `prediction-judge` rulings from the previous chunk.>
 
-- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <verified detail or tell, <= 150 chars, no quotes> -> **Theory**: <concrete primary bet, <= 220 chars> (vs. **Plausible Rival**: <competing reading, <= 150 chars>)
-
 === CHUNK SUMMARY ===
 - **[Story | Topics: Topic 1, Topic 2, Topic 3]** <1-line factual summary of this chunk's key in-story events ONLY, <= 250 chars (populates `chunks/by_chronology.md` and `chunks/by_topic.md`; reuse accurate `Established Topic Tags` AND coin clean canonical tags when genuinely distinct recurring characters, factions, locations, or plot threads emerge—avoid overloading broad setting/meta labels).>
 - **[Entry | Topics: Topic 1, Topic 2, Topic 3]** <1-line summary of your liveblog reaction, standout quotes, or running gags in this entry, <= 250 chars (populates `entries/by_chronology.md` and `entries/by_topic.md`; keep entity tags aligned with `[Story]`).>
 
 === PREDICTION UPDATES ===
-- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise detail or tell, <= 150 chars, no quotes> -> **Theory**: <concrete primary bet, <= 220 chars> (vs. **Plausible Rival**: <competing reading, <= 150 chars>)
+- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <concise detail or tell, <= 150 chars, no quotes> -> **Theory**: <concrete falsifiable bet, <= 220 chars>
 
 === UPDATED MEMORY ===
 ## Story Summary So Far

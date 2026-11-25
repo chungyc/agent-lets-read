@@ -193,7 +193,7 @@ testRec1OrchestratorGuardrails mBinPath = do
             , "Unresearched canary riff " <> T.pack secretCanaryPhrase <> " wondering about harbor compasses!"
             , ""
             , "=== DRAFT PREDICTION ==="
-            , "- **[Predicted Chunk 0001 | Topics: Inspector Lin, Brass Compass]** **Clue/Anomaly**: Unmarked compass -> **Theory**: Mara left it (vs. **Plausible Rival**: Dropped by crew)"
+            , "- **[Predicted Chunk 0001 | Topics: Inspector Lin, Brass Compass]** **Clue/Anomaly**: Unmarked compass -> **Theory**: Mara left it"
             ]
         )
       (ecScr1, outScr1, errScr1) <- readProcessWithExitCode binPath ["script", "--session", sessDir] ""
@@ -266,14 +266,12 @@ testRec1OrchestratorGuardrails mBinPath = do
             , ""
             , "That compass is definitely planted!"
             , ""
-            , "- **[Predicted Chunk 0001 | Topics: Inspector Lin, Brass Compass, Harbor]** **Clue/Anomaly**: Lin finds an unmarked brass compass on the dock -> **Theory**: Mara left the compass as a signal for Lin (vs. **Plausible Rival**: A dockworker dropped it during cargo unloading)"
-            , ""
             , "=== CHUNK SUMMARY ==="
             , "- **[Story | Topics: Inspector Lin, Brass Compass, Harbor]** *Brass* compass appears on the dock as Inspector Lin arrives."
             , "- **[Entry | Topics: Inspector Lin, Brass Compass, Harbor]** Suspicion over the planted dockside compass."
             , ""
             , "=== PREDICTION UPDATES ==="
-            , "- **[Predicted Chunk 0001 | Topics: Inspector Lin, Brass Compass, Harbor]** **Clue/Anomaly**: Lin finds an unmarked brass compass on the dock -> **Theory**: Mara left the compass as a signal for Lin (vs. **Plausible Rival**: A dockworker dropped it during cargo unloading)"
+            , "- **[Predicted Chunk 0001 | Topics: Inspector Lin, Brass Compass, Harbor]** **Clue/Anomaly**: Lin finds an unmarked brass compass on the dock -> **Theory**: Mara left the compass as a signal for Lin"
             , ""
             , "=== UPDATED MEMORY ==="
             , "## Story Summary So Far"
@@ -288,6 +286,10 @@ testRec1OrchestratorGuardrails mBinPath = do
             && "[HOST_WAIT | Chunk 0001 | judge | 0/3 idle | pending: prediction-judge, fact-checker, commentary-critic]" `isInfixOf` outRec
             && "[SUBAGENT_DONE | Chunk 0001 | <role>]" `isInfixOf` outRec
         )
+      preJudgeEntry1Txt <- TIO.readFile (sessDir </> "entries" </> "chunk_0001.md")
+      assertBool
+        "record writes temporary Prediction Tracker Update (Reader Proposal) callout before judge runs"
+        ("Prediction Tracker Update (Reader Proposal)" `T.isInfixOf` preJudgeEntry1Txt)
 
       TIO.writeFile
         (sessDir </> "current_judge_response.md")
@@ -311,6 +313,12 @@ testRec1OrchestratorGuardrails mBinPath = do
         "judge with topic-curator reminds orchestrator to kill topic-curator"
         ("topic-curator" `isInfixOf` outJ2 && "manage_subagents" `isInfixOf` outJ2)
       rebuiltLogTxt <- TIO.readFile (sessDir </> "lets_read_log.md")
+      assertBool
+        "judge folds reader's proposed Clue/Anomaly -> Theory into a single Prediction Judge Rulings callout"
+        ( "**Prediction Judge Rulings (Chunk 0001)**:" `T.isInfixOf` rebuiltLogTxt
+            && "Lin finds an unmarked brass compass on the dock -> **Theory**: Mara left the compass as a signal for Lin" `T.isInfixOf` rebuiltLogTxt
+            && not ("Prediction Tracker Update (Reader Proposal)" `T.isInfixOf` rebuiltLogTxt)
+        )
       assertBool "lets_read_log.md after rebuildMasterLog uses ## Reader Persona heading" ("## Reader Persona" `T.isInfixOf` rebuiltLogTxt)
       assertBool "lets_read_log.md after rebuildMasterLog omits *Reader Persona*: pseudo-heading" (not ("*Reader Persona*:" `T.isInfixOf` rebuiltLogTxt))
       let rebuiltHeaderLines = takeWhile (/= "---") (T.lines rebuiltLogTxt)
@@ -370,14 +378,12 @@ testRec1OrchestratorGuardrails mBinPath = do
             , ""
             , "Mara was at the lighthouse the whole time, right after the dockside compass in `chunks/chunk_0001.md`!"
             , ""
-            , "- **[Predicted Chunk 0002 | Topics: Mara, Lighthouse, Beacon]** **Clue/Anomaly**: Mara ascends the spiral stairs toward the unlit beacon -> **Theory**: Mara is relighting the beacon to warn ships away from the harbor reef (vs. **Plausible Rival**: She is signaling an accomplice offshore)"
-            , ""
             , "=== CHUNK SUMMARY ==="
             , "- **[Story | Topics: Mara, Lighthouse, Beacon]** Mara climbs the spiral stairs toward the lighthouse beacon."
             , "- **[Entry | Topics: Mara, Lighthouse, Beacon]** Reaction to Mara reaching the beacon in the finale."
             , ""
             , "=== PREDICTION UPDATES ==="
-            , "- **[Predicted Chunk 0002 | Topics: Mara, Lighthouse, Beacon]** **Clue/Anomaly**: Mara ascends the spiral stairs toward the unlit beacon -> **Theory**: Mara is relighting the beacon to warn ships away from the harbor reef (vs. **Plausible Rival**: She is signaling an accomplice offshore)"
+            , "- **[Predicted Chunk 0002 | Topics: Mara, Lighthouse, Beacon]** **Clue/Anomaly**: Mara ascends the spiral stairs toward the unlit beacon -> **Theory**: Mara is relighting the beacon to warn ships away from the harbor reef"
             , ""
             , "=== UPDATED MEMORY ==="
             , "## Story Summary So Far"

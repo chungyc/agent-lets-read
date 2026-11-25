@@ -75,7 +75,7 @@ the page.
 Each active prediction has the structure:
 
 ```markdown
-- **[Predicted Chunk XXXX | Topics: ...]** **Clue/Anomaly**: <detail> -> **Theory**: <primary bet> (vs. **Plausible Rival**: <rival explanation>)
+- **[Predicted Chunk XXXX | Topics: ...]** **Clue/Anomaly**: <detail> -> **Theory**: <concrete bet>
 ```
 
 ### Judge Every Active Prediction on the Merits
@@ -118,19 +118,15 @@ Each active prediction has the structure:
   `CONFIRMED` over minor secondary phrasing when the primary predicted turn
   itself came true.
 
-- If the `**Plausible Rival**` happened instead of the primary `**Theory**`,
-  you MUST rule the prediction **`DEBUNKED`**, **never** `CONFIRMED` (no
-  two-way hedging credit).
-
 #### `DEBUNKED`
 
 ```markdown
-- **[Predicted Chunk XXXX -> DEBUNKED Chunk NNNN]** <concise 1-line explanation of how current_chunk.md falsified the primary Theory, <= 200 chars>
+- **[Predicted Chunk XXXX -> DEBUNKED Chunk NNNN]** <concise 1-line explanation of how current_chunk.md falsified Theory, <= 200 chars>
 ```
 
-- Use when `current_chunk.md` directly contradicts or disproves the primary
-  `**Theory**`, **or** when the `**Plausible Rival**` or a mundane explanation
-  wins out instead of the primary `**Theory**`.
+- Use when `current_chunk.md` directly contradicts or disproves `**Theory**`,
+  or when a mundane explanation resolves the setup instead of the predicted
+  turn.
 
 - When a `**Theory**` ties its predicted effect to a **specific stated in-story
   trigger or bounded chapter window** (for example, *"Once X happens, Y
@@ -151,9 +147,8 @@ Each active prediction has the structure:
 ```
 
 Use when `blind-reader` spotted a genuine clue or setup that `current_chunk.md`
-paid off, **but** the story twisted the payoff in a surprise third direction
-that falsified the literal `**Theory**` (and was not just the mundane
-`**Plausible Rival**`).
+paid off, **but** the story twisted the payoff in a surprise direction that
+falsified the literal `**Theory**` (rather than simply resolving it mundanely).
 
 ### Cliffhanger Fake-Out Reversals (Last 2 Chunks)
 
@@ -318,8 +313,8 @@ for `> 10`):
 - **[Predicted Chunk NNNN -> ACTIVE]** <1-sentence note on why this non-obvious prediction earns a ledger slot (<= 200 chars)>
 - **[Predicted Chunk NNNN -> NOT ADDED]** [<FLAG>] <1-sentence feedback when Chunk NNNN's proposal fails screening (<= 200 chars)>
 - **[Predicted Chunk YYYY -> CONFIRMED Chunk NNNN]** <1-line textual proof from current_chunk.md (<= 200 chars)>
-- **[Predicted Chunk ZZZZ -> DEBUNKED Chunk NNNN]** <1-line explanation of how current_chunk.md falsified the primary Theory or proved the Plausible Rival instead (<= 200 chars)>
-- **[Predicted Chunk WWWW -> SUBVERTED Chunk NNNN]** <1-line explanation of how the story's twist paid off the clue in an unexpected third direction (<= 200 chars)>
+- **[Predicted Chunk ZZZZ -> DEBUNKED Chunk NNNN]** <1-line explanation of how current_chunk.md falsified Theory (<= 200 chars)>
+- **[Predicted Chunk WWWW -> SUBVERTED Chunk NNNN]** <1-line explanation of how the story's twist paid off the clue in an unexpected direction (<= 200 chars)>
 ```
 
 Once `write_file` succeeds, immediately end your turn with **only a 1-line

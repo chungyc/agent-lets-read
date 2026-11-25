@@ -29,7 +29,9 @@ module LetsRead.Predictions
   , renderHallOfFameMarkdown
   , formatPredictionTrackerCallout
   , formatJudgeCallout
+  , isPredictionMentionedInComm
   , stripExistingJudgeCallout
+  , stripTrackerProposalCallout
   , formatAuditEntryCallout
   ) where
 
@@ -111,7 +113,7 @@ stopTopicWords =
   , "some", "such", "very", "much", "many", "each", "every", "both", "either"
   , "neither", "other", "another", "same", "different", "next", "last", "first"
   , "second", "third", "chapter", "chunk", "part", "story", "scene", "clue"
-  , "anomaly", "theory", "plausible", "rival", "predicted", "confirmed"
+  , "anomaly", "theory", "predicted", "confirmed"
   , "debunked", "subverted", "retired", "because", "instead", "actually"
   , "really", "simply", "merely", "purely", "routine", "normal", "ordinary"
   , "standard", "mundane", "coincidence", "genuine", "genuinely", "secretly"
@@ -132,7 +134,6 @@ extractFallbackTopics body =
   let cleaned =
         T.replace "**Clue/Anomaly**" " "
           $ T.replace "**Theory**" " "
-          $ T.replace "**Plausible Rival**" " "
           $ T.replace "**Clue**" " "
           $ T.replace "**Anomaly**" " " body
       tokens = T.words (T.map (\c -> if isAlphaNum c || c == '-' || c == '\'' then c else ' ') cleaned)
@@ -174,7 +175,7 @@ parseTopicsFromBracket insideRaw bodyAfter =
                 then extractFallbackTopics bodyAfter
                 else take 6 validTags
 
-splitPredictionComponents :: Text -> (Text, Text, Text)
+splitPredictionComponents :: Text -> (Text, Text)
 splitPredictionComponents body =
   let stripBoldLabel lbl txt =
         let s = T.strip txt
@@ -199,27 +200,12 @@ splitPredictionComponents body =
                 case T.breakOn "->" body of
                   (b, a) | not (T.null a) -> (b, T.drop 2 a)
                   _ -> ("", body)
-      (theoryPart, rivalPart) =
-        case T.breakOn "(vs." afterArrow of
-          (t, r) | not (T.null r) ->
-            let rInner = T.drop 4 r
-                rTrim = T.dropWhileEnd (\c -> c == '.' || isSpace c) rInner
-                rClean =
-                  if ")" `T.isSuffixOf` rTrim
-                    then T.dropEnd 1 rTrim
-                    else rInner
-             in (t, rClean)
-          _ ->
-            case T.breakOn "**Plausible Rival**" afterArrow of
-              (t, r) | not (T.null r) -> (t, r)
-              _ -> (afterArrow, "")
       clueClean =
         stripBoldLabel "clue/anomaly"
           $ stripBoldLabel "clue"
           $ stripBoldLabel "anomaly" cluePart
-      theoryClean = stripBoldLabel "theory" theoryPart
-      rivalClean = stripBoldLabel "plausible rival" (stripBoldLabel "rival" rivalPart)
-   in (T.strip clueClean, T.strip theoryClean, T.strip rivalClean)
+      theoryClean = stripBoldLabel "theory" afterArrow
+   in (T.strip clueClean, T.strip theoryClean)
 
 canonicalizeActiveLine :: Int -> [Text] -> Text -> Text
 canonicalizeActiveLine c1 topics body =
@@ -409,9 +395,9 @@ parsePredictionLine rawLine =
                             [c1]
                               | isActiveTag && c1 > 0 && not (T.null (T.strip afterBracket)) ->
                                   let topics = parseTopicsFromBracket insideRaw afterBracket
-                                      (clue, theory, rival) = splitPredictionComponents afterBracket
+                                      (clue, theory) = splitPredictionComponents afterBracket
                                       canonL = canonicalizeActiveLine c1 topics afterBracket
-                                   in PredValidActive c1 topics clue theory rival canonL afterBracket
+                                   in PredValidActive c1 topics clue theory canonL afterBracket
                             _ ->
                               PredInvalidNotation l afterBracket
 
@@ -437,7 +423,6 @@ renderOriginalPredictionSummary pr
         <> prClue pr
         <> " -> **Theory**: "
         <> prTheory pr
-        <> (if T.null (prRival pr) then "" else " (vs. **Plausible Rival**: " <> prRival pr <> ")")
   | otherwise = T.strip (prRawBody pr)
 
 checkPredictionConcisenessIssues :: PredictionRecord -> [Text]
@@ -445,13 +430,11 @@ checkPredictionConcisenessIssues pr =
   let bodyLen = T.length (prRawBody pr)
       clueLen = T.length (prClue pr)
       theoryLen = T.length (prTheory pr)
-      rivalLen = T.length (prRival pr)
       clueHasQuote = T.any (\c -> c == '"' || c == '\x201C' || c == '\x201D') (prClue pr)
-   in [ "total body was " <> jsonInt bodyLen <> " chars (cap: <= 550 chars)" | bodyLen > 550 ]
+   in [ "total body was " <> jsonInt bodyLen <> " chars (cap: <= 400 chars)" | bodyLen > 400 ]
         ++ [ "`**Clue/Anomaly**` was " <> jsonInt clueLen <> " chars (cap: <= 150 chars)" | clueLen > 150 ]
         ++ [ "`**Clue/Anomaly**` contained inline quotation marks (summarize the detail concisely without quoting)" | clueHasQuote ]
         ++ [ "`**Theory**` was " <> jsonInt theoryLen <> " chars (cap: <= 220 chars)" | theoryLen > 220 ]
-        ++ [ "`**Plausible Rival**` was " <> jsonInt rivalLen <> " chars (cap: <= 150 chars)" | rivalLen > 150 ]
 
 renderConcisenessAuditBlock :: Text -> PredictionRecord -> [Text] -> Text
 renderConcisenessAuditBlock nextStr pr issues =
@@ -472,7 +455,7 @@ renderConcisenessAuditBlock nextStr pr issues =
             78
             ( "  - Action Required: On Chunk "
                 <> nextStr
-                <> ", keep the post-bracket prediction body `<= 550 chars` total (`**Clue/Anomaly** <= 150 chars` with no inline quotes, `**Theory** <= 220 chars`, `**Plausible Rival** <= 150 chars`)."
+                <> ", keep the post-bracket prediction body `<= 400 chars` total (`**Clue/Anomaly** <= 150 chars` with no inline quotes, `**Theory** <= 220 chars`)."
             )
         ]
 
@@ -601,7 +584,7 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
         ]
 
       classifyActiveBullet :: ParsedPrediction -> Either (Int, ParsedPrediction) (Maybe Text)
-      classifyActiveBullet p@(PredValidActive c1 _ clue theory rival canonL bodyAfter)
+      classifyActiveBullet p@(PredValidActive c1 _ clue theory canonL bodyAfter)
         | any (\pr -> prOriginChunk pr == c1) prevRecords && (isRecordTurn || c1 /= curIdx) =
             Right Nothing
         | c1 /= curIdx =
@@ -630,15 +613,15 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
                           )
                       )
                   )
-        | T.null clue || T.null theory || T.null rival =
+        | T.null clue || T.null theory =
             Right
               ( Just
                   ( renderTagFormatAuditBlock
-                      "New prediction is missing one or more required structured segments (`**Clue/Anomaly**`, `-> **Theory**`, or `(vs. **Plausible Rival**: ...)`)."
+                      "New prediction is missing one or both required structured segments (`**Clue/Anomaly**` or `-> **Theory**`)."
                       canonL
                       ( "Format every new prediction as `- **[Predicted Chunk "
                           <> nextStr
-                          <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail> -> **Theory**: <primary bet> (vs. **Plausible Rival**: <rival explanation>)`."
+                          <> " | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: <detail> -> **Theory**: <concrete bet>`."
                       )
                   )
               )
@@ -649,7 +632,7 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
       classifyInvalidBullet (PredInvalidNotation rawInv bodyAfter) =
         let trimmedBody =
               if T.null (T.strip bodyAfter)
-                then "**Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)"
+                then "**Clue/Anomaly**: ... -> **Theory**: ..."
                 else T.strip bodyAfter
          in renderTagFormatAuditBlock
               "Malformed or unsupported prediction bracket tag in `=== PREDICTION UPDATES ===`."
@@ -666,7 +649,7 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
         renderTagFormatAuditBlock
           "Unexpected prediction line format."
           (ppRawLine p)
-          "Use standard `- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` notation."
+          "Use standard `- **[Predicted Chunk XXXX | Topics: Topic 1, Topic 2, Topic 3]** **Clue/Anomaly**: ... -> **Theory**: ...` notation."
 
       activeResults = map classifyActiveBullet activeBullets
       rawValidNewPairs = [(c, p) | Left (c, p) <- activeResults]
@@ -691,7 +674,7 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
       (validNewActiveParsed, duplicateChunkAuditBlocks) = dedupNewByChunk [] rawValidNewPairs
 
       toPredictionRecord :: ParsedPrediction -> PredictionRecord
-      toPredictionRecord (PredValidActive c1 topics clue theory rival _ bodyAfter) =
+      toPredictionRecord (PredValidActive c1 topics clue theory _ bodyAfter) =
         PredictionRecord
           { prOriginChunk = c1
           , prChapterNumber = chapNum
@@ -701,7 +684,6 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
           , prTopics = topics
           , prClue = clue
           , prTheory = theory
-          , prRival = rival
           , prRawBody = bodyAfter
           , prStatus = PredStatusActive Nothing
           }
@@ -732,12 +714,12 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
         | isRecordTurn && curIdx >= 1 && curIdx < totalChunks && not hasNewForCur =
             [ renderTagFormatAuditBlock
                 ("No new prediction was logged for Chunk " <> curStr <> " (every chunk before the final chunk must log 1 new specific, non-obvious prediction).")
-                ("*(Missing `- **[Predicted Chunk " <> curStr <> " | Topics: Topic 1, Topic 2]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` in `=== PREDICTION UPDATES ===`)*")
+                ("*(Missing `- **[Predicted Chunk " <> curStr <> " | Topics: Topic 1, Topic 2]** **Clue/Anomaly**: ... -> **Theory**: ...` in `=== PREDICTION UPDATES ===`)*")
                 ( "On Chunk "
                     <> nextStr
-                    <> ", make sure to log 1 new specific, non-obvious prediction using `- **[Predicted Chunk "
+                    <> ", make sure to stake 1 new specific, non-obvious prediction using `- **[Predicted Chunk "
                     <> nextStr
-                    <> " | Topics: Topic 1, Topic 2]** **Clue/Anomaly**: ... -> **Theory**: ... (vs. **Plausible Rival**: ...)` in both `=== COMMENTARY ===` and `=== PREDICTION UPDATES ===`."
+                    <> " | Topics: Topic 1, Topic 2]** **Clue/Anomaly**: ... -> **Theory**: ...` in `=== PREDICTION UPDATES ===`."
                 )
             ]
         | otherwise = []
@@ -1248,7 +1230,6 @@ renderSinglePredictionDoc sessionDir pr =
         , ""
         , "- **Clue / Anomaly**: " <> (if T.null (prClue pr) then prRawBody pr else prClue pr)
         , "- **Theory**: " <> (if T.null (prTheory pr) then prRawBody pr else prTheory pr)
-        , "- **Plausible Rival**: " <> (if T.null (prRival pr) then "*(Not separately specified)*" else prRival pr)
         , "- **Canonical Tracker Line**: " <> renderRecordActiveLine pr
         , ""
         ]
@@ -1571,6 +1552,20 @@ stripExistingJudgeCallout txt =
    in if T.null after
         then txt
         else before
+
+stripTrackerProposalCallout :: Text -> Text
+stripTrackerProposalCallout txt =
+  let marker = "\n\n> [!NOTE]\n> **Prediction Tracker Update (Reader Proposal)**:\n"
+      (before, after) = T.breakOn marker txt
+   in if T.null after
+        then txt
+        else
+          let afterHeader = T.drop (T.length marker) after
+              remainingLines = dropWhile (\l -> ">" `T.isPrefixOf` T.stripStart l) (T.lines afterHeader)
+              restTxt = T.stripStart (T.unlines remainingLines)
+           in if T.null restTxt
+                then T.stripEnd before
+                else T.stripEnd before <> "\n\n" <> T.stripEnd restTxt
 
 formatAuditEntryCallout :: [Text] -> Text
 formatAuditEntryCallout [] = ""

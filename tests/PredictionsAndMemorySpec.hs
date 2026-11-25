@@ -95,18 +95,14 @@ testRec4PredictionSubClausesAndScreening :: IO ()
 testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
   putStrLn "== Rec #4: Sub-Clause Overflow Audit, Screening Flags & Diversified Retirement =="
   let clueOk = "Lin notices fresh salt stains on the locked boathouse latch"
-      theoryOk = "Mara used the boathouse at high tide to hide the harbor master's ledger"
-      rivalOver =
-        "The salt stains are leftover spray from last week's equinoctial gale, and the harbor master still has the ledger locked inside his upstairs office wall safe behind the chart cabinet"
+      theoryOver =
+        "Mara unlocked the flooded North Pier boathouse at high tide using the duplicate brass key from the customs office so she could hide the harbor master's forged cargo ledger behind the upper rafters before dawn patrol arrived"
       predLineOverflow =
         "- **[Predicted Chunk 0004 | Topics: Detective Lin, Mara, Boathouse]** **Clue/Anomaly**: "
           <> clueOk
           <> " -> **Theory**: "
-          <> theoryOk
-          <> " (vs. **Plausible Rival**: "
-          <> rivalOver
-          <> ")"
-  assertBool "Rival clause > 150 chars" (T.length rivalOver > 150)
+          <> theoryOver
+  assertBool "Theory clause > 220 chars" (T.length theoryOver > 220)
   let (recs1, _, auditBlocks1, _) =
         auditAndApplyPredictionUpdates
           4
@@ -116,7 +112,7 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
           1
           2
           True
-          predLineOverflow
+          "Liveblog commentary in natural prose."
           []
           (Just predLineOverflow)
   assertEq "Overflowing sub-clause still records the active prediction" 1 (length recs1)
@@ -124,22 +120,20 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
   case recs1 of
     (firstPr : _) ->
       assertBool
-        "checkPredictionConcisenessIssues flags Plausible Rival cap"
-        (any ("Plausible Rival" `T.isInfixOf`) (checkPredictionConcisenessIssues firstPr))
+        "checkPredictionConcisenessIssues flags Theory cap"
+        (any ("`**Theory**`" `T.isInfixOf`) (checkPredictionConcisenessIssues firstPr))
     [] -> die "Expected 1 prediction record"
 
-  let rivalOk = "The salt stains are spray from last night's storm and the boathouse was never opened"
+  let theoryOk = "Mara used the boathouse at high tide to hide the harbor master's ledger"
       predLineClean =
         "- **[Predicted Chunk 0004 | Topics: Detective Lin, Mara]** **Clue/Anomaly**: "
           <> clueOk
           <> " -> **Theory**: "
           <> theoryOk
-          <> " (vs. **Plausible Rival**: "
-          <> rivalOk
-          <> ")"
-      (_, _, auditBlocksClean, _) =
-        auditAndApplyPredictionUpdates 4 10 2 "Boathouse" 1 2 True predLineClean [] (Just predLineClean)
+      (_, _, auditBlocksClean, trackerLinesClean) =
+        auditAndApplyPredictionUpdates 4 10 2 "Boathouse" 1 2 True "Natural commentary prose." [] (Just predLineClean)
   assertEq "Clean sub-clauses produce 0 prediction audit warnings" 0 (length auditBlocksClean)
+  assertEq "Decoupled commentary produces 1 tracker proposal line for pre-judge review" 1 (length trackerLinesClean)
 
   let midChunk = dummyChunk 4 2 1 2
       stMid =
@@ -207,8 +201,7 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
             , prTopics = ["Harbor"]
             , prClue = "Clue " <> T.pack (show i)
             , prTheory = "Theory " <> T.pack (show i)
-            , prRival = "Rival " <> T.pack (show i)
-            , prRawBody = "**Clue/Anomaly**: Clue -> **Theory**: Theory (vs. **Plausible Rival**: Rival)"
+            , prRawBody = "**Clue/Anomaly**: Clue " <> T.pack (show i) <> " -> **Theory**: Theory " <> T.pack (show i)
             , prStatus =
                 if i == 5
                   then PredStatusActive (Just "[DUPLICATE-THESIS] Duplicates Predicted Chunk 0002.")
@@ -279,7 +272,9 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
     createDirectoryIfMissing True (sessTmp </> "entries")
     createDirectoryIfMissing True (sessTmp </> "chunks")
     TIO.writeFile (sessTmp </> "chunks" </> "chunk_0011.md") "Mara checked the narrow lantern alcove.\n"
-    TIO.writeFile (sessTmp </> "entries" </> "chunk_0011.md") "## Chunk 11/15\n\nCommentary.\n\n---\n\n"
+    TIO.writeFile
+      (sessTmp </> "entries" </> "chunk_0011.md")
+      "## Chunk 11/15\n\nCommentary.\n\n> [!NOTE]\n> **Prediction Tracker Update (Reader Proposal)**:\n> - **[Predicted Chunk 0011 | Topics: Harbor]** **Clue/Anomaly**: Clue 11 -> **Theory**: Theory 11\n\n---\n\n"
     let unflagged11 = [p {prStatus = PredStatusActive Nothing} | p <- elevenActives]
         stJudge11 =
           (baseDummyState 15)
@@ -307,6 +302,14 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
       "=== PERSONA & STYLE CRITIQUE ===\n- **[Persona & Lens]** Good.\n- **[What Worked Well]** Good.\n- **[Where the Voice Drifted or Felt Formulaic]** None.\n"
     cmdJudge (JudgeOptions sessTmp Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing)
     stAfterCmdJudge <- loadState sessTmp
+    entry11AfterRejTxt <- TIO.readFile (sessTmp </> "entries" </> "chunk_0011.md")
+    assertBool
+      "cmdJudge folds pre-judge Reader Proposal callout into Prediction Judge Rulings (Chunk 0011) even on NOT ADDED"
+      ( not ("Prediction Tracker Update (Reader Proposal)" `T.isInfixOf` entry11AfterRejTxt)
+          && "**Prediction Judge Rulings (Chunk 0011)**:" `T.isInfixOf` entry11AfterRejTxt
+          && "- **[Predicted Chunk 0011 | Topics: Harbor]** **Clue/Anomaly**: Clue 11 -> **Theory**: Theory 11" `T.isInfixOf` entry11AfterRejTxt
+          && "Predicted Chunk 0011 -> NOT ADDED" `T.isInfixOf` entry11AfterRejTxt
+      )
     pred11FileExists <- doesFileExist (sessTmp </> "predictions" </> "pred_0011.md")
     assertBool
       "cmdJudge excludes flagged Chunk 0011 from stPredictions and predictions/pred_0011.md while sparing all 10 active bets"
@@ -351,6 +354,13 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
       "=== PERSONA & STYLE CRITIQUE ===\n- **[Persona & Lens]** Good.\n- **[What Worked Well]** Good.\n- **[Where the Voice Drifted or Felt Formulaic]** None.\n"
     cmdJudge (JudgeOptions sessTmp Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing)
     stAfterAccept11 <- loadState sessTmp
+    entry11AfterAcceptTxt <- TIO.readFile (sessTmp </> "entries" </> "chunk_0011.md")
+    assertBool
+      "Idempotent cmdJudge re-run keeps proposed Clue/Anomaly -> Theory in single Prediction Judge Rulings callout"
+      ( not ("Prediction Tracker Update (Reader Proposal)" `T.isInfixOf` entry11AfterAcceptTxt)
+          && "- **[Predicted Chunk 0011 | Topics: Harbor]** **Clue/Anomaly**: Clue 11 -> **Theory**: Theory 11" `T.isInfixOf` entry11AfterAcceptTxt
+          && "Predicted Chunk 0011 -> ACTIVE" `T.isInfixOf` entry11AfterAcceptTxt
+      )
     pred11ExistsAfterAccept <- doesFileExist (sessTmp </> "predictions" </> "pred_0011.md")
     assertBool
       "Idempotent cmdJudge re-run restores accepted Chunk 0011, clears stRejectedPredictions, and retires nominated Chunk 0005"
@@ -461,8 +471,7 @@ testRec5ArcRollupsFinalMysteriesAndHallOfFame = do
           , prTopics = ["Inspector Lin", "Mara"]
           , prClue = "Mara pockets the brass key"
           , prTheory = "Mara unlocks the lighthouse vault in Act 2"
-          , prRival = "Mara tosses the key into the bay"
-          , prRawBody = "**Clue/Anomaly**: Mara pockets the brass key -> **Theory**: Mara unlocks the lighthouse vault in Act 2 (vs. **Plausible Rival**: Mara tosses the key into the bay)"
+          , prRawBody = "**Clue/Anomaly**: Mara pockets the brass key -> **Theory**: Mara unlocks the lighthouse vault in Act 2"
           , prStatus = PredStatusActive Nothing
           }
       (judgedPreds, _, _) =
@@ -488,9 +497,10 @@ testRec5ArcRollupsFinalMysteriesAndHallOfFame = do
     "hall_of_fame.md has no *Session Directory*: pseudo-heading"
     (not ("*Session Directory*:" `T.isInfixOf` hofMd))
   assertBool
-    "hall_of_fame.md includes original Clue/Anomaly -> Theory (vs. Plausible Rival)"
-    ( "**Clue/Anomaly**: Mara pockets the brass key -> **Theory**: Mara unlocks the lighthouse vault in Act 2 (vs. **Plausible Rival**: Mara tosses the key into the bay)"
+    "hall_of_fame.md includes original Clue/Anomaly -> Theory without Plausible Rival"
+    ( "**Clue/Anomaly**: Mara pockets the brass key -> **Theory**: Mara unlocks the lighthouse vault in Act 2"
         `T.isInfixOf` hofNorm
+        && not ("Plausible Rival" `T.isInfixOf` hofMd)
     )
 
 testRec6LeadingEmphasisAndMarkdownFormatting :: IO ()
@@ -658,8 +668,7 @@ testRec7IndexByteBudgetsWrappingAndSummaryLint = do
           , prTopics = ["Inspector Lin", "Harbor Manifest"]
           , prClue = "Wax seal matches the customs house stamp"
           , prTheory = "The deputy collector forged the manifest to divert contraband to the lighthouse"
-          , prRival = "A clerk reused old wax stock by mistake"
-          , prRawBody = "**Clue/Anomaly**: Wax seal matches the customs house stamp -> **Theory**: The deputy collector forged the manifest to divert contraband to the lighthouse (vs. **Plausible Rival**: A clerk reused old wax stock by mistake)"
+          , prRawBody = "**Clue/Anomaly**: Wax seal matches the customs house stamp -> **Theory**: The deputy collector forged the manifest to divert contraband to the lighthouse"
           , prStatus =
               PredStatusConfirmed
                 ( ResolutionMeta
@@ -794,15 +803,11 @@ testRec8CrossArcPredictionIndexesAndEchoGuard = withTempDir "rec8-cross-arc" $ \
           , prTopics = topics
           , prClue = "Clue on chunk " <> T.pack (show idx)
           , prTheory = theoryTxt
-          , prRival = "Mundane coincidence on chunk " <> T.pack (show idx)
           , prRawBody =
               "**Clue/Anomaly**: Clue on chunk "
                 <> T.pack (show idx)
                 <> " -> **Theory**: "
                 <> theoryTxt
-                <> " (vs. **Plausible Rival**: Mundane coincidence on chunk "
-                <> T.pack (show idx)
-                <> ")"
           , prStatus = PredStatusActive Nothing
           }
 
@@ -1003,15 +1008,11 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
           , prTopics = topics
           , prClue = "Clue " <> T.pack (show idx)
           , prTheory = theoryTxt
-          , prRival = "Rival " <> T.pack (show idx)
           , prRawBody =
               "**Clue/Anomaly**: Clue "
                 <> T.pack (show idx)
                 <> " -> **Theory**: "
                 <> theoryTxt
-                <> " (vs. **Plausible Rival**: Rival "
-                <> T.pack (show idx)
-                <> ")"
           , prStatus = PredStatusActive Nothing
           }
       bet1 = mkBet 1 1 ["Mara", "Harbor"] "Mara hid the tide chart in the boathouse"
@@ -1119,8 +1120,9 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
         && "Chunk 0002 (NOT ADDED): Lin arrives at Pier 2 after breakfast" `T.isInfixOf` jpPersistNorm
     )
   assertBool
-    "pred_0001.md renders - **Judge Screening**: while unresolved, and rejected pred_0002.md does not exist"
+    "pred_0001.md renders - **Judge Screening**: without Plausible Rival while unresolved, and rejected pred_0002.md does not exist"
     ( "- **Judge Screening**: Sharp catch linking Mara's wet boots to the tide chart!" `T.isInfixOf` normWs pred1FileTxt
+        && not ("Plausible Rival" `T.isInfixOf` pred1FileTxt)
         && not pred2Exists
     )
   assertBool
@@ -1201,13 +1203,13 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
   -- Parser guard: copying active prediction + indented '*Judge screening*:' sub-bullet from memory.md into === PREDICTION UPDATES ===
   let copiedSlateWithNewBet =
         T.unlines
-          [ "- **[Predicted Chunk 0001 | Topics: Mara, Harbor]** **Clue/Anomaly**: Clue 1 -> **Theory**: Mara hid the tide chart in the boathouse (vs. **Plausible Rival**: Rival 1) ([details](predictions/pred_0001.md))"
+          [ "- **[Predicted Chunk 0001 | Topics: Mara, Harbor]** **Clue/Anomaly**: Clue 1 -> **Theory**: Mara hid the tide chart in the boathouse ([details](predictions/pred_0001.md))"
           , "  - *Judge screening*: [DUPLICATE-THESIS] Redundant restatement of stated dock schedule."
           , "  - `Judge screening`: [UNINTERESTING] Backtick-formatted screening label."
           , "  - *Prior screening*: [DUPLICATE-THESIS] Prior screening label."
           , "  - Original prediction — **Clue/Anomaly**: Clue 1 -> **Theory**: Mara hid the tide chart in the boathouse"
           , "  - Previous prediction — **Clue/Anomaly**: Clue 4 -> **Theory**: Patrol cutter"
-          , "- **[Predicted Chunk 0005 | Topics: Mara, Beacon]** **Clue/Anomaly**: Mara oils the shutter hinge -> **Theory**: Mara will flash a shuttered signal at midnight (vs. **Plausible Rival**: Routine maintenance before rain)"
+          , "- **[Predicted Chunk 0005 | Topics: Mara, Beacon]** **Clue/Anomaly**: Mara oils the shutter hinge -> **Theory**: Mara will flash a shuttered signal at midnight"
           ]
       (recs5, _, auditWarns5, _) =
         auditAndApplyPredictionUpdates
@@ -1336,7 +1338,7 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
           , "- **[Discussion | Topics: Harbor]** Confirmed North Pier."
           , ""
           , "=== PREDICTION UPDATES ==="
-          , "- **[Predicted Chunk 0002 | Topics: Inspector Lin, Harbor]** **Clue/Anomaly**: North Pier walk -> **Theory**: Lin arrives after breakfast (vs. **Plausible Rival**: Routine patrol)"
+          , "- **[Predicted Chunk 0002 | Topics: Inspector Lin, Harbor]** **Clue/Anomaly**: North Pier walk -> **Theory**: Lin arrives after breakfast"
           ]
       )
     cmdDiscuss (DiscussOptions discTmp Nothing Nothing Nothing Nothing Nothing Nothing)

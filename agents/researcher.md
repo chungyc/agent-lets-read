@@ -79,8 +79,8 @@ Call `read_file` in parallel on `<session_dir>/current_research_prompt.md`,
   `<session_dir>/predictions/by_chronology.md`,
   `<session_dir>/predictions/archive/`, and
   `<session_dir>/predictions/pred_XXXX.md` (plus `predictions/hall_of_fame.md`
-  on Wrapup, to verify exact original `**Clue/Anomaly**`, `**Theory**`,
-  `**Plausible Rival**`, and verdict details).
+  on Wrapup, to verify exact original `**Clue/Anomaly**`, `**Theory**`, and
+  verdict details).
 
 - `<session_dir>/archive/memory/` (`curated_XXXX.md`, `chunk_XXXX.md`, to check
   when an earlier reader belief or baseline note was recorded).
@@ -128,11 +128,11 @@ leaves it unstated so `blind-reader` does not record it as in-story fact.
 ### 3. Prior Predictions & Judge Verdicts (Record of Bets, Not Story Proof)
 
 `predictions/pred_XXXX.md` (and `predictions/hall_of_fame.md` on Wrapup)
-establish **what `blind-reader` previously predicted (`Clue/Anomaly`, `Theory`,
-`Plausible Rival`) and how `prediction-judge` ruled on it**. An `ACTIVE`,
-`RETIRED`, `DEBUNKED`, or `SUBVERTED` theory is never an in-story fact, and even
-when a bet was ruled `CONFIRMED`, pull the primary `chunks/chunk_XXXX.md`
-passage if exact scene details matter.
+establish **what `blind-reader` previously predicted (`Clue/Anomaly`, `Theory`)
+and how `prediction-judge` ruled on it**. An `ACTIVE`, `RETIRED`, `DEBUNKED`,
+or `SUBVERTED` theory is never an in-story fact, and even when a bet was ruled
+`CONFIRMED`, pull the primary `chunks/chunk_XXXX.md` passage if exact scene
+details matter.
 
 ### 4. Prior Session Entries, Discussions & Memory Snapshots
 
