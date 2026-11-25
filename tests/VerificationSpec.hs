@@ -12,6 +12,7 @@ import LetsRead.Chunker (computeShouldRotate)
 import LetsRead.Memory (parseCombinedResponse)
 import LetsRead.Prompts
   ( writeCurrentChunkFile
+  , writeCurrentCriticPromptFile
   , writeCurrentFactCheckPromptFile
   , writeCurrentPromptFile
   , writeCurrentResearchPromptFile
@@ -32,9 +33,11 @@ import LetsRead.Verification
   , checkSubagentLogUsedVerificationTools
   , extractSubagentLogResponse
   , extractVerifiedResearchChunkRefs
+  , isCompletionNoticeOnly
+  , parseCriticAndFactSections
   , parseResearchNotesSection
   , parseToolReceiptTag
-  , isCompletionNoticeOnly
+  , renderCriticFeedbackMarkdown
   , renderCurrentResearchMarkdown
   , resolveSubagentToolAudit
   , verifyAndFilterCriticFactBullets
@@ -237,6 +240,83 @@ testRec3CallbackAndFactCheckAudits = withTempDir "rec3-callbacks" $ \tmp -> do
   assertBool
     "Fact-check prompt has zero quarantine-leak policing"
     (not ("quarantine leak" `T.isInfixOf` T.toLower fcNorm))
+
+  -- Commentary-critic prompt: Chunk 1 vs. non-rotated Chunk 4 vs. rotated Chunk 8 + prior critique filtering + symmetric tags
+  crit1Path <-
+    writeCurrentCriticPromptFile
+      tmp
+      ((baseDummyState 12) {stCurrentIndex = 1, stPendingLinterWarnings = ["- **[Deterministic Style Linter (`LetsRead`)]** Overlong summary."]})
+  crit1Norm <- normWs <$> TIO.readFile crit1Path
+  assertBool
+    "Chunk 1 critic prompt omits Deterministic Style Linter Hits, prior entries, and Previous Chunk's Critique"
+    ( not ("Deterministic Style Linter" `T.isInfixOf` crit1Norm)
+        && not ("by_chronology.md" `T.isInfixOf` crit1Norm)
+        && not ("Previous Chunk's Critique" `T.isInfixOf` crit1Norm)
+        && "[What Worked | MINOR / MODERATE / STRONG]" `T.isInfixOf` crit1Norm
+        && "[What Didn't Work | MINOR / MODERATE / STRONG]" `T.isInfixOf` crit1Norm
+    )
+
+  crit4Path <- writeCurrentCriticPromptFile tmp ((baseDummyState 12) {stCurrentIndex = 4})
+  crit4Norm <- normWs <$> TIO.readFile crit4Path
+  assertBool
+    "Non-rotated Chunk 4 critic prompt includes entries/chunk_0001..0003.md and entries/by_chronology.md conditionally for newly spawned instances"
+    ( "newly spawned conversation" `T.isInfixOf` crit4Norm
+        && "entries/by_chronology.md" `T.isInfixOf` crit4Norm
+        && "entries/chunk_0001.md" `T.isInfixOf` crit4Norm
+        && "entries/chunk_0002.md" `T.isInfixOf` crit4Norm
+        && "entries/chunk_0003.md" `T.isInfixOf` crit4Norm
+    )
+
+  let prevFbDoc =
+        renderCriticFeedbackMarkdown
+          tmp
+          7
+          False
+          []
+          []
+          [ "- **[Deterministic Style Linter (`LetsRead`)]** Your previous `[Story]` summary ran past the 250-char budget across a wrapped continuation line."
+          , "- **[Callback & Continuity Audit (`LetsRead`)]** Unverified prior chunk ref."
+          , "- **[Persona & Lens]** Conversational harbor liveblogger."
+          , "- **[What Worked | MINOR]** Brief funny quip on the foghorn."
+          , "- **[What Didn't Work | STRONG]** Recounted the pier dialogue beat-by-beat instead of reacting to it."
+          ]
+  TIO.writeFile (tmp </> "critic_feedback.md") prevFbDoc
+  crit8Path <-
+    writeCurrentCriticPromptFile
+      tmp
+      ((baseDummyState 12) {stCurrentIndex = 8, stPendingLinterWarnings = ["- **[Deterministic Style Linter (`LetsRead`)]** Another lint."]})
+  crit8Norm <- normWs <$> TIO.readFile crit8Path
+  assertBool
+    "Rotated Chunk 8 critic prompt mandates entries/chunk_0005..0007.md + entries/by_chronology.md and embeds prior editorial critique without linter/audit lines"
+    ( "mandatory cold-start comparison baseline on this rotated turn" `T.isInfixOf` crit8Norm
+        && "entries/by_chronology.md" `T.isInfixOf` crit8Norm
+        && "entries/chunk_0005.md" `T.isInfixOf` crit8Norm
+        && "entries/chunk_0006.md" `T.isInfixOf` crit8Norm
+        && "entries/chunk_0007.md" `T.isInfixOf` crit8Norm
+        && not ("entries/chunk_0004.md" `T.isInfixOf` crit8Norm)
+        && "## Previous Chunk's Critique (Chunk 7)" `T.isInfixOf` crit8Norm
+        && "[What Didn't Work | STRONG]" `T.isInfixOf` crit8Norm
+        && not ("250-char budget" `T.isInfixOf` crit8Norm)
+        && not ("Deterministic Style Linter" `T.isInfixOf` crit8Norm)
+        && not ("Callback & Continuity Audit" `T.isInfixOf` crit8Norm)
+    )
+
+  p8ReaderPath <- writeCurrentPromptFile tmp ((baseDummyState 12) {stCurrentIndex = 8, stStoryRecords = priorRecs}) (dummyChunk 8 8 1 1)
+  p8ReaderNorm <- normWs <$> TIO.readFile p8ReaderPath
+  assertBool
+    "Reader prompt with critic_feedback.md surfaces weight-calibrated STRONG / MODERATE / MINOR uptake guidance"
+    ( "protect strengths marked `STRONG` in `What Worked`" `T.isInfixOf` p8ReaderNorm
+        && "priority craft corrections" `T.isInfixOf` p8ReaderNorm
+    )
+
+  let (_, _, parsedWithHdr) =
+        parseCriticAndFactSections
+          "=== PERSONA & STYLE CRITIQUE ===\n- **[Persona & Lens]** Conversational.\n- **[What Worked | STRONG]** Sharp riff.\n- **[What Didn't Work | MINOR]** Watch repeating 'honestly'.\n"
+      (_, _, parsedHeaderless) =
+        parseCriticAndFactSections
+          "- **[Persona & Lens]** Conversational.\n- **[What Worked | MINOR]** Brief quip.\n- **[What Didn't Work | STRONG]** Pure plot summary.\n"
+  assertEq "parseCriticAndFactSections parses symmetric tags with section header" 3 (length parsedWithHdr)
+  assertEq "parseCriticAndFactSections parses [What Worked] and [What Didn't Work] in headerless fallback mode" 3 (length parsedHeaderless)
 
   let auditSkippedPrev =
         SubagentToolAudit

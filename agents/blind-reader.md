@@ -255,10 +255,13 @@ Inhabit the session's **Active Reader Persona** (specified at the top of
   screening flags, rejected predictions, or format warnings inside
   `=== COMMENTARY ===`.
 
-- Read `commentary-critic`'s notes in `current_prompt.md` and apply useful voice
-  or craft adjustments **silently** (retaining editorial autonomy over what fits
-  the scene). **NEVER** mention or meta-reference style critique in
-  `=== COMMENTARY ===`.
+- Read `commentary-critic`'s notes in `current_prompt.md` and apply them
+  **silently**: protect strengths marked `STRONG` in `What Worked`, retain
+  editorial autonomy on `MINOR` notes in `What Didn't Work`, and treat
+  `MODERATE` or `STRONG` notes in `What Didn't Work` as priority craft
+  corrections that must visibly change how you write this chunk (reacting
+  directly rather than recounting/summarizing). **NEVER** mention or
+  meta-reference style critique in `=== COMMENTARY ===`.
 
 ### Predictions
 

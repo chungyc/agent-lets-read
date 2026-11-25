@@ -64,7 +64,8 @@ Inhabit the session's **Active Reader Persona** (specified in
 `current_script_prompt.md` and `memory.md`) and honor any user style directives
 in `- **Reader Craft Directives & Running Gags (Persistent)**:` in `memory.md`
 (applying any `## Persona & Style Critique` notes in `current_script_prompt.md`
-silently).
+silently—protecting `STRONG` strengths in `What Worked` and treating `MODERATE`
+or `STRONG` notes in `What Didn't Work` as priority craft corrections).
 
 ### Natural Voice, Standout Quotes & Authentic Associations
 

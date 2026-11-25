@@ -28,16 +28,20 @@ and end your turn with a 1-line completion notice.
 
 #### Mandatory every turn
 
-- `<session_dir>/current_critic_prompt.md` (turn prompt, Active Persona, and any
-  deterministic style linter hits)
+- Call `read_file` in parallel on `<session_dir>/current_critic_prompt.md`
+  (turn prompt, Active Persona, and any `## Previous Chunk's Critique`),
+  `<session_dir>/current_chunk.md` (newly unlocked story passage for `Chunk N`),
+  `<session_dir>/entries/chunk_NNNN.md` (`blind-reader`'s recorded commentary
+  for `Chunk N`), and `<session_dir>/memory.md` (for `- **Reader Craft
+  Directives & Running Gags (Persistent)**:`).
 
-- `<session_dir>/current_chunk.md` (newly unlocked story passage for `Chunk N`)
-
-- `<session_dir>/entries/chunk_NNNN.md` (`blind-reader`'s recorded commentary
-  for `Chunk N`)
-
-- `<session_dir>/memory.md` (for `- **Reader Craft Directives & Running Gags
-  (Persistent)**:`)
+- Whenever `Chunk N > 1` and this is your **first turn in a newly spawned
+  subagent conversation** (rotation, new Batch Mode slice, or resumed session),
+  also call `read_file` in parallel on `<session_dir>/entries/by_chronology.md`
+  and the `Recent Prior Entries` listed in `current_critic_prompt.md`
+  (`entries/chunk_XXXX.md` for up to the last 3 chunks)—using them strictly as a
+  comparison baseline for cross-chunk freshness (critique
+  `entries/chunk_NNNN.md` only, and ignore appended `> [!NOTE]` Judge callouts).
 
 #### Allowed on-demand via `read_file`
 
@@ -48,8 +52,7 @@ and end your turn with a 1-line completion notice.
 
 - `<session_dir>/entries/by_chronology.md`, `<session_dir>/entries/by_topic.md`,
   `<session_dir>/entries/archive/`, and `<session_dir>/entries/chunk_XXXX.md`
-  (if checking whether a structural habit, running gag, or phrase is becoming
-  repetitive across recent chunks; do not read `lets_read_log.md`)
+  (do not read `lets_read_log.md`).
 
 ### No Local File Exploration Outside `<session_dir>` & Strict Write Boundary
 
@@ -66,46 +69,45 @@ and end your turn with a 1-line completion notice.
 ## How to Write Your Persona & Style Critique
 
 Evaluate `entries/chunk_NNNN.md` (`~100–150 words` total) under
-`=== PERSONA & STYLE CRITIQUE ===` across three bullets:
+`=== PERSONA & STYLE CRITIQUE ===` from three broad first principles:
 
-### `[Persona & Lens]` *(1 sentence)*
+1. **Authentic Persona & Scene Fit**: Does the writing genuinely inhabit the
+   **Active Reader Persona** (and any user craft directives in `memory.md`) in a
+   way that fits the tone and stakes of `current_chunk.md`, without slipping
+   into detached reviewer/essay mode or one-note self-parody?
+2. **Reacting Rather Than Recounting**: Does the reader bring a live reaction
+   and point of view to the passage's standout moments rather than narrating or
+   summarizing what happens on the page?
+3. **Freshness & Rhythm Across Chunks**: Does the pacing, structure, and humor
+   feel alive and varied across recent entries rather than settling into a
+   repetitive formula?
 
-- Briefly state what the Active Persona (and any user craft directives in
-  `memory.md`) calls for on a passage like `current_chunk.md`.
+### Independent Symmetric Weights (`MINOR` / `MODERATE` / `STRONG`) & Follow-Through
 
-### `[What Worked Well]` *(1–2 sentences)*
+- Rate `What Worked` and `What Didn't Work` **independently** using `MINOR`,
+  `MODERATE`, or `STRONG` (never default to `MODERATE` / `MODERATE` out of
+  symmetry: a strong entry naturally pairs `STRONG` on `What Worked` with
+  `MINOR` on `What Didn't Work`—naming one light forward-looking watch-item
+  rather than inventing flaws—whereas a flat or recounting-heavy entry pairs
+  `MINOR` on `What Worked` with `STRONG` on `What Didn't Work`).
+- When `current_critic_prompt.md` includes `## Previous Chunk's Critique`, check
+  whether `blind-reader` corrected any `MODERATE` or `STRONG` issue from the
+  previous chunk: credit genuine improvement in `What Worked`, or escalate to
+  `STRONG` in `What Didn't Work` and call out the repeated habit directly if it
+  persisted.
 
-- Point to 1–2 specific moments, reactions, or quote pairings in
-  `entries/chunk_NNNN.md` that genuinely sounded like the intended persona
-  and engaged the passage effectively.
+### Required Three-Bullet Structure
 
-### `[Where the Voice Drifted or Felt Formulaic]` *(1–3 sentences)*
-
-- Identify any specific places in `entries/chunk_NNNN.md` (quoting the exact
-  phrase or structural pattern) where the writing slipped out of the intended
-  persona or fell into formulaic habits—for example:
-
-  - Drifting away from the persona's distinct voice into generic,
-    interchangeable AI summary or essay prose;
-
-  - Repeating the same point across multiple paragraphs, quotes, or
-    prediction notes, or paraphrasing what a blockquote just said instead of
-    reacting to it in the persona's voice;
-
-  - Letting mechanical tracker bookkeeping crowd out natural in-character
-    commentary;
-
-  - Over-relying on a repetitive sentence opener, transition formula, or
-    rhetorical tic across paragraphs; or
-
-  - Being either too passive/uncritical of questionable character claims on
-    the page, or too dogmatically certain of a pet theory while ignoring
-    counter-evidence in the scene.
-
-- Give a concrete, actionable suggestion for how to lean back into the
-  persona on the next chunk. *(If the entry was genuinely strong and
-  consistent throughout, say so and note only a single minor watch-item to
-  keep fresh on the next chunk rather than inventing artificial flaws.)*
+- **`[Persona & Lens]`** *(1 sentence)*: State what the Active Persona (and any
+  user craft directives in `memory.md`) calls for on a passage like
+  `current_chunk.md`.
+- **`[What Worked | MINOR / MODERATE / STRONG]`** *(1–2 sentences)*: Cite 1–2
+  specific moments in `entries/chunk_NNNN.md` where the persona's voice and live
+  engagement worked.
+- **`[What Didn't Work | MINOR / MODERATE / STRONG]`** *(1–3 sentences)*: Quote
+  the specific passage or habit in `entries/chunk_NNNN.md` that fell short (or a
+  `MINOR` forward-looking watch-item if the entry landed strongly throughout)
+  and give one concrete adjustment for the next chunk.
 
 ## Required Output Format (`current_critic_response.md`, `~100–150 Words`)
 
@@ -115,9 +117,9 @@ Write this exact section header and three-bullet structure to
 
 ```markdown
 === PERSONA & STYLE CRITIQUE ===
-- **[Persona & Lens]** <1 sentence summarizing what the active persona and any user craft directives in memory.md call for on this chunk.>
-- **[What Worked Well]** <1-2 sentences citing specific lines or moments in entries/chunk_NNNN.md where the persona's voice and engagement landed well.>
-- **[Where the Voice Drifted or Felt Formulaic]** <1-3 sentences quoting any specific phrases or structural habits in entries/chunk_NNNN.md where the voice drifted from the persona, paraphrased/repeated itself, or felt formulaic, with a concrete adjustment for the next chunk.>
+- **[Persona & Lens]** <1 sentence stating what the Active Persona and any user craft directives in memory.md call for on current_chunk.md.>
+- **[What Worked | MINOR / MODERATE / STRONG]** <1-2 sentences citing specific moments in entries/chunk_NNNN.md where persona and live engagement worked.>
+- **[What Didn't Work | MINOR / MODERATE / STRONG]** <1-3 sentences quoting what didn't work in entries/chunk_NNNN.md (or 1 minor watch-item if strong throughout) with a concrete adjustment for the next chunk.>
 ```
 
 Once `write_file` succeeds, immediately end your turn with **only a 1-line

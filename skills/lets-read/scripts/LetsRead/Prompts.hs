@@ -37,7 +37,8 @@ import LetsRead.Index
   , partitionVettedTopics
   )
 import LetsRead.Predictions
-  ( predShortStatusTag
+  ( coalesceBulletLines
+  , predShortStatusTag
   , renderOriginalPredictionSummary
   , renderRecordActiveLine
   , renderRecordResolvedLine
@@ -412,23 +413,38 @@ writeCurrentChunkFile path c totalChunks totalChapters = do
                ]
   TIO.writeFile path (header <> chunkText c <> "\n")
 
-extractInlineCriticSection :: Int -> Text -> [Text]
-extractInlineCriticSection fromChunkIdx rawFb =
+extractRawStyleBodyLines :: Text -> [Text]
+extractRawStyleBodyLines rawFb =
   let ls = T.lines (T.strip rawFb)
       (_, afterHeader) = break (\l -> "## Persona & Style Critique" `T.isPrefixOf` T.stripStart l) ls
-      bodyLines =
-        case afterHeader of
-          (_ : rest) ->
-            let untilNextH2 = takeWhile (\l -> not ("## " `T.isPrefixOf` T.stripStart l)) rest
-             in reverse (dropWhile (T.null . T.strip) (reverse (dropWhile (T.null . T.strip) untilNextH2)))
-          [] -> [l | l <- ls, "- " `T.isPrefixOf` T.stripStart l]
+   in case afterHeader of
+        (_ : rest) ->
+          let untilNextH2 = takeWhile (\l -> not ("## " `T.isPrefixOf` T.stripStart l)) rest
+           in reverse (dropWhile (T.null . T.strip) (reverse (dropWhile (T.null . T.strip) untilNextH2)))
+        [] -> [l | l <- ls, "- " `T.isPrefixOf` T.stripStart l]
+
+extractPriorEditorialCriticBullets :: Text -> [Text]
+extractPriorEditorialCriticBullets rawFb =
+  [ b
+  | b <- coalesceBulletLines (extractRawStyleBodyLines rawFb)
+  , let s = T.strip b
+        low = T.toLower s
+  , "- " `T.isPrefixOf` s || "* " `T.isPrefixOf` s
+  , not ("*(none flagged" `T.isInfixOf` low)
+  , not ("[deterministic style linter" `T.isInfixOf` low)
+  , not ("[callback & continuity audit" `T.isInfixOf` low)
+  ]
+
+extractInlineCriticSection :: Int -> Text -> [Text]
+extractInlineCriticSection fromChunkIdx rawFb =
+  let bodyLines = extractRawStyleBodyLines rawFb
    in if null bodyLines
         then []
         else
           [ ""
           , "## Persona & Style Critique from Chunk " <> jsonInt fromChunkIdx
           , ""
-          , wrapMarkdownParagraph 78 "Apply useful voice and craft adjustments silently—never mention or apologize for style critique inside `=== COMMENTARY ===`."
+          , wrapMarkdownParagraph 78 "Apply these notes silently (never mention or apologize for style critique inside `=== COMMENTARY ===`): protect strengths marked `STRONG` in `What Worked`, retain editorial autonomy on `MINOR` notes in `What Didn't Work`, and treat `MODERATE` or `STRONG` notes in `What Didn't Work` as priority craft corrections that must visibly change how you write this chunk."
           , ""
           ]
             ++ bodyLines
@@ -1331,18 +1347,56 @@ writeCurrentCriticPromptFile sessionDir st = do
   absSession <- canonicalizePath sessionDir
   sessionFilesRefPath <- resolveSessionFilesRefPathIO
   let curIdx = stCurrentIndex st
-      curPad = padChunkNumber curIdx
+      criticFeedbackPath = absSession </> "critic_feedback.md"
+  hasPrevCriticFb <- if curIdx > 1 then doesFileExist criticFeedbackPath else pure False
+  rawPrevCriticFb <- if hasPrevCriticFb then readTextFileSafe criticFeedbackPath else pure ""
+  let curPad = padChunkNumber curIdx
       curPadTxt = T.pack curPad
       totalChunks = stTotalChunks st
       entryPath = absSession </> "entries" </> ("chunk_" ++ curPad ++ ".md")
       criticRespPath = absSession </> "current_critic_response.md"
-      linterBlock =
-        if null (stPendingLinterWarnings st)
-          then "- *(None triggered.)*"
-          else T.intercalate "\n\n" (map (wrapMarkdownBullet 78) (stPendingLinterWarnings st))
+      rotateCritic = curIdx > 1 && (curIdx - 1) `mod` 7 == 0
+      priorEntryIndices = if curIdx <= 1 then [] else [max 1 (curIdx - 3) .. curIdx - 1]
+      priorEntryRelPaths = ["entries/chunk_" <> T.pack (padChunkNumber i) <> ".md" | i <- priorEntryIndices]
+      priorEntryAbsPaths = [T.pack (absSession </> "entries" </> ("chunk_" ++ padChunkNumber i ++ ".md")) | i <- priorEntryIndices]
+      lookbackScopeLbl =
+        if rotateCritic
+          then "mandatory on this rotated turn; on-demand otherwise"
+          else "mandatory if newly spawned in this conversation; on-demand otherwise"
+      priorSessionBullets =
+        if curIdx <= 1
+          then []
+          else
+            [ "- Commentary Chronological Index (" <> lookbackScopeLbl <> "): " <> T.pack (absSession </> "entries" </> "by_chronology.md")
+            , "- Recent Prior Entries (" <> lookbackScopeLbl <> " — comparison baseline only; ignore appended `> [!NOTE]` Judge callouts): " <> T.intercalate ", " priorEntryAbsPaths
+            ]
+      prevCritBullets = if curIdx <= 1 then [] else extractPriorEditorialCriticBullets rawPrevCriticFb
+      prevCritSection =
+        if null prevCritBullets
+          then []
+          else
+            [ ""
+            , "## Previous Chunk's Critique (Chunk " <> jsonInt (curIdx - 1) <> ")"
+            , ""
+            , wrapMarkdownParagraph 78 "Check whether `blind-reader` corrected any `MODERATE` or `STRONG` issue below (crediting genuine improvement in `What Worked`, or escalating to `STRONG` in `What Didn't Work` if the same problem persisted):"
+            , ""
+            , T.intercalate "\n\n" (map (wrapMarkdownBullet 78) prevCritBullets)
+            ]
+      coldStartReadNote
+        | curIdx <= 1 = ""
+        | rotateCritic =
+            " (plus mandatory cold-start comparison baseline on this rotated turn: `entries/by_chronology.md` and "
+              <> T.intercalate ", " ["`" <> p <> "`" | p <- priorEntryRelPaths]
+              <> " — critique `entries/chunk_"
+              <> curPadTxt
+              <> ".md` only, ignoring appended `> [!NOTE]` Judge callouts)"
+        | otherwise =
+            " (and if this is your first turn in a newly spawned conversation, also read `entries/by_chronology.md` and "
+              <> T.intercalate ", " ["`" <> p <> "`" | p <- priorEntryRelPaths]
+              <> " in parallel as a comparison baseline, ignoring appended `> [!NOTE]` Judge callouts)"
       criticPromptPath = sessionDir </> "current_critic_prompt.md"
       criticPromptText =
-        T.unlines
+        T.unlines $
           [ "# Commentary Critic Prompt — Chunk " <> jsonInt curIdx <> " of " <> jsonInt totalChunks
           , ""
           , wrapMarkdownParagraph
@@ -1360,30 +1414,32 @@ writeCurrentCriticPromptFile sessionDir st = do
           , "- Current Story Chunk (`chunks/chunk_" <> curPadTxt <> ".md` — mandatory read): " <> T.pack (absSession </> "current_chunk.md")
           , "- Recorded Commentary Entry (mandatory read): " <> T.pack entryPath
           , "- Updated Reader Memory File (mandatory read): " <> T.pack (absSession </> "memory.md")
-          , "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
-          , "- Output Response File (mandatory `write_file`, `Overwrite: true`): " <> T.pack criticRespPath
-          , ""
-          , "## Active Reader Persona"
-          , ""
-          , wrapMarkdownParagraph 78 (expandPersonaPreset (stPersona st))
-          , ""
-          , "## Deterministic Style Linter Hits"
-          , ""
-          , linterBlock
-          , ""
-          , "## Turn Output Contract"
-          , ""
-          , wrapMarkdownParagraph
-              78
-              ( "Read `current_chunk.md`, `entries/chunk_"
-                  <> curPadTxt
-                  <> ".md`, and `memory.md`, write `=== PERSONA & STYLE CRITIQUE ===` (`~100-150 words`) with the three required bullets (`- **[Persona & Lens]**`, `- **[What Worked Well]**`, and `- **[Where the Voice Drifted or Felt Formulaic]**`) to `"
-                  <> T.pack criticRespPath
-                  <> "` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice and no tool calls: `[SUBAGENT_DONE | Chunk "
-                  <> curPadTxt
-                  <> " | commentary-critic] wrote current_critic_response.md`"
-              )
           ]
+            ++ priorSessionBullets
+            ++ [ "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
+               , "- Output Response File (mandatory `write_file`, `Overwrite: true`): " <> T.pack criticRespPath
+               , ""
+               , "## Active Reader Persona"
+               , ""
+               , wrapMarkdownParagraph 78 (expandPersonaPreset (stPersona st))
+               ]
+            ++ prevCritSection
+            ++ [ ""
+               , "## Turn Output Contract"
+               , ""
+               , wrapMarkdownParagraph
+                   78
+                   ( "Read `current_chunk.md`, `entries/chunk_"
+                       <> curPadTxt
+                       <> ".md`, and `memory.md`"
+                       <> coldStartReadNote
+                       <> ", write `=== PERSONA & STYLE CRITIQUE ===` (`~100-150 words`) with the three required bullets (`- **[Persona & Lens]**`, `- **[What Worked | MINOR / MODERATE / STRONG]**`, and `- **[What Didn't Work | MINOR / MODERATE / STRONG]**`, rating the two weights independently) to `"
+                       <> T.pack criticRespPath
+                       <> "` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice and no tool calls: `[SUBAGENT_DONE | Chunk "
+                       <> curPadTxt
+                       <> " | commentary-critic] wrote current_critic_response.md`"
+                   )
+               ]
   TIO.writeFile criticPromptPath criticPromptText
   pure criticPromptPath
 

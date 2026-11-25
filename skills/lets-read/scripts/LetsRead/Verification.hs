@@ -246,7 +246,7 @@ parseCriticAndFactSections raw =
         | (sec, l) <- tagged
         , let low = T.toLower l
         , sec == CritSecStyle
-            || (sec == CritSecGeneral && ("[persona" `T.isInfixOf` low || "[what worked" `T.isInfixOf` low || "[where the voice" `T.isInfixOf` low || "[skeptical" `T.isInfixOf` low || "[anti-timidity" `T.isInfixOf` low))
+            || (sec == CritSecGeneral && ("[persona" `T.isInfixOf` low || "[what worked" `T.isInfixOf` low || "[what didn't" `T.isInfixOf` low || "[what did not" `T.isInfixOf` low || "[where the voice" `T.isInfixOf` low || "[skeptical" `T.isInfixOf` low || "[anti-timidity" `T.isInfixOf` low))
         , isBullet l
         ]
    in (verifiedLogBullets, factBullets, styleBullets)
@@ -459,7 +459,7 @@ renderCriticFeedbackMarkdown sessionDir curIdx isArchiveDoc verifiedLog peerQuer
       howToUseQuote =
         wrapMarkdownQuote
           78
-          "Read `commentary-critic`'s editorial review of how your previous entry aligned with your Active Persona. Apply useful voice and craft adjustments silently as you write this chunk's commentary (while retaining editorial autonomy over what fits the current scene). Never apologize for, mention, or meta-reference style feedback inside `=== COMMENTARY ===`."
+          "Read `commentary-critic`'s editorial review of your previous entry. Protect strengths marked `STRONG` in `What Worked`, retain editorial autonomy on `MINOR` notes in `What Didn't Work`, and treat `MODERATE` or `STRONG` notes in `What Didn't Work` as priority craft corrections that must visibly change how you write this chunk's commentary. Apply all adjustments silently—never apologize for, mention, or meta-reference style feedback inside `=== COMMENTARY ===`."
    in T.unlines $
         [ "# Persona & Style Critique Notes (Chunk " <> curPad <> ")"
         , ""
