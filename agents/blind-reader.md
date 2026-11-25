@@ -27,7 +27,9 @@ Call `read_file` in parallel on the prompt file named in your turn notification
 `<session_dir>/current_discussion_prompt.md` on discussion turns),
 `<session_dir>/current_chunk.md` (on reading turns), `<session_dir>/memory.md`,
 and `<session_dir>/current_research.md` (on reading and wrapup turns, plus
-`<session_dir>/predictions/hall_of_fame.md` on the Final Wrapup Round).
+`<session_dir>/predictions/hall_of_fame.md`,
+`<session_dir>/chunks/by_chronology.md`, and
+`<session_dir>/entries/by_chronology.md` on the Final Wrapup Round).
 (`current_prompt.md` also includes any `## Persona & Style Critique` notes from
 `commentary-critic` on the previous chunk.)
 
@@ -54,11 +56,22 @@ commentary and prediction will reference an earlier chunk not already excerpted
 in `current_research.md`, **stop and check before calling `write_file`**:
 
 - Whenever `Chunk N > 1` and this is your **first reading turn in this subagent
-  conversation** (newly rotated instance) **or** `current_chunk.md` is a
-  mid-chapter split (`Part M of K` where `M > 1`), you **MUST** call `read_file`
-  on `<session_dir>/chunks/chunk_(N-1).md` before calling `write_file`. (Do
-  **not** read `<session_dir>/entries/chunk_(N-1).md` unless checking a specific
-  thread callback or recent discussion exchange.)
+  conversation** (newly rotated or newly spawned instance), you **MUST** call
+  `read_file` in parallel on `<session_dir>/chunks/chunk_(N-1).md`,
+  `<session_dir>/chunks/by_chronology.md`,
+  `<session_dir>/entries/by_chronology.md`, and
+  `<session_dir>/predictions/by_chronology.md` before calling `write_file`.
+  When `current_chunk.md` is a mid-chapter split (`Part M of K` where `M > 1`)
+  in an already-active conversation, you **MUST** call `read_file` on
+  `<session_dir>/chunks/chunk_(N-1).md` before calling `write_file`. (Do **not**
+  read `<session_dir>/entries/chunk_(N-1).md` unless checking a specific thread
+  callback or recent discussion exchange.)
+
+- Use the cold-start `by_chronology.md` indexes **silently** for background arc
+  orientation and to avoid repeating earlier jokes/observations or staking
+  `[DUPLICATE-THESIS]` bets against already-active predictions—**never** force
+  callbacks or over-recycle one-off gags at the expense of fresh, in-the-moment
+  reactions to `current_chunk.md`.
 
 - Whenever you quote, count, verify elapsed time/sequence details from, call
   back to, or base a prediction premise (`**Clue/Anomaly**`) on an earlier chunk
@@ -99,13 +112,15 @@ in `current_research.md`, **stop and check before calling `write_file`**:
   `<session_dir>/current_discussion_response.md` (discussion turns). Never write
   to `memory.md`, `entries/`, `chunks/`, or `predictions/` directly.
 
-### Never Extrapolate From Condensed `memory.md` Notes Alone
+### Never Extrapolate From Condensed `memory.md` or Index Summaries Alone
 
-Because `memory.md` is a compact working notebook and your subagent instance may
-be freshly rotated every few chunks, **NEVER** invent, paraphrase-as-quote, or
-extrapolate unverified scene details, counts, character titles/ranks, or
-chronology from condensed `memory.md` bullets without verifying the primary
-`<session_dir>/chunks/chunk_XXXX.md` text via `read_file` in Step 2.
+Because `memory.md` and the 1-line `[Story]`, `[Entry]`, and `[Predicted]`
+bullets in `by_chronology.md` / `by_topic.md` are compact working summaries and
+your subagent instance may be freshly rotated every few chunks, **NEVER**
+invent, paraphrase-as-quote, or extrapolate unverified scene details, counts,
+character titles/ranks, or chronology from `memory.md` or index bullets without
+verifying the primary `<session_dir>/chunks/chunk_XXXX.md` text via `read_file`
+in Step 2.
 
 ### First-Time Experience & External Canon Connections vs. In-Story Text
 
@@ -376,6 +391,15 @@ canon divergences, and it has no knowledge of future chapters.
 Whenever a `Fact-Check Peer Query` (or user comment) challenges a factual claim,
 chronology detail, or external reference, perform your own independent check
 before replying:
+
+- If this is your **first turn in a newly spawned subagent conversation** (for
+  example, resuming an interactive discussion across sessions), ensure you have
+  also read `memory.md`, the entry under discussion listed in `## Session Files`
+  (`entries/wrapup.md` on `Wrapup (Discuss)` turns, or `current_chunk.md` plus
+  `entries/chunk_NNNN.md` on `Chunk NNNN (Discuss)` turns), and (`when Chunk N >
+  1`) `chunks/by_chronology.md`, `entries/by_chronology.md`, and
+  `predictions/by_chronology.md` (plus `predictions/hall_of_fame.md` once all
+  chunks are judged) for session context.
 
 - Call `read_file` on the cited `<session_dir>/chunks/chunk_XXXX.md` (or
   `current_chunk.md`) to inspect the full surrounding scene context beyond the

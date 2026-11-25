@@ -750,26 +750,49 @@ writeCurrentPromptFile sessionDir st chunk = do
           else
             let prevPad = padChunkNumber (curIdx - 1)
                 prevPathTxt = T.pack (absSession </> "chunks" </> ("chunk_" ++ prevPad ++ ".md"))
-             in [ "- Previous Story Chunk: " <> prevPathTxt ]
+                idxScopeLabel =
+                  if shouldRotate
+                    then "mandatory on this rotated turn; on-demand otherwise"
+                    else "mandatory if newly spawned in this conversation; on-demand otherwise"
+             in [ "- Previous Story Chunk: " <> prevPathTxt
+                , "- Story Chronological Index (" <> idxScopeLabel <> "): " <> T.pack (absSession </> "chunks" </> "by_chronology.md")
+                , "- Commentary Entries Chronological Index (" <> idxScopeLabel <> "): " <> T.pack (absSession </> "entries" </> "by_chronology.md")
+                , "- Predictions Chronological Index (" <> idxScopeLabel <> "): " <> T.pack (absSession </> "predictions" </> "by_chronology.md")
+                ]
       continuitySection =
         if curIdx <= 1
           then []
           else
             let prevPadTxt = T.pack (padChunkNumber (curIdx - 1))
-                continuityMsg =
-                  if shouldRotate || isMidChapter
-                    then
+                chronIndexList = "`chunks/by_chronology.md`, `entries/by_chronology.md`, and `predictions/by_chronology.md`"
+                orientationGuard =
+                  " Use the `by_chronology.md` indexes silently for background orientation and to avoid repeating earlier jokes or active `[DUPLICATE-THESIS]` bets—never force callbacks or recycle one-off gags, and never treat 1-line index summaries as primary story text."
+                continuityMsg
+                  | shouldRotate =
                       "Mandatory continuity read on this turn ("
-                        <> (if shouldRotate && isMidChapter then "rotated reader + mid-chapter split" else if shouldRotate then "rotated reader" else "mid-chapter split")
+                        <> (if isMidChapter then "rotated reader + mid-chapter split" else "rotated reader")
                         <> "): call `read_file` on `chunks/chunk_"
                         <> prevPadTxt
-                        <> ".md` BEFORE calling `write_file`."
-                    else
+                        <> ".md`, "
+                        <> chronIndexList
+                        <> " BEFORE calling `write_file`."
+                        <> orientationGuard
+                  | isMidChapter =
+                      "Mandatory continuity read on this turn (mid-chapter split): call `read_file` on `chunks/chunk_"
+                        <> prevPadTxt
+                        <> ".md` BEFORE calling `write_file` (and if this is your first turn in a newly spawned conversation, also read "
+                        <> chronIndexList
+                        <> " in parallel)."
+                        <> orientationGuard
+                  | otherwise =
                       "If this is your first turn in a newly spawned conversation, call `read_file` on `chunks/chunk_"
                         <> prevPadTxt
-                        <> ".md` BEFORE calling `write_file`."
+                        <> ".md`, "
+                        <> chronIndexList
+                        <> " BEFORE calling `write_file`."
+                        <> orientationGuard
              in [ ""
-                , "### Previous Chunk Continuity"
+                , "### Cold-Start & Mid-Chapter Continuity"
                 , ""
                 , wrapMarkdownParagraph 78 continuityMsg
                 ]
@@ -789,9 +812,13 @@ writeCurrentPromptFile sessionDir st chunk = do
           then ""
           else
             let prevPadTxt = T.pack (padChunkNumber (curIdx - 1))
-             in if shouldRotate || isMidChapter
-                  then " Call `read_file` on `chunks/chunk_" <> prevPadTxt <> ".md` BEFORE writing your response."
-                  else " If newly spawned in this conversation, also call `read_file` on `chunks/chunk_" <> prevPadTxt <> ".md` before writing."
+                chronShort = "`chunks/by_chronology.md`, `entries/by_chronology.md`, and `predictions/by_chronology.md`"
+             in if shouldRotate
+                  then " Call `read_file` on `chunks/chunk_" <> prevPadTxt <> ".md`, " <> chronShort <> " BEFORE writing your response."
+                  else
+                    if isMidChapter
+                      then " Call `read_file` on `chunks/chunk_" <> prevPadTxt <> ".md` BEFORE writing your response (and if newly spawned in this conversation, also read " <> chronShort <> ")."
+                      else " If newly spawned in this conversation, also call `read_file` on `chunks/chunk_" <> prevPadTxt <> ".md`, " <> chronShort <> " before writing."
       predictionUpdatesBody =
         if curIdx >= totalChunks
           then "Output `- None (story complete!).` on this final chunk (`prediction-judge` still evaluates prior predictions against this chunk)"
@@ -815,7 +842,7 @@ writeCurrentPromptFile sessionDir st chunk = do
           78
           ( "1. Read `current_chunk.md`, `memory.md`, and `current_research.md` (applying any critique or calibration notes above silently, using `current_research.md` selectively where relevant without forcing callbacks, and anchoring covered callbacks/canon details in its verified excerpts/notes)."
               <> step1PrevNote
-              <> " Whenever quoting, counting, or building a prediction premise (`**Clue/Anomaly**`) on an earlier chunk not verbatim in `current_chunk.md` or `current_research.md`, call `read_file` on `chunks/chunk_XXXX.md` (never rely on `memory.md` alone); when referencing an earlier prediction/ruling not shown above or in `current_research.md`, check `predictions/by_topic.md` or `predictions/by_chronology.md`. Connecting external canon, comparing adaptations, and predicting canon elements is welcomed—verify specific external lore not already covered in `current_research.md` via neutral `search_web` queries (never searching for spoilers of this specific story) and keep explicit in-story facts distinct when the story diverges from canon."
+              <> " Whenever quoting, counting, or building a prediction premise (`**Clue/Anomaly**`) on an earlier chunk not verbatim in `current_chunk.md` or `current_research.md`, call `read_file` on `chunks/chunk_XXXX.md` (never rely on `memory.md` or index summaries alone); when referencing an earlier prediction/ruling not shown above or in `current_research.md`, check `predictions/by_topic.md` or `predictions/by_chronology.md`. Connecting external canon, comparing adaptations, and predicting canon elements is welcomed—verify specific external lore not already covered in `current_research.md` via neutral `search_web` queries (never searching for spoilers of this specific story) and keep explicit in-story facts distinct when the story diverges from canon."
           )
       step2Line =
         wrapMarkdownBullet
@@ -931,6 +958,8 @@ writeWrapupPromptFile sessionDir st = do
             , "- Reader Memory File (mandatory read): {{MEMORY_FILE}}"
             , "- Prediction Hall of Fame & Shame (mandatory read): {{HALL_OF_FAME_FILE}}"
             , "- Pre-Pulled Reference Packet (mandatory read): {{RESEARCH_FILE}}"
+            , "- Story Chronological Index (mandatory read): {{CHUNKS_CHRON_FILE}}"
+            , "- Commentary Chronological Index (mandatory read): {{ENTRIES_CHRON_FILE}}"
             , "- Session File & Index Reference (optional on-demand `read_file`): {{SESSION_FILES_REF}}"
             , "- Output Response File (mandatory `write_file`, `Overwrite: true`): {{READER_RESPONSE_FILE}}"
             , ""
@@ -942,7 +971,7 @@ writeWrapupPromptFile sessionDir st = do
             , ""
             , "## Final Wrapup Instructions"
             , ""
-            , wrapMarkdownParagraph 78 "Read `memory.md`, `predictions/hall_of_fame.md`, and `current_research.md` (verifying exact original `**Clue/Anomaly**` and `**Theory**` wording and full-story timeline progression rather than reconstructing from memory), write line 1 as `<!-- TOOLS: read_file(...) -->` followed by `=== COMMENTARY ===` covering finale verdicts, whole-story retrospective, prediction scoreboard retrospective, and closing sign-off to `{{READER_RESPONSE_FILE}}` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice and no tool calls: `[SUBAGENT_DONE | Wrapup | blind-reader] wrote current_reader_response.md [Tools: read_file(memory.md, predictions/hall_of_fame.md, current_research.md, ...)]`"
+            , wrapMarkdownParagraph 78 "Read `memory.md`, `predictions/hall_of_fame.md`, `current_research.md`, `chunks/by_chronology.md`, and `entries/by_chronology.md` in parallel (verifying exact original `**Clue/Anomaly**` and `**Theory**` wording and full-story timeline progression rather than reconstructing from memory or 1-line index summaries), write line 1 as `<!-- TOOLS: read_file(...) -->` followed by `=== COMMENTARY ===` covering finale verdicts, whole-story retrospective, prediction scoreboard retrospective, and closing sign-off to `{{READER_RESPONSE_FILE}}` via `write_file` (`Overwrite: true`), and once `write_file` succeeds, immediately end your turn with ONLY this 1-line completion notice and no tool calls: `[SUBAGENT_DONE | Wrapup | blind-reader] wrote current_reader_response.md [Tools: read_file(memory.md, predictions/hall_of_fame.md, current_research.md, chunks/by_chronology.md, entries/by_chronology.md, ...)]`"
             ]
   let substitutions =
         [ ("{{TOTAL_CHUNKS}}", jsonInt totalChunks)
@@ -951,6 +980,8 @@ writeWrapupPromptFile sessionDir st = do
         , ("{{MEMORY_FILE}}", T.pack (absSession </> "memory.md"))
         , ("{{HALL_OF_FAME_FILE}}", T.pack (absSession </> "predictions" </> "hall_of_fame.md"))
         , ("{{RESEARCH_FILE}}", T.pack (absSession </> "current_research.md"))
+        , ("{{CHUNKS_CHRON_FILE}}", T.pack (absSession </> "chunks" </> "by_chronology.md"))
+        , ("{{ENTRIES_CHRON_FILE}}", T.pack (absSession </> "entries" </> "by_chronology.md"))
         , ("{{READER_RESPONSE_FILE}}", T.pack (absSession </> "current_reader_response.md"))
         , ("{{CRITIC_CONTEXT}}", criticContext)
         , ("{{CHUNKS_DIR}}", T.pack (absSession </> "chunks"))
@@ -1468,6 +1499,7 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
           , ""
           , "- Session Directory: `" <> T.pack absSession <> "`"
           , "- Current Story Chunk (`chunks/chunk_" <> curPad <> ".md`): " <> T.pack (absSession </> "current_chunk.md")
+          , "- Recorded Entry Under Discussion (`entries/chunk_" <> curPad <> ".md`): " <> T.pack (absSession </> "entries" </> ("chunk_" ++ padChunkNumber curIdx ++ ".md"))
           , "- Reader Memory File: " <> T.pack (absSession </> "memory.md")
           , "- Story Chunks Directory (on-demand `read_file` verification): " <> T.pack (absSession </> "chunks")
           , "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
@@ -1487,7 +1519,12 @@ writeFactCheckDiscussionPromptFile sessionDir st peerQueries = do
                , ""
                , wrapMarkdownBullet
                    78
-                   "1. Perform your own independent verification first by calling `read_file` on the cited `<session_dir>/chunks/chunk_XXXX.md` (or `current_chunk.md`) and/or calling `search_web` with a neutral query."
+                   ( "1. Perform your own independent verification first by calling `read_file` on the cited `<session_dir>/chunks/chunk_XXXX.md` (or `current_chunk.md`) and/or calling `search_web` with a neutral query."
+                       <> ( if curIdx <= 1
+                              then " If this is your first turn in a newly spawned conversation, ensure you have also read `memory.md` and `entries/chunk_" <> curPad <> ".md` for context."
+                              else " If this is your first turn in a newly spawned conversation, ensure you have also read `memory.md`, `entries/chunk_" <> curPad <> ".md`, `chunks/by_chronology.md`, `entries/by_chronology.md`, and `predictions/by_chronology.md` for context."
+                          )
+                   )
                , ""
                , wrapMarkdownBullet
                    78
@@ -1516,14 +1553,15 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
   hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
   let curIdx = stCurrentIndex st
       curPad = T.pack (padChunkNumber curIdx)
-      discRoundTag = if hasWrapup then "Wrapup (Discuss)" else "Chunk " <> curPad <> " (Discuss)"
+      isWrapupTarget = hasWrapup && curIdx >= stTotalChunks st
+      discRoundTag = if isWrapupTarget then "Wrapup (Discuss)" else "Chunk " <> curPad <> " (Discuss)"
       totalChunks = stTotalChunks st
       userMsgPath = sessionDir </> "last_user_message.md"
       discPromptPath = sessionDir </> "current_discussion_prompt.md"
       discRespPath = absSession </> "current_discussion_response.md"
-      isPostWrapup = curIdx >= totalChunks && stCurrentRecorded st && stCurrentJudged st
+      isAllChunksJudged = curIdx >= totalChunks && stCurrentRecorded st && stCurrentJudged st
       mUserCurPred =
-        if isPostWrapup
+        if isAllChunksJudged
           then Nothing
           else listToMaybe [pr | pr <- stPredictions st, prOriginChunk pr == curIdx]
       curPredSection =
@@ -1543,6 +1581,24 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
               <> "'s prediction)"
           Nothing ->
             "(plus `=== UPDATED MEMORY ===` if the exchange updates a factual/timeline correction, craft/style directive, running gag, or character status)"
+      targetSessionLines =
+        if isWrapupTarget
+          then
+            [ "- Recorded Entry Under Discussion (`entries/wrapup.md`): " <> T.pack (absSession </> "entries" </> "wrapup.md")
+            ]
+          else
+            [ "- Current Story Chunk (`chunks/chunk_" <> curPad <> ".md`): " <> T.pack (absSession </> "current_chunk.md")
+            , "- Recorded Entry Under Discussion (`entries/chunk_" <> curPad <> ".md`): " <> T.pack (absSession </> "entries" </> ("chunk_" ++ padChunkNumber curIdx ++ ".md"))
+            ]
+      coldStartClause
+        | isWrapupTarget =
+            " If this is your first turn in a newly spawned conversation, ensure you have also read `memory.md`, `entries/wrapup.md`, `chunks/by_chronology.md`, `entries/by_chronology.md`, and `predictions/hall_of_fame.md` for context."
+        | curIdx <= 1 =
+            " If this is your first turn in a newly spawned conversation, ensure you have also read `memory.md`, `current_chunk.md`, and `entries/chunk_" <> curPad <> ".md` for context."
+        | isAllChunksJudged =
+            " If this is your first turn in a newly spawned conversation, ensure you have also read `memory.md`, `current_chunk.md`, `entries/chunk_" <> curPad <> ".md`, `chunks/by_chronology.md`, `entries/by_chronology.md`, `predictions/by_chronology.md`, and `predictions/hall_of_fame.md` for context."
+        | otherwise =
+            " If this is your first turn in a newly spawned conversation, ensure you have also read `memory.md`, `current_chunk.md`, `entries/chunk_" <> curPad <> ".md`, `chunks/by_chronology.md`, `entries/by_chronology.md`, and `predictions/by_chronology.md` for context."
       discPromptText =
         T.unlines $
           [ "# User Discussion Prompt — Chunk " <> jsonInt curIdx <> " of " <> jsonInt totalChunks
@@ -1559,16 +1615,17 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
           , "## Session Files"
           , ""
           , "- Session Directory: `" <> T.pack absSession <> "`"
-          , "- Current Story Chunk (`chunks/chunk_" <> curPad <> ".md`): " <> T.pack (absSession </> "current_chunk.md")
-          , "- Reader Memory File: " <> T.pack (absSession </> "memory.md")
-          , "- Story Chunks Directory (on-demand `read_file` verification): " <> T.pack (absSession </> "chunks")
-          , "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
-          , "- Output Response File (mandatory `write_file`, `Overwrite: true`): " <> T.pack discRespPath
-          , ""
-          , "## Active Persona"
-          , ""
-          , wrapMarkdownParagraph 78 (expandPersonaPreset (stPersona st))
           ]
+            ++ targetSessionLines
+            ++ [ "- Reader Memory File: " <> T.pack (absSession </> "memory.md")
+               , "- Story Chunks Directory (on-demand `read_file` verification): " <> T.pack (absSession </> "chunks")
+               , "- Session File & Index Reference (optional on-demand `read_file`): " <> T.pack sessionFilesRefPath
+               , "- Output Response File (mandatory `write_file`, `Overwrite: true`): " <> T.pack discRespPath
+               , ""
+               , "## Active Persona"
+               , ""
+               , wrapMarkdownParagraph 78 (expandPersonaPreset (stPersona st))
+               ]
             ++ curPredSection
             ++ [ ""
                , "## User Message"
@@ -1579,7 +1636,9 @@ writeUserDiscussionPromptFile sessionDir st userMsg = do
                , ""
                , wrapMarkdownBullet
                    78
-                   "1. If the user's message references a specific detail from an earlier chunk or external reference material, verify it via `read_file` on `chunks/chunk_XXXX.md` or neutral `search_web` first."
+                   ( "1. If the user's message references a specific detail from an earlier chunk or external reference material, verify it via `read_file` on `chunks/chunk_XXXX.md` or neutral `search_web` first."
+                       <> coldStartClause
+                   )
                , ""
                , wrapMarkdownBullet
                    78

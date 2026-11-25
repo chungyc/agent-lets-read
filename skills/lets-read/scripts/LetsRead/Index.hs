@@ -820,7 +820,7 @@ predictionIndexSpec =
   IndexSpec
     { isDomainDir = "predictions"
     , isDomainTitle = "Predictions"
-    , isChronIntro = "Use this index to browse predictions in chronological order by Arc, Chapter, and Chunk, including cross-arc resolutions of earlier predictions."
+    , isChronIntro = "Use this index to browse predictions in chronological order by Arc, Chapter, and Chunk, including still-active bets and cross-arc resolutions from earlier arcs."
     , isTopicIntro = "Use this inverted index to look up all active and resolved predictions associated with a character, faction, artifact, location, or mystery theme."
     , isItemIndex = prOriginChunk
     , isItemLastUpdated = \pr -> maybe (prOriginChunk pr) (max (prOriginChunk pr) . rmChunk) (predStoryResolutionMeta pr)
@@ -867,6 +867,22 @@ predictionIndexSpec =
           _ ->
             let firstInlineOrigin = minimum (map prOriginChunk inlinePreds)
                 inlineOriginFloor = min (lastCompletedEnd + 1) firstInlineOrigin
+                earlierActive =
+                  sortOn
+                    prOriginChunk
+                    [ pr
+                    | pr <- allPreds
+                    , prOriginChunk pr < inlineOriginFloor
+                    , isPredActive pr
+                    ]
+                earlierActiveSec =
+                  if null earlierActive
+                    then []
+                    else
+                      [ "## Earlier-Arc Active Predictions"
+                      , ""
+                      , T.intercalate "\n" (map renderPredSummaryBullet earlierActive)
+                      ]
                 resolvedPairs =
                   sortOn
                     (\(rm, pr) -> (rmChapterNumber rm, rmChunk rm, prOriginChunk pr))
@@ -876,13 +892,18 @@ predictionIndexSpec =
                     , Just rm <- [predStoryResolutionMeta pr]
                     , rmChunk rm >= inlineOriginFloor
                     ]
-             in case renderCrossArcResolutionBody resolvedPairs of
-                  Nothing -> []
-                  Just bodyTxt ->
-                    [ "## Earlier-Arc Predictions Resolved Here"
-                    , ""
-                    , bodyTxt
-                    ]
+                resolvedSec =
+                  case renderCrossArcResolutionBody resolvedPairs of
+                    Nothing -> []
+                    Just bodyTxt ->
+                      [ "## Earlier-Arc Predictions Resolved Here"
+                      , ""
+                      , bodyTxt
+                      ]
+             in case (earlierActiveSec, resolvedSec) of
+                  ([], rs) -> rs
+                  (as, []) -> as
+                  (as, rs) -> as ++ [""] ++ rs
     }
 
 collectSessionTopicCounts :: SessionState -> [(Text, Int)]

@@ -180,8 +180,40 @@ testRec3CallbackAndFactCheckAudits = withTempDir "rec3-callbacks" $ \tmp -> do
   promptTxt <- TIO.readFile promptPath
   let promptNorm = normWs promptTxt
   assertBool
-    "Rotated reader prompt highlights mandatory chunks/chunk_0006.md read"
-    ("chunks/chunk_0006.md" `T.isInfixOf` promptNorm && "BEFORE" `T.isInfixOf` promptNorm)
+    "Rotated reader prompt highlights mandatory chunks/chunk_0006.md and all three by_chronology.md reads"
+    ( "chunks/chunk_0006.md" `T.isInfixOf` promptNorm
+        && "chunks/by_chronology.md" `T.isInfixOf` promptNorm
+        && "entries/by_chronology.md" `T.isInfixOf` promptNorm
+        && "predictions/by_chronology.md" `T.isInfixOf` promptNorm
+        && "BEFORE" `T.isInfixOf` promptNorm
+    )
+  assertBool
+    "Reader prompt warns never to rely on memory.md or index summaries alone and not to force callbacks"
+    ( "never rely on `memory.md` or index summaries alone" `T.isInfixOf` promptNorm
+        && "never force callbacks" `T.isInfixOf` promptNorm
+    )
+
+  p1Path <- writeCurrentPromptFile tmp ((baseDummyState 12) {stCurrentIndex = 1}) (dummyChunk 1 1 1 1)
+  p1Norm <- normWs <$> TIO.readFile p1Path
+  assertBool
+    "Chunk 1 reader prompt omits chunk_0000.md and Cold-Start & Mid-Chapter Continuity section"
+    ( not ("chunk_0000.md" `T.isInfixOf` p1Norm)
+        && not ("### Cold-Start & Mid-Chapter Continuity" `T.isInfixOf` p1Norm)
+    )
+
+  pMidPath <-
+    writeCurrentPromptFile
+      tmp
+      ((baseDummyState 12) {stCurrentIndex = 3, stStoryRecords = take 2 priorRecs})
+      (dummyChunk 3 2 2 2)
+  pMidNorm <- normWs <$> TIO.readFile pMidPath
+  assertBool
+    "Mid-chapter non-rotated reader prompt mandates chunk_0002.md and conditionally includes by_chronology.md for newly spawned instances"
+    ( "mid-chapter split" `T.isInfixOf` pMidNorm
+        && "chunks/chunk_0002.md" `T.isInfixOf` pMidNorm
+        && "newly spawned conversation" `T.isInfixOf` pMidNorm
+        && "predictions/by_chronology.md" `T.isInfixOf` pMidNorm
+    )
   assertBool
     "Reader prompt highlights Bullet 1 updates and welcomes external canon"
     ("Core Premise, Timeline & Baseline Facts (Persistent)" `T.isInfixOf` promptNorm && "Connecting external canon" `T.isInfixOf` promptNorm)
@@ -222,12 +254,20 @@ testRec3CallbackAndFactCheckAudits = withTempDir "rec3-callbacks" $ \tmp -> do
 
   let auditReadPrev =
         auditSkippedPrev
-          { staReadFiles = ["current_chunk.md", "memory.md", "chunks/chunk_0006.md", "entries/chunk_0005.md"]
+          { staReadFiles =
+              [ "current_chunk.md"
+              , "memory.md"
+              , "chunks/chunk_0006.md"
+              , "chunks/by_chronology.md"
+              , "entries/by_chronology.md"
+              , "predictions/by_chronology.md"
+              , "entries/chunk_0005.md"
+              ]
           }
       (mPrev2, cbCnt2, warns2) = auditReaderToolUsage 7 True "Great chapter!" auditReadPrev
   assertEq "Rotated reader reading chunks/chunk_0006.md -> Just True" (Just True) mPrev2
-  assertEq "entries/chunk_0005.md is not miscounted as story chunk read" 1 cbCnt2
-  assertEq "Zero warnings when chunk_0006.md was read" 0 (length warns2)
+  assertEq "by_chronology.md and entries/chunk_0005.md are not miscounted as leaf story chunk reads" 1 cbCnt2
+  assertEq "Zero warnings when chunk_0006.md and cold-start indexes were read" 0 (length warns2)
 
   writeCurrentChunkFile (tmp </> "current_chunk.md") chk7 12 12
   let fcAuditNoPrior =

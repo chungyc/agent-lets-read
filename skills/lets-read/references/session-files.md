@@ -42,7 +42,11 @@ condensed summaries.
 
 Chronological and semantic topic indexes (along with `chunks/archive/`) of
 1-line `[Story]` summaries used to locate which `chunks/chunk_XXXX.md` file
-covers a character, faction, location, prop, or event.
+covers a character, faction, location, prop, or event. Treat 1-line `[Story]`,
+`[Entry]`, and `[Predicted]` index bullets strictly as orientation and
+navigation pointers—always call `read_file` on the leaf `chunks/chunk_XXXX.md`
+file before quoting, counting, or grounding a factual claim or
+`**Clue/Anomaly**` premise on an earlier chunk.
 
 ### Reader Working Notebook & Snapshots (`memory.md` & `archive/memory/`)
 
@@ -191,10 +195,11 @@ arc. When completed arc links exceed 25 nodes or 12 KB, intermediate
 
 `## Current & Recent Arc` lists every entry in the current unarchived arc inline
 by chapter (retaining at least the 5 most recent entries inline right after an
-arc boundary). In `predictions/by_chronology.md`, when predictions staked in an
-archived earlier arc are judged during the current arc window, they also appear
-inline under `## Earlier-Arc Predictions Resolved Here` grouped by resolution
-chapter.
+arc boundary). In `predictions/by_chronology.md`, any still-`ACTIVE` predictions
+staked in archived earlier arcs appear inline under
+`## Earlier-Arc Active Predictions`, and predictions staked in an archived
+earlier arc that were judged during the current arc window appear inline under
+`## Earlier-Arc Predictions Resolved Here` grouped by resolution chapter.
 
 ### Semantic Topic Index Tree (`<domain>/by_topic.md`)
 

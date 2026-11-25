@@ -15,11 +15,17 @@ All {{TOTAL_CHUNKS}} story chunks of *{{TITLE}}* have been read and
 - Pre-Pulled Reference Packet (mandatory read — verified story, entry,
   prediction, and canon excerpts): {{RESEARCH_FILE}}
 
-- Story Chunks Indices (`chunks/by_chronology.md` & `chunks/by_topic.md`,
-  on-demand `read_file`): {{CHUNKS_DIR}}
+- Story Chronological Index (mandatory read — arc & chapter progression):
+  {{CHUNKS_CHRON_FILE}}
 
-- Commentary Entries Indices (`entries/by_chronology.md` &
-  `entries/by_topic.md`, on-demand `read_file`): {{ENTRIES_DIR}}
+- Commentary Chronological Index (mandatory read — prior entries &
+  discussions): {{ENTRIES_CHRON_FILE}}
+
+- Story Chunks Directory & Topic Index (`chunks/by_topic.md`, on-demand
+  `read_file`): {{CHUNKS_DIR}}
+
+- Commentary Entries Directory & Topic Index (`entries/by_topic.md`,
+  on-demand `read_file`): {{ENTRIES_DIR}}
 
 - Predictions Indices (`predictions/by_chronology.md` &
   `predictions/by_topic.md`, on-demand `read_file`): {{PREDICTIONS_DIR}}
@@ -44,12 +50,14 @@ All {{TOTAL_CHUNKS}} story chunks of *{{TITLE}}* have been read and
 
 ### 1. Mandatory Reads & Pre-Writing Verification
 
-Read `memory.md`, `predictions/hall_of_fame.md`, and `current_research.md`
-first (applying any `## Persona & Style Critique` notes above silently, and
-using `current_research.md` selectively where relevant without forcing
-callbacks). Because your subagent instance may have rotated in late in the
-story, do **NOT** reconstruct earlier prediction wording or multi-chapter
-chronology from memory or fanon alone:
+Read `memory.md`, `predictions/hall_of_fame.md`, `current_research.md`,
+`chunks/by_chronology.md`, and `entries/by_chronology.md` in parallel first
+(applying any `## Persona & Style Critique` notes above silently, and using
+`current_research.md` and the chronological indexes selectively without
+forcing callbacks). Because your subagent instance may have rotated in late
+in the story, do **NOT** reconstruct earlier prediction wording or
+multi-chapter chronology from memory, 1-line index summaries, or fanon
+alone:
 
 - Check the **exact original `**Clue/Anomaly**` and `**Theory**` text** in
   `predictions/hall_of_fame.md` (or via `read_file` on
@@ -61,9 +69,10 @@ chronology from memory or fanon alone:
 - Cross-check **overall story chronology, elapsed-time spans, and baseline
   facts** against Bullet 1 (`Core Premise, Timeline & Baseline Facts
   (Persistent)`) of `memory.md` and `chunks/by_chronology.md` (calling
-  `read_file` on `chunks/chunk_XXXX.md` or `entries/chunk_XXXX.md` when
-  referencing specific earlier scenes). Never conflate a local timeframe from a
-  single scene with the overall span of the story.
+  `read_file` on `chunks/chunk_XXXX.md` or `entries/chunk_XXXX.md` whenever
+  quoting or citing specific earlier scene details not already verbatim in
+  `current_research.md`). Never conflate a local timeframe from a single
+  scene with the overall span of the story.
 
 ### 2. Persona & Voice
 
@@ -109,5 +118,6 @@ Write line 1 as `<!-- TOOLS: read_file(...) -->` followed by
 completion notice starting with
 `[SUBAGENT_DONE | Wrapup | blind-reader] wrote current_reader_response.md`
 followed by `[Tools: read_file(...)]` listing `memory.md`,
-`predictions/hall_of_fame.md`, `current_research.md`, and any other files read,
-with no tool calls.
+`predictions/hall_of_fame.md`, `current_research.md`,
+`chunks/by_chronology.md`, `entries/by_chronology.md`, and any other files
+read, with no tool calls.

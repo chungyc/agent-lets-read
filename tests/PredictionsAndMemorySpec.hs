@@ -564,6 +564,13 @@ testRec6LeadingEmphasisAndMarkdownFormatting = do
     assertBool
       "Wrapup prompt substitutes session-files.md reference path"
       ("session-files.md" `T.isInfixOf` wrapNoCritic && not ("{{SESSION_FILES_REF}}" `T.isInfixOf` wrapNoCritic))
+    assertBool
+      "Wrapup prompt mandates reading chunks/by_chronology.md and entries/by_chronology.md with zero leftover placeholders"
+      ( "chunks/by_chronology.md" `T.isInfixOf` wrapNoCritic
+          && "entries/by_chronology.md" `T.isInfixOf` wrapNoCritic
+          && not ("{{CHUNKS_CHRON_FILE}}" `T.isInfixOf` wrapNoCritic)
+          && not ("{{ENTRIES_CHRON_FILE}}" `T.isInfixOf` wrapNoCritic)
+      )
 
     refPath <- resolveSessionFilesRefPathIO
     hasRefFile <- doesFileExist refPath
@@ -917,6 +924,12 @@ testRec8CrossArcPredictionIndexesAndEchoGuard = withTempDir "rec8-cross-arc" $ \
     "L1_0001.md retains Arc 1 predictions 1..18 without an earlier-arc footer"
     ("[pred_0002]" `T.isInfixOf` l1Arc1 && not ("Earlier-Arc Predictions Resolved in This Arc" `T.isInfixOf` l1Arc1))
   assertBool
+    "by_chronology.md renders ## Earlier-Arc Active Predictions with still-active Arc 1 bets"
+    ( "## Earlier-Arc Active Predictions" `T.isInfixOf` chronArc2
+        && "[pred_0001]" `T.isInfixOf` chronArc2
+        && not ("\n\n\n" `T.isInfixOf` chronArc2)
+    )
+  assertBool
     "by_chronology.md renders ## Earlier-Arc Predictions Resolved Here"
     ("## Earlier-Arc Predictions Resolved Here" `T.isInfixOf` chronArc2)
   assertBool
@@ -926,8 +939,30 @@ testRec8CrossArcPredictionIndexesAndEchoGuard = withTempDir "rec8-cross-arc" $ \
     "Chunk 20 reversal of pred_0003 also appears inline in by_chronology.md"
     ("[pred_0003]" `T.isInfixOf` chronArc2 && "SUBVERTED Chk 0020" `T.isInfixOf` chronArc2)
   assertBool
-    "Cap-retired pred_0004 is excluded from Earlier-Arc Predictions Resolved Here"
+    "Cap-retired pred_0004 is excluded from Earlier-Arc Active and Resolved sections"
     (not ("[pred_0004]" `T.isInfixOf` chronArc2))
+
+  -- Also check when earlier-arc active bets exist with zero cross-arc resolutions
+  let arc1AllActiveOrRetired =
+        [ if i == 4 then pr4Retired else mkActivePred i ((i + 1) `div` 2) ["Harbor"] ("Open theory " <> T.pack (show i))
+        | i <- [1 .. 18]
+        ]
+      stArc2ActiveOnly =
+        (baseDummyState 45)
+          { stCurrentIndex = 20
+          , stPredictions = arc1AllActiveOrRetired ++ arc2Preds
+          }
+  syncPredictionsDirectory tmp stArc2ActiveOnly
+  chronArc2ActiveOnly <- TIO.readFile (tmp </> "predictions" </> "by_chronology.md")
+  assertBool
+    "by_chronology.md with earlier-arc active bets and 0 cross-arc resolutions omits Resolved section cleanly"
+    ( "## Earlier-Arc Active Predictions" `T.isInfixOf` chronArc2ActiveOnly
+        && "[pred_0001]" `T.isInfixOf` chronArc2ActiveOnly
+        && not ("[pred_0004]" `T.isInfixOf` chronArc2ActiveOnly)
+        && not ("## Earlier-Arc Predictions Resolved Here" `T.isInfixOf` chronArc2ActiveOnly)
+        && not ("\n\n\n" `T.isInfixOf` chronArc2ActiveOnly)
+    )
+  syncPredictionsDirectory tmp stArc2
 
   -- Advance into Arc 3 (Chunks 39..43, Ch. 20..22) so Arc 2 (Chunks 20..38) archives into L1_0002.md
   let arc2FullPreds =
@@ -1183,6 +1218,44 @@ testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> 
         && not ("- `- **[Predicted" `T.isInfixOf` fcDiscTxt)
         && not ("- `- **[Predicted" `T.isInfixOf` uDiscTxt)
     )
+  (_, fcDiscPath3) <- writeFactCheckDiscussionPromptFile tmp stRender ["- **[Peer Verification Query]** Check timeline."]
+  fcDiscNorm3 <- normWs <$> TIO.readFile fcDiscPath3
+  (_, uDiscPath3) <- writeUserDiscussionPromptFile tmp stRender "What about Pier 2?"
+  uDiscNorm3 <- normWs <$> TIO.readFile uDiscPath3
+  (_, uDiscPreWrapPath) <- writeUserDiscussionPromptFile tmp (stRender {stCurrentIndex = 10}) "Thoughts on the finale before wrapup?"
+  uDiscPreWrapNorm <- normWs <$> TIO.readFile uDiscPreWrapPath
+  createDirectoryIfMissing True (tmp </> "entries")
+  TIO.writeFile (tmp </> "entries" </> "wrapup.md") "## Final Wrapup\n\nRetrospective.\n"
+  (_, uDiscPostWrapPath) <- writeUserDiscussionPromptFile tmp (stRender {stCurrentIndex = 10}) "Final thoughts?"
+  uDiscPostWrapNorm <- normWs <$> TIO.readFile uDiscPostWrapPath
+  assertBool
+    "Chunk > 1 discussion prompts list Recorded Entry Under Discussion and cold-start by_chronology.md guidance"
+    ( "Recorded Entry Under Discussion (`entries/chunk_0003.md`)" `T.isInfixOf` fcDiscNorm3
+        && "Recorded Entry Under Discussion (`entries/chunk_0003.md`)" `T.isInfixOf` uDiscNorm3
+        && "chunks/by_chronology.md" `T.isInfixOf` fcDiscNorm3
+        && "entries/by_chronology.md" `T.isInfixOf` fcDiscNorm3
+        && "predictions/by_chronology.md" `T.isInfixOf` fcDiscNorm3
+        && "chunks/by_chronology.md" `T.isInfixOf` uDiscNorm3
+        && "predictions/by_chronology.md" `T.isInfixOf` uDiscNorm3
+    )
+  assertBool
+    "Pre-wrapup finale user discussion (Chunk N/N before entries/wrapup.md exists) references entries/chunk_0010.md + hall_of_fame.md and NOT entries/wrapup.md"
+    ( "entries/chunk_0010.md" `T.isInfixOf` uDiscPreWrapNorm
+        && "current_chunk.md" `T.isInfixOf` uDiscPreWrapNorm
+        && "predictions/hall_of_fame.md" `T.isInfixOf` uDiscPreWrapNorm
+        && not ("entries/wrapup.md" `T.isInfixOf` uDiscPreWrapNorm)
+    )
+  assertBool
+    "Post-wrapup user discussion (once entries/wrapup.md exists) references entries/wrapup.md and predictions/hall_of_fame.md"
+    ( "Recorded Entry Under Discussion (`entries/wrapup.md`)" `T.isInfixOf` uDiscPostWrapNorm
+        && "entries/wrapup.md" `T.isInfixOf` uDiscPostWrapNorm
+        && "predictions/hall_of_fame.md" `T.isInfixOf` uDiscPostWrapNorm
+        && not ("entries/chunk_0010.md" `T.isInfixOf` uDiscPostWrapNorm)
+        && not ("current_chunk.md" `T.isInfixOf` uDiscPostWrapNorm)
+    )
+  assertBool
+    "Chunk 1 discussion prompts omit by_chronology.md cold-start list"
+    (not ("by_chronology.md" `T.isInfixOf` fcDiscTxt) && not ("by_chronology.md" `T.isInfixOf` uDiscTxt))
 
   -- Chunk 4: cliffhanger fake-out reopening resets bet3 to PredStatusActive Nothing
   let (after4Reopen, _, _) =
