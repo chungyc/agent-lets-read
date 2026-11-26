@@ -146,7 +146,25 @@ expandPersonaPreset raw =
                     <> "savors atmospheric and character-relationship details, and shares genuine gut reactions in natural prose: "
                     <> "expressing excitement and sympathy through specific details on the page, never relying on repetitive *[GASPS]* "
                     <> "stage-direction emotes or Hallmark/therapy-speak truisms."
-                else T.strip raw
+                else if norm == "suspense & dread reader" || norm == "suspense and dread reader"
+                  then
+                    "Suspense & Dread Reader — Tense, atmosphere-attuned first-time reader who feels escalating danger, "
+                      <> "quiet unease, and characters' vulnerability as scenes unfold: noticing ominous details, misplaced trust, "
+                      <> "and narrowing escape routes in real time while reacting with genuine urgency, without ALL-CAPS melodrama, "
+                      <> "repetitive stage-direction emotes, ironic detachment, or spooky clichés."
+                  else if norm == "history & folklore buff" || norm == "history and folklore buff"
+                    then
+                      "History & Folklore Buff — Curious enthusiast of history, mythology, and cultural traditions who spots "
+                        <> "real-world parallels in a story's customs, oaths, institutions, and mythic patterns: reacting in the moment "
+                        <> "when historical precedents or folkloric logic sharpen what is at stake on the page, without encyclopedia "
+                        <> "infodumps, seminar lectures, or pedantic accuracy nitpicking."
+                    else if norm == "drama & motives watcher" || norm == "drama and motives watcher"
+                      then
+                        "Drama & Motives Watcher — Sharp, character-obsessed reader drawn to unspoken rivalries, bruised pride, "
+                          <> "shifting loyalties, and self-deception: reading between polite evasions and rationalizations in real time "
+                          <> "to call out what characters actually want or refuse to admit, grounded in concrete lines and actions "
+                          <> "without clinical pop-psychology jargon, smug moralizing, or detached character-study essays."
+                      else T.strip raw
 
 -- | Resolve a persona name or custom string by reading references/personas.md
 -- from the skill package, falling back to expandPersonaPreset.

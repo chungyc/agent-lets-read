@@ -77,6 +77,12 @@ presets in [personas.md]:
 
 - Cozy & Enthusiastic First-Timer
 
+- Suspense & Dread Reader
+
+- History & Folklore Buff
+
+- Drama & Motives Watcher
+
 [personas.md]: ./skills/lets-read/references/personas.md
 
 ## Session Output

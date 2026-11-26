@@ -10,6 +10,7 @@ import Data.List (isInfixOf)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import LetsRead.Chunker (buildChunksFromSource)
+import LetsRead.Prompts (expandPersonaPreset)
 import LetsRead.Types
   ( Chunk (..)
   , SessionState (..)
@@ -88,6 +89,21 @@ testVaultAndChunker = withTempDir "vault" $ \tmp -> do
   saveState sessDir st0
   stLoaded <- loadState sessDir
   assertEq "SessionState binary serialization round-trip" st0 stLoaded
+
+  forM_
+    [ ("Suspense & Dread Reader", "suspense and dread reader", "escalating danger, quiet unease")
+    , ("History & Folklore Buff", "history and folklore buff", "real-world parallels in a story's customs")
+    , ("Drama & Motives Watcher", "drama and motives watcher", "unspoken rivalries, bruised pride")
+    ]
+    $ \(presetName, altName, snippet) -> do
+      let expanded = expandPersonaPreset presetName
+      assertBool
+        ("expandPersonaPreset expands " ++ T.unpack presetName)
+        ((presetName <> " \x2014 ") `T.isPrefixOf` expanded && snippet `T.isInfixOf` expanded)
+      assertEq
+        ("expandPersonaPreset handles 'and' variant for " ++ T.unpack presetName)
+        expanded
+        (expandPersonaPreset altName)
 
 testRec1OrchestratorGuardrails :: Maybe FilePath -> IO ()
 testRec1OrchestratorGuardrails mBinPath = do
@@ -661,3 +677,26 @@ testRec1OrchestratorGuardrails mBinPath = do
         ( "### Reader Discussion" `T.isInfixOf` wrapupEntryTxt
             && T.pack postWrapMsg `T.isInfixOf` wrapupEntryTxt
         )
+
+      forM_
+        [ ("persona_suspense", "Suspense & Dread Reader", "suspense and dread reader")
+        , ("persona_history", "History & Folklore Buff", "history and folklore buff")
+        , ("persona_drama", "Drama & Motives Watcher", "drama and motives watcher")
+        ]
+        $ \(dirSlug, presetName, altName) -> do
+          let pSessDir = tmp </> dirSlug
+          (ecPInit, _, errPInit) <-
+            readProcessWithExitCode
+              binPath
+              ["init", srcPath, "--session", pSessDir, "--persona", T.unpack presetName]
+              ""
+          assertEq ("CLI init with preset " ++ T.unpack presetName ++ " exit 0 (" ++ errPInit ++ ")") ExitSuccess ecPInit
+          stPreset <- loadState pSessDir
+          assertEq
+            ("CLI init resolves " ++ T.unpack presetName ++ " via personas.md matching Prompts fallback")
+            (expandPersonaPreset presetName)
+            (stPersona stPreset)
+          assertEq
+            ("CLI init preset fallback matches 'and' variant for " ++ T.unpack presetName)
+            (expandPersonaPreset altName)
+            (stPersona stPreset)
