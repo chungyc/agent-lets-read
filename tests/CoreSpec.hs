@@ -362,10 +362,10 @@ testRec1OrchestratorGuardrails mBinPath = do
       pipelineTxt <- TIO.readFile (repoDir </> "skills" </> "lets-read" </> "references" </> "driver-pipeline.md")
       let (_, fromStep4Interactive) = T.breakOn "\n#### Interactive Mode\n" skillTxt
       assertBool
-        "SKILL.md delegates Interactive Mode and Batch Mode to lets-read-*-driver with lazy rotation and invoke_subagent fallback"
+        "SKILL.md delegates Interactive Mode and Batch Mode to lets-read-*-driver without linking driver-pipeline.md"
         ( "lets-read-interactive-driver" `T.isInfixOf` skillTxt
             && "lets-read-batch-driver" `T.isInfixOf` skillTxt
-            && "driver-pipeline.md" `T.isInfixOf` skillTxt
+            && not ("driver-pipeline.md" `T.isInfixOf` skillTxt)
             && "chunks_in_driver >= 8" `T.isInfixOf` skillTxt
             && "[DRIVER_DONE |" `T.isInfixOf` skillTxt
             && "invoke_subagent" `T.isInfixOf` fst (T.breakOn "\n#### Batch Mode\n" fromStep4Interactive)

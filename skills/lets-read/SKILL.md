@@ -2,13 +2,10 @@
 name: lets-read
 description: >-
   Conducts a spoiler-free, chapter-by-chapter or chunk-by-chunk "Let's Read"
-  liveblog of a story (.txt, .md, .html, .epub) using a Haskell gatekeeper, two
-  mode drivers (lets-read-interactive-driver and lets-read-batch-driver), and
-  seven isolated leaf subagents (lets-read-script-writer, lets-read-researcher,
-  lets-read-blind-reader, lets-read-prediction-judge, lets-read-fact-checker,
-  lets-read-commentary-critic, and lets-read-topic-curator). Use this skill
-  whenever the user asks for a Let's Read, liveblog reaction, unspoiled
-  first-time read, or incremental commentary on a story or book.
+  liveblog of a story (.txt, .md, .html, .epub) using a Haskell gatekeeper,
+  mode drivers, and isolated leaf subagents. Use this skill whenever the user
+  asks for a Let's Read, liveblog reaction, unspoiled first-time read, or
+  incremental commentary on a story or book.
 compatibility: >-
   Requires bash and GHC (Glasgow Haskell Compiler, presumed version 9.10.3; the
   Haskell code does not build on certain other GHC versions) with standard boot
@@ -19,30 +16,12 @@ compatibility: >-
 # Let's Read Skill (Spoiler-Free Architecture)
 
 This skill conducts an unspoiled **Let's Read** of a story or book in `.txt`,
-`.md`, `.markdown`, `.html`, or `.epub` format by combining a compiled **Haskell
-Gatekeeper** (`<skill_dir>/.bin/lets-read`, where `<skill_dir>` is the directory
-containing this `SKILL.md`) with two orchestrator **Mode Drivers** (sharing
-[driver-pipeline.md]) and seven isolated **Leaf Subagents** that exchange data
-strictly via `<session_dir>` files:
-
-- `lets-read-interactive-driver` (*Interactive Driver*, `Model: "inherit"`):
-  Executes strictly one interactive turn per request (`ADVANCE` for one chunk or
-  Final Wrapup, or `DISCUSS` for a user comment/question), keeping persistent
-  leaf subagents warm across turns while returning a 1-line `[DRIVER_DONE | ...]`
-  file pointer to this host.
-
-- `lets-read-batch-driver` (*Batch Driver*, `Model: "inherit"`): Autonomously
-  drives an assigned slice of ~7–8 chunks (plus Final Wrapup when finishing the
-  final chunk) and terminates its child leaf subagents via `kill_all` before
-  returning a 1-line `[DRIVER_DONE | Batch ...]` summary.
-
-- `lets-read-script-writer`, `lets-read-researcher`, `lets-read-blind-reader`,
-  `lets-read-prediction-judge`, `lets-read-fact-checker`,
-  `lets-read-commentary-critic`, and `lets-read-topic-curator`: Isolated leaf
-  subagents orchestrated exclusively by the active mode driver according to
-  [driver-pipeline.md].
-
-[driver-pipeline.md]: ./references/driver-pipeline.md
+`.md`, `.markdown`, `.html`, or `.epub` format. This top-level host initializes
+the compiled **Haskell Gatekeeper** (`<skill_dir>/.bin/lets-read`, where
+`<skill_dir>` is the directory containing this `SKILL.md`) and delegates all
+chunk reading, review, and discussion execution to `lets-read-interactive-driver`
+or `lets-read-batch-driver` (which coordinate the seven isolated `lets-read-*`
+leaf subagents via `<session_dir>` files).
 
 ## Mandatory Anti-Spoiler & Host Rules
 
@@ -76,15 +55,9 @@ asks for a custom chunk size.
   first).
 
 - Once `invoke_subagent` or `send_message` to a driver returns, immediately park
-  your turn with **ZERO tool calls**, outputting **only**:
-
-  ```text
-  [HOST_WAIT | <mode> | <action> | 0/1 idle | pending: <driver>]
-  ```
-
-  Wait until the driver's `[DRIVER_DONE | ...]` completion notice arrives before
-  proceeding. Never re-send duplicate notifications or poll with
-  `manage_subagents(Action: "list")`.
+  your turn with **ZERO tool calls** outputting **only** the step's
+  `[HOST_WAIT | ...]` line until `[DRIVER_DONE | ...]` arrives. Never re-send
+  duplicate notifications or poll with `manage_subagents(Action: "list")`.
 
 - When relaying `lets-read-blind-reader`'s commentary or discussion reply in
   chat, call `read_file` on `<session_dir>/entries/chunk_XXXX.md` (or
@@ -98,8 +71,7 @@ asks for a custom chunk size.
 
 In the main host conversation, use strictly `<skill_dir>/scripts/prepare.sh`,
 `<skill_dir>/.bin/lets-read` (`init`, `status`), `read_file`, `write_file`,
-`invoke_subagent`, `send_message`, and `manage_subagents` (plus
-`define_subagent` only for uninstalled checkouts). **Never** run `python`,
+`invoke_subagent`, `send_message`, and `manage_subagents`. **Never** run `python`,
 `python3`, `ls`, `cat`, `head`, `tail`, `find`, or `grep` to inspect
 `<session_dir>` or `state.json`. To check session state, run
 `<skill_dir>/.bin/lets-read status --session "<session_dir>"`.
@@ -161,57 +133,14 @@ Or inspect/resume an existing session:
 
 [prepare.sh]: ./scripts/prepare.sh
 
-### Step 3: Verify the Nine Subagents Are Available
+### Step 3: Verify the Mode Drivers Are Registered
 
-When the `lets-read` plugin is installed and enabled, all nine `lets-read-*`
-subagents are registered in `<subagents>`:
-
-- Mode Drivers (`EnableWriteTools: true`, `EnableSubagentTools: true`,
-  `EnableMCPTools: false` when defining from an uninstalled checkout):
-
-  - [lets-read-interactive-driver.md] (`Name: "lets-read-interactive-driver"`,
-    `Role: "Interactive Read-Through Driver"`, `Model: "inherit"`)
-
-  - [lets-read-batch-driver.md] (`Name: "lets-read-batch-driver"`,
-    `Role: "Batch Read-Through Driver"`, `Model: "inherit"`)
-
-- Leaf Subagents (`EnableWriteTools: true`, `EnableSubagentTools: false`,
-  `EnableMCPTools: false` when defining from an uninstalled checkout):
-
-  - [lets-read-script-writer.md] (`Name: "lets-read-script-writer"`,
-    `Role: "Unresearched Script Writer"`, `Model: "flash"`)
-
-  - [lets-read-researcher.md] (`Name: "lets-read-researcher"`,
-    `Role: "Continuity & Canon Researcher"`, `Model: "flash"`)
-
-  - [lets-read-blind-reader.md] (`Name: "lets-read-blind-reader"`,
-    `Role: "Blind Story Reader"`, `Model: "inherit"`)
-
-  - [lets-read-prediction-judge.md] (`Name: "lets-read-prediction-judge"`,
-    `Role: "Impartial Prediction Judge"`, `Model: "inherit"`)
-
-  - [lets-read-fact-checker.md] (`Name: "lets-read-fact-checker"`,
-    `Role: "Commentary Fact-Checker"`, `Model: "inherit"`)
-
-  - [lets-read-commentary-critic.md] (`Name: "lets-read-commentary-critic"`,
-    `Role: "Commentary Critic"`, `Model: "inherit"`)
-
-  - [lets-read-topic-curator.md] (`Name: "lets-read-topic-curator"`,
-    `Role: "Topic Index Curator"`, `Model: "flash_lite"`)
-
-If running from an uninstalled checkout where they do not yet appear in
-`<subagents>`, read each file under `agents/` and call `define_subagent` with
-the tool flags above.
-
-[lets-read-interactive-driver.md]: ../../agents/lets-read-interactive-driver.md
-[lets-read-batch-driver.md]: ../../agents/lets-read-batch-driver.md
-[lets-read-script-writer.md]: ../../agents/lets-read-script-writer.md
-[lets-read-researcher.md]: ../../agents/lets-read-researcher.md
-[lets-read-blind-reader.md]: ../../agents/lets-read-blind-reader.md
-[lets-read-prediction-judge.md]: ../../agents/lets-read-prediction-judge.md
-[lets-read-fact-checker.md]: ../../agents/lets-read-fact-checker.md
-[lets-read-commentary-critic.md]: ../../agents/lets-read-commentary-critic.md
-[lets-read-topic-curator.md]: ../../agents/lets-read-topic-curator.md
+Confirm `lets-read-interactive-driver` and `lets-read-batch-driver` appear in
+`<subagents>`. Both drivers spawn the `lets-read-*` leaf subagents in child
+conversations (which do not inherit parent `define_subagent` definitions), so if
+the `lets-read-*` subagents are missing from `<subagents>`, stop and ask the
+user to install and enable the `lets-read` plugin (`agy plugin install`) rather
+than calling `define_subagent`.
 
 ### Step 4: Driving the Session
 
