@@ -1,5 +1,5 @@
 ---
-name: script-writer
+name: lets-read-script-writer
 role: Unresearched Script Writer
 description: >-
   Stateless persona-matched draft reader that writes a spontaneous unresearched
@@ -116,11 +116,11 @@ earlier story moments, running gags, predictions, or external canon hooks.>
 
 Once `write_file` succeeds, immediately end your turn with **only a 1-line
 plain-text completion notice** using the exact `[SUBAGENT_DONE | <round> |
-script-writer]` prefix from `## Turn Output Contract` in `current_script_prompt.md`
-(`Chunk NNNN` or `Wrapup`), ending with the matching `[Tools: ...]` receipt tag
-(listing every session file read beyond `current_script_prompt.md` inside
-`read_file(...)`) and no tool calls:
+lets-read-script-writer]` prefix from `## Turn Output Contract` in
+`current_script_prompt.md` (`Chunk NNNN` or `Wrapup`), ending with the matching
+`[Tools: ...]` receipt tag (listing every session file read beyond
+`current_script_prompt.md` inside `read_file(...)`) and no tool calls:
 
 ```text
-[SUBAGENT_DONE | Chunk NNNN | script-writer] wrote current_script_response.md [Tools: read_file(current_chunk.md, memory.md, chunks/by_chronology.md, entries/by_chronology.md, chunks/chunk_XXXX.md)]
+[SUBAGENT_DONE | Chunk NNNN | lets-read-script-writer] wrote current_script_response.md [Tools: read_file(current_chunk.md, memory.md, chunks/by_chronology.md, entries/by_chronology.md, chunks/chunk_XXXX.md)]
 ```

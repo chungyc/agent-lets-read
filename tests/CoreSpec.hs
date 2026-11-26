@@ -112,19 +112,25 @@ testRec1OrchestratorGuardrails mBinPath = do
     Just binPath -> withTempDir "rec1-cli" $ \tmp -> do
       let repoDir = takeDirectory (takeDirectory (takeDirectory (takeDirectory binPath)))
           agentFiles =
-            [ ("script-writer.md", "model: flash")
-            , ("researcher.md", "model: flash")
-            , ("blind-reader.md", "model: inherit")
-            , ("prediction-judge.md", "model: inherit")
-            , ("fact-checker.md", "model: inherit")
-            , ("commentary-critic.md", "model: inherit")
-            , ("topic-curator.md", "model: flash_lite")
+            [ ("lets-read-script-writer.md", "name: lets-read-script-writer", "model: flash")
+            , ("lets-read-researcher.md", "name: lets-read-researcher", "model: flash")
+            , ("lets-read-blind-reader.md", "name: lets-read-blind-reader", "model: inherit")
+            , ("lets-read-prediction-judge.md", "name: lets-read-prediction-judge", "model: inherit")
+            , ("lets-read-fact-checker.md", "name: lets-read-fact-checker", "model: inherit")
+            , ("lets-read-commentary-critic.md", "name: lets-read-commentary-critic", "model: inherit")
+            , ("lets-read-topic-curator.md", "name: lets-read-topic-curator", "model: flash_lite")
             ]
-      forM_ agentFiles $ \(af, expectedModel) -> do
+          driverFiles =
+            [ ("lets-read-interactive-driver.md", "name: lets-read-interactive-driver")
+            , ("lets-read-batch-driver.md", "name: lets-read-batch-driver")
+            ]
+      forM_ agentFiles $ \(af, expectedName, expectedModel) -> do
         agentTxt <- TIO.readFile (repoDir </> "agents" </> af)
         assertBool
-          (af ++ " declares expected frontmatter " ++ T.unpack expectedModel)
-          (("\n" <> expectedModel <> "\n") `T.isInfixOf` agentTxt)
+          (af ++ " declares expected frontmatter " ++ T.unpack expectedName ++ " and " ++ T.unpack expectedModel)
+          ( ("\n" <> expectedName <> "\n") `T.isInfixOf` agentTxt
+              && ("\n" <> expectedModel <> "\n") `T.isInfixOf` agentTxt
+          )
         assertBool
           (af ++ " forbids run_command, edit_file, and send_message concisely")
           ("- Never call `run_command`, `edit_file`, or `send_message`." `T.isInfixOf` agentTxt)
@@ -132,6 +138,22 @@ testRec1OrchestratorGuardrails mBinPath = do
           (af ++ " omits misleading 'reply to the host' phrasing and uses [SUBAGENT_DONE |")
           ( not ("reply to the host" `T.isInfixOf` T.toLower agentTxt)
               && "[SUBAGENT_DONE |" `T.isInfixOf` agentTxt
+          )
+      forM_ driverFiles $ \(df, expectedName) -> do
+        drvTxt <- TIO.readFile (repoDir </> "agents" </> df)
+        assertBool
+          (df ++ " declares subagent/model/tools frontmatter and references driver-pipeline.md with [HOST_WAIT | and [DRIVER_DONE |")
+          ( ("\n" <> expectedName <> "\n") `T.isInfixOf` drvTxt
+              && "\nsubagent: true\n" `T.isInfixOf` drvTxt
+              && "\nmainAgent: false\n" `T.isInfixOf` drvTxt
+              && "\nmodel: inherit\n" `T.isInfixOf` drvTxt
+              && "run_command" `T.isInfixOf` drvTxt
+              && "invoke_subagent" `T.isInfixOf` drvTxt
+              && "send_message" `T.isInfixOf` drvTxt
+              && "manage_subagents" `T.isInfixOf` drvTxt
+              && "driver-pipeline.md" `T.isInfixOf` drvTxt
+              && "[HOST_WAIT |" `T.isInfixOf` drvTxt
+              && "[DRIVER_DONE |" `T.isInfixOf` drvTxt
           )
       let srcPath = tmp </> "mini.md"
           sessDir = tmp </> "session"
@@ -160,13 +182,13 @@ testRec1OrchestratorGuardrails mBinPath = do
       (ecNext, outNext, _) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
       assertEq "CLI next exit 0" ExitSuccess ecNext
       assertBool
-        "next unlocks awaiting_script with Model: \"flash\", [HOST_WAIT | Chunk 0001 | script], and [SUBAGENT_DONE | Chunk 0001 | script-writer]"
+        "next unlocks awaiting_script with Model: \"flash\", [HOST_WAIT | Chunk 0001 | script], and [SUBAGENT_DONE | Chunk 0001 | lets-read-script-writer]"
         ( "\"status\": \"awaiting_script\"" `isInfixOf` outNext
             && "\"is_wrapup\": false" `isInfixOf` outNext
             && "Model: \\\"flash\\\"" `isInfixOf` outNext
             && "ZERO tool calls" `isInfixOf` outNext
-            && "[HOST_WAIT | Chunk 0001 | script | 0/1 idle | pending: script-writer]" `isInfixOf` outNext
-            && "[SUBAGENT_DONE | Chunk 0001 | script-writer]" `isInfixOf` outNext
+            && "[HOST_WAIT | Chunk 0001 | script | 0/1 idle | pending: lets-read-script-writer]" `isInfixOf` outNext
+            && "[SUBAGENT_DONE | Chunk 0001 | lets-read-script-writer]" `isInfixOf` outNext
         )
 
       (ecStatScript, outStatScript, _) <- readProcessWithExitCode binPath ["status", "--session", sessDir] ""
@@ -203,9 +225,10 @@ testRec1OrchestratorGuardrails mBinPath = do
       (ecScr1, outScr1, errScr1) <- readProcessWithExitCode binPath ["script", "--session", sessDir] ""
       assertEq ("CLI script chunk 1/2 exit 0 (" ++ errScr1 ++ ")") ExitSuccess ecScr1
       assertBool
-        "script transitions to awaiting_research with Model: \"flash\" and reminds host to kill script-writer"
+        "script transitions to awaiting_research with Model: \"flash\" and reminds host to kill lets-read-script-writer"
         ( "\"status\": \"awaiting_research\"" `isInfixOf` outScr1
-            && "script-writer" `isInfixOf` outScr1
+            && "lets-read-script-writer" `isInfixOf` outScr1
+            && "lets-read-researcher" `isInfixOf` outScr1
             && "Model: \\\"flash\\\"" `isInfixOf` outScr1
             && "manage_subagents" `isInfixOf` outScr1
             && "ZERO tool calls" `isInfixOf` outScr1
@@ -238,8 +261,8 @@ testRec1OrchestratorGuardrails mBinPath = do
       (ecRes1, outRes1, errRes1) <- readProcessWithExitCode binPath ["research", "--session", sessDir] ""
       assertEq ("CLI research chunk 1/2 exit 0 (" ++ errRes1 ++ ")") ExitSuccess ecRes1
       assertBool
-        "research unlocks chunk for blind-reader and reminds host to kill one-shot researcher"
-        ("\"status\": \"unlocked\"" `isInfixOf` outRes1 && "ZERO tool calls" `isInfixOf` outRes1 && "Kill the finished one-shot researcher" `isInfixOf` outRes1)
+        "research unlocks chunk for lets-read-blind-reader and reminds host to kill one-shot lets-read-researcher"
+        ("\"status\": \"unlocked\"" `isInfixOf` outRes1 && "ZERO tool calls" `isInfixOf` outRes1 && "Kill the finished one-shot lets-read-researcher" `isInfixOf` outRes1)
       hasResPromptAfterRes <- doesFileExist (sessDir </> "current_research_prompt.md")
       hasResRespAfterRes <- doesFileExist researchResp
       hasResPacket1 <- doesFileExist (sessDir </> "current_research.md")
@@ -288,7 +311,7 @@ testRec1OrchestratorGuardrails mBinPath = do
       assertBool
         "record hint enforces concrete initial [HOST_WAIT | Chunk 0001 | judge | 0/3 idle] and [SUBAGENT_DONE | Chunk 0001 | <role>] with ZERO tool calls"
         ( "ZERO tool calls" `isInfixOf` outRec
-            && "[HOST_WAIT | Chunk 0001 | judge | 0/3 idle | pending: prediction-judge, fact-checker, commentary-critic]" `isInfixOf` outRec
+            && "[HOST_WAIT | Chunk 0001 | judge | 0/3 idle | pending: lets-read-prediction-judge, lets-read-fact-checker, lets-read-commentary-critic]" `isInfixOf` outRec
             && "[SUBAGENT_DONE | Chunk 0001 | <role>]" `isInfixOf` outRec
         )
       preJudgeEntry1Txt <- TIO.readFile (sessDir </> "entries" </> "chunk_0001.md")
@@ -308,15 +331,19 @@ testRec1OrchestratorGuardrails mBinPath = do
 
       (ecJ1, outJ1, _) <- readProcessWithExitCode binPath ["judge", "--session", sessDir] ""
       assertEq "CLI judge (no topic-curator) exit 0" ExitSuccess ecJ1
-      assertBool "judge without topic-curator omits topic-curator kill prompt" (not ("topic-curator" `isInfixOf` outJ1))
+      assertBool
+        "judge includes is_chapter_end and omits topic-curator kill prompt when unused"
+        ( "\"is_chapter_end\": true" `isInfixOf` outJ1
+            && not ("lets-read-topic-curator" `isInfixOf` outJ1)
+        )
 
       let topicResp = tmp </> "topic_resp.md"
       TIO.writeFile topicResp "=== TOPIC MERGES ===\n- NONE\n"
       (ecJ2, outJ2, _) <- readProcessWithExitCode binPath ["judge", "--session", sessDir, "--topic-response-file", topicResp] ""
       assertEq "CLI judge (with topic-curator) exit 0" ExitSuccess ecJ2
       assertBool
-        "judge with topic-curator reminds orchestrator to kill topic-curator"
-        ("topic-curator" `isInfixOf` outJ2 && "manage_subagents" `isInfixOf` outJ2)
+        "judge with topic-curator reminds orchestrator to kill lets-read-topic-curator"
+        ("lets-read-topic-curator" `isInfixOf` outJ2 && "manage_subagents" `isInfixOf` outJ2)
       rebuiltLogTxt <- TIO.readFile (sessDir </> "lets_read_log.md")
       assertBool
         "judge folds reader's proposed Clue/Anomaly -> Theory into a single Prediction Judge Rulings callout"
@@ -332,21 +359,26 @@ testRec1OrchestratorGuardrails mBinPath = do
         (all (\l -> "#" `T.isPrefixOf` l || T.length l <= 80) rebuiltHeaderLines)
 
       skillTxt <- TIO.readFile (repoDir </> "skills" </> "lets-read" </> "SKILL.md")
-      let (beforeStep5, fromStep5) = T.breakOn "### Step 5: Interactive Discussion vs. Batch Progression" skillTxt
+      pipelineTxt <- TIO.readFile (repoDir </> "skills" </> "lets-read" </> "references" </> "driver-pipeline.md")
+      let (_, fromStep4Interactive) = T.breakOn "\n#### Interactive Mode\n" skillTxt
       assertBool
-        "SKILL.md contains Step 5 heading"
-        (not (T.null fromStep5))
-      assertBool
-        "SKILL.md places Step 6 Final Wrapup after Step 5 rather than inside Step 4"
-        ( not ("Dedicated Final Wrapup Round" `T.isInfixOf` beforeStep5)
-            && "### Step 6: Dedicated Final Wrapup Round" `T.isInfixOf` fromStep5
-            && not ("Step 4.7" `T.isInfixOf` skillTxt)
+        "SKILL.md delegates Interactive Mode and Batch Mode to lets-read-*-driver with lazy rotation and invoke_subagent fallback"
+        ( "lets-read-interactive-driver" `T.isInfixOf` skillTxt
+            && "lets-read-batch-driver" `T.isInfixOf` skillTxt
+            && "driver-pipeline.md" `T.isInfixOf` skillTxt
+            && "chunks_in_driver >= 8" `T.isInfixOf` skillTxt
+            && "[DRIVER_DONE |" `T.isInfixOf` skillTxt
+            && "invoke_subagent" `T.isInfixOf` fst (T.breakOn "\n#### Batch Mode\n" fromStep4Interactive)
         )
-      let (_, fromStep6) = T.breakOn "### Step 6: Dedicated Final Wrapup Round" fromStep5
+      let (_, fromProc2) = T.breakOn "## Procedure 2: Final Wrapup Round" pipelineTxt
+          (_, fromProc3) = T.breakOn "## Procedure 3: User Discussion Turn" pipelineTxt
       assertBool
-        "SKILL.md Step 5 and Step 6 mention invoke_subagent fallback when no blind-reader is active"
-        ( "invoke_subagent" `T.isInfixOf` fst (T.breakOn "#### Batch Mode" fromStep5)
-            && "invoke_subagent" `T.isInfixOf` fromStep6
+        "driver-pipeline.md separates Reading Chunk, Final Wrapup, and User Discussion procedures with invoke_subagent fallbacks"
+        ( "## Procedure 1: Single Reading Chunk" `T.isInfixOf` pipelineTxt
+            && not (T.null fromProc2)
+            && not (T.null fromProc3)
+            && "invoke_subagent" `T.isInfixOf` fst (T.breakOn "## Procedure 3" fromProc2)
+            && "invoke_subagent" `T.isInfixOf` fromProc3
         )
 
       (ecNext2, _, errNext2) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
@@ -514,8 +546,10 @@ testRec1OrchestratorGuardrails mBinPath = do
           ""
       assertEq ("CLI discuss on chunk 2/2 exit 0 (" ++ errDisc ++ ")") ExitSuccess ecDisc
       assertBool
-        "user discuss on chunk N/N reports wrapup_pending true, is_finished false, and fact_check_discussion_resolved false"
-        ( "\"wrapup_pending\": true" `isInfixOf` outDisc
+        "user discuss on chunk N/N reports total_chunks, is_chapter_end true, wrapup_pending true, is_finished false, and fact_check_discussion_resolved false"
+        ( "\"total_chunks\": 2" `isInfixOf` outDisc
+            && "\"is_chapter_end\": true" `isInfixOf` outDisc
+            && "\"wrapup_pending\": true" `isInfixOf` outDisc
             && "\"is_finished\": false" `isInfixOf` outDisc
             && "\"fact_check_discussion_resolved\": false" `isInfixOf` outDisc
         )
@@ -581,8 +615,12 @@ testRec1OrchestratorGuardrails mBinPath = do
       (ecRecWrap, outRecWrap, errRecWrap) <- readProcessWithExitCode binPath ["record", "--session", sessDir] ""
       assertEq ("CLI record wrapup exit 0 (" ++ errRecWrap ++ ")") ExitSuccess ecRecWrap
       assertBool
-        "record wrapup emits wrapup_recorded and is_finished true"
-        ("\"status\": \"wrapup_recorded\"" `isInfixOf` outRecWrap && "\"is_finished\": true" `isInfixOf` outRecWrap)
+        "record wrapup emits wrapup_recorded, is_chapter_end false, wrapup_pending false, and is_finished true"
+        ( "\"status\": \"wrapup_recorded\"" `isInfixOf` outRecWrap
+            && "\"is_chapter_end\": false" `isInfixOf` outRecWrap
+            && "\"wrapup_pending\": false" `isInfixOf` outRecWrap
+            && "\"is_finished\": true" `isInfixOf` outRecWrap
+        )
 
       let postWrapMsg = "Any favorite scene looking back at the whole story?"
       (ecDPWrap, _, errDPWrap) <-
@@ -609,8 +647,10 @@ testRec1OrchestratorGuardrails mBinPath = do
           ""
       assertEq ("CLI post-wrapup discuss exit 0 (" ++ errDiscWrap ++ ")") ExitSuccess ecDiscWrap
       assertBool
-        "post-wrapup discuss reports is_finished true, wrapup_pending false, and omits unlock-next-chunk hint"
-        ( "\"is_finished\": true" `isInfixOf` outDiscWrap
+        "post-wrapup discuss reports total_chunks, is_chapter_end false, is_finished true, wrapup_pending false, and omits unlock-next-chunk hint"
+        ( "\"total_chunks\": 2" `isInfixOf` outDiscWrap
+            && "\"is_chapter_end\": false" `isInfixOf` outDiscWrap
+            && "\"is_finished\": true" `isInfixOf` outDiscWrap
             && "\"wrapup_pending\": false" `isInfixOf` outDiscWrap
             && "Post-wrapup discussion recorded!" `isInfixOf` outDiscWrap
             && not ("unlock the next chunk" `isInfixOf` outDiscWrap)

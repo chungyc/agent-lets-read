@@ -4,9 +4,9 @@
 -- Module      : LetsRead.Command.Judge
 -- Description : Handler and CLI parser for the 'judge' subcommand
 --
--- Collects and applies verdicts from @prediction-judge@, receipt-verified
--- queries from @fact-checker@, persona/style feedback from @commentary-critic@,
--- and optional taxonomy merges from @topic-curator@. Appends the Prediction
+-- Collects and applies verdicts from @lets-read-prediction-judge@, receipt-verified
+-- queries from @lets-read-fact-checker@, persona/style feedback from @lets-read-commentary-critic@,
+-- and optional taxonomy merges from @lets-read-topic-curator@. Appends the Prediction
 -- Referee callout to the recorded chunk entry, updates @critic_feedback.md@
 -- and @current_discussion_prompt.md@ (if fact-check peer queries were raised),
 -- and synchronizes all multi-layer indexes.
@@ -48,7 +48,8 @@ import LetsRead.Predictions
   , stripTrackerProposalCallout
   )
 import LetsRead.Types
-  ( PredictionRecord (..)
+  ( ChunkMeta (metaIsChapterEnd)
+  , PredictionRecord (..)
   , PredictionStatus (..)
   , SessionState (..)
   , jsonBool
@@ -78,21 +79,21 @@ data JudgeOptions = JudgeOptions
   { jdgSession :: FilePath
   -- ^ Target session directory.
   , jdgResponseFile :: Maybe FilePath
-  -- ^ Optional explicit path to the @prediction-judge@ response file.
+  -- ^ Optional explicit path to the @lets-read-prediction-judge@ response file.
   , jdgSubagentLog :: Maybe FilePath
-  -- ^ Optional path or conversation ID for the @prediction-judge@ transcript log.
+  -- ^ Optional path or conversation ID for the @lets-read-prediction-judge@ transcript log.
   , jdgFactCheckResponseFile :: Maybe FilePath
-  -- ^ Optional explicit path to the @fact-checker@ response file.
+  -- ^ Optional explicit path to the @lets-read-fact-checker@ response file.
   , jdgFactCheckLog :: Maybe FilePath
-  -- ^ Optional path or conversation ID for the @fact-checker@ transcript log.
+  -- ^ Optional path or conversation ID for the @lets-read-fact-checker@ transcript log.
   , jdgCriticResponseFile :: Maybe FilePath
-  -- ^ Optional explicit path to the @commentary-critic@ response file.
+  -- ^ Optional explicit path to the @lets-read-commentary-critic@ response file.
   , jdgCriticLog :: Maybe FilePath
-  -- ^ Optional path or conversation ID for the @commentary-critic@ transcript log.
+  -- ^ Optional path or conversation ID for the @lets-read-commentary-critic@ transcript log.
   , jdgTopicResponseFile :: Maybe FilePath
-  -- ^ Optional explicit path to the @topic-curator@ response file.
+  -- ^ Optional explicit path to the @lets-read-topic-curator@ response file.
   , jdgTopicLog :: Maybe FilePath
-  -- ^ Optional path or conversation ID for the @topic-curator@ transcript log.
+  -- ^ Optional path or conversation ID for the @lets-read-topic-curator@ transcript log.
   }
 
 -- | Parse CLI arguments for the @judge@ subcommand.
@@ -135,7 +136,7 @@ cmdJudge opts = do
       [sessionDir </> "current_judge_response.md"]
       (jdgSubagentLog opts)
       "Judge"
-      ( "Error: current_judge_response.md has not been written yet (prediction-judge is still running). Do not re-message working reviewers; end your turn with ZERO tool calls outputting a single '[HOST_WAIT | Chunk "
+      ( "Error: current_judge_response.md has not been written yet (lets-read-prediction-judge is still running). Do not re-message working reviewers; end your turn with ZERO tool calls outputting a single '[HOST_WAIT | Chunk "
           ++ curPadStr
           ++ " | judge | ...]' line with the current idle count and remaining roles, and wait for all '[SUBAGENT_DONE | Chunk "
           ++ curPadStr
@@ -148,7 +149,7 @@ cmdJudge opts = do
       [sessionDir </> "current_fact_check_response.md"]
       (jdgFactCheckLog opts)
       "Fact-check"
-      ( "Error: current_fact_check_response.md has not been written yet (fact-checker is still running). Do not re-message working reviewers; end your turn with ZERO tool calls outputting a single '[HOST_WAIT | Chunk "
+      ( "Error: current_fact_check_response.md has not been written yet (lets-read-fact-checker is still running). Do not re-message working reviewers; end your turn with ZERO tool calls outputting a single '[HOST_WAIT | Chunk "
           ++ curPadStr
           ++ " | judge | ...]' line with the current idle count and remaining roles, and wait for all '[SUBAGENT_DONE | Chunk "
           ++ curPadStr
@@ -162,7 +163,7 @@ cmdJudge opts = do
       [sessionDir </> "current_critic_response.md"]
       (jdgCriticLog opts)
       "Critic"
-      ( "Error: current_critic_response.md has not been written yet (commentary-critic is still running). Do not re-message working reviewers; end your turn with ZERO tool calls outputting a single '[HOST_WAIT | Chunk "
+      ( "Error: current_critic_response.md has not been written yet (lets-read-commentary-critic is still running). Do not re-message working reviewers; end your turn with ZERO tool calls outputting a single '[HOST_WAIT | Chunk "
           ++ curPadStr
           ++ " | judge | ...]' line with the current idle count and remaining roles, and wait for all '[SUBAGENT_DONE | Chunk "
           ++ curPadStr
@@ -187,11 +188,11 @@ cmdJudge opts = do
             if hasTopicPrompt
               then
                 die
-                  ( "Error: current_topic_response.md has not been written yet (current_topic_prompt.md exists). If topic-curator is already dispatched, do not re-message it—end your turn with ZERO tool calls outputting a single '[HOST_WAIT | Chunk "
+                  ( "Error: current_topic_response.md has not been written yet (current_topic_prompt.md exists). If lets-read-topic-curator is already dispatched, do not re-message it—end your turn with ZERO tool calls outputting a single '[HOST_WAIT | Chunk "
                       ++ curPadStr
                       ++ " | judge | ...]' line with the current idle count and remaining roles, and wait for '[SUBAGENT_DONE | Chunk "
                       ++ curPadStr
-                      ++ " | topic-curator]'; otherwise invoke topic-curator first."
+                      ++ " | lets-read-topic-curator]'; otherwise invoke lets-read-topic-curator first."
                   )
               else pure Nothing
       else pure Nothing
@@ -264,11 +265,12 @@ cmdJudge opts = do
 
   hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
   let storyChunksDone = curIdx >= stTotalChunks st
+      isChapEnd = maybe False metaIsChapterEnd (stCurrentMeta st)
       isFin = storyChunksDone && hasWrapup && not factCheckPending
       statusStr = if factCheckPending then "awaiting_fact_check_response" else "judged"
       topicKillPrefix =
         if usedTopicCurator
-          then "Kill the finished one-shot topic-curator subagent immediately via manage_subagents(Action: \"kill\")! "
+          then "Kill the finished one-shot lets-read-topic-curator subagent immediately via manage_subagents(Action: \"kill\")! "
           else ""
       nextHintBase
         | factCheckPending =
@@ -276,11 +278,11 @@ cmdJudge opts = do
               <> jsonInt factQueriesCount
               <> " peer verification query(ies) on Chunk "
               <> jsonInt curIdx
-              <> "! Send a 1-line notification via send_message to the active blind-reader subagent to read <session_dir>/current_discussion_prompt.md and write <session_dir>/current_discussion_response.md, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
+              <> "! Send a 1-line notification via send_message to the active lets-read-blind-reader subagent to read <session_dir>/current_discussion_prompt.md and write <session_dir>/current_discussion_response.md, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
               <> curPad
-              <> " (Discuss) | discuss | 0/1 idle | pending: blind-reader]'; once '[SUBAGENT_DONE | Chunk "
+              <> " (Discuss) | discuss | 0/1 idle | pending: lets-read-blind-reader]'; once '[SUBAGENT_DONE | Chunk "
               <> curPad
-              <> " (Discuss) | blind-reader]' arrives, run 'lets-read discuss --session <dir> --subagent-log <reader_log>' BEFORE running 'next'."
+              <> " (Discuss) | lets-read-blind-reader]' arrives, run 'lets-read discuss --session <dir> --subagent-log <reader_log>' BEFORE running 'next'."
         | storyChunksDone && not hasWrapup =
             "All story chunks have been judged! Run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round (or present the commentary to the user)."
         | otherwise =
@@ -292,6 +294,7 @@ cmdJudge opts = do
       , ("chunk_index", jsonInt curIdx)
       , ("total_chunks", jsonInt (stTotalChunks st))
       , ("remaining_chunks", jsonInt (stTotalChunks st - curIdx))
+      , ("is_chapter_end", jsonBool isChapEnd)
       , ("is_finished", jsonBool isFin)
       , ("wrapup_recorded", jsonBool hasWrapup)
       , ("wrapup_pending", jsonBool (storyChunksDone && not hasWrapup && not factCheckPending))

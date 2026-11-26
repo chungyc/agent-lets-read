@@ -4,8 +4,8 @@
 -- Module      : LetsRead.Command.Discuss
 -- Description : Handler and CLI parser for the 'discuss' subcommand
 --
--- Records a @blind-reader@ discussion reply—either resolving a pending
--- @fact-checker@ peer verification query or answering a user discussion
+-- Records a @lets-read-blind-reader@ discussion reply—either resolving a pending
+-- @lets-read-fact-checker@ peer verification query or answering a user discussion
 -- message—into the current chunk entry (or @entries/wrapup.md@), updates
 -- curated memory and predictions if revised, and refreshes all session indexes.
 module LetsRead.Command.Discuss
@@ -43,7 +43,8 @@ import LetsRead.Predictions
   , formatPredictionTrackerCallout
   )
 import LetsRead.Types
-  ( EntryDiscussionRecord (..)
+  ( ChunkMeta (..)
+  , EntryDiscussionRecord (..)
   , EntryLogRecord (..)
   , ParsedChunkSummaries (..)
   , PredictionRecord (..)
@@ -78,7 +79,7 @@ data DiscussOptions = DiscussOptions
   , discResponseFile :: Maybe FilePath
   -- ^ Optional explicit path to the structured discussion response file.
   , discSubagentLog :: Maybe FilePath
-  -- ^ Optional path or conversation ID for the @blind-reader@ transcript log.
+  -- ^ Optional path or conversation ID for the @lets-read-blind-reader@ transcript log.
   , discCommentaryFile :: Maybe FilePath
   -- ^ Optional path to a plain reply file (without delimiter sections).
   , discMemoryFile :: Maybe FilePath
@@ -133,11 +134,11 @@ cmdDiscuss opts = do
       [sessionDir </> "current_discussion_response.md"]
       (discSubagentLog opts)
       "Discussion"
-      ( "Error: current_discussion_response.md has not been written yet (blind-reader is still running). Do not re-message blind-reader; end your turn with ZERO tool calls outputting ONLY '[HOST_WAIT | "
+      ( "Error: current_discussion_response.md has not been written yet (lets-read-blind-reader is still running). Do not re-message lets-read-blind-reader; end your turn with ZERO tool calls outputting ONLY '[HOST_WAIT | "
           ++ discRoundStr
-          ++ " | discuss | 0/1 idle | pending: blind-reader]' and wait for '[SUBAGENT_DONE | "
+          ++ " | discuss | 0/1 idle | pending: lets-read-blind-reader]' and wait for '[SUBAGENT_DONE | "
           ++ discRoundStr
-          ++ " | blind-reader]' before running 'discuss'."
+          ++ " | lets-read-blind-reader]' before running 'discuss'."
       )
 
   when (T.null replyText) $
@@ -343,11 +344,12 @@ cmdDiscuss opts = do
 
   stillPending <- doesFileExist questionsPath
   let storyChunksDone = curIdx >= stTotalChunks st && stCurrentRecorded st' && stCurrentJudged st' && not stillPending
+      isChapEnd = not hasWrapup && maybe False metaIsChapterEnd (stCurrentMeta st)
       wrapupPending = storyChunksDone && not hasWrapup
       isFin = storyChunksDone && hasWrapup
       nextHint
         | stillPending =
-            "A Fact-Check Peer Query is still pending in current_discussion_prompt.md. Send it to blind-reader and run 'discuss' before 'next'."
+            "A Fact-Check Peer Query is still pending in current_discussion_prompt.md. Send it to lets-read-blind-reader and run 'discuss' before 'next'."
         | wrapupPending && isFactCheckDiscussion =
             "Fact-check discussion resolved and all story chunks are judged! Run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round (or present the commentary and discussion to the user)."
         | wrapupPending =
@@ -361,6 +363,8 @@ cmdDiscuss opts = do
     jsonObject
       [ ("status", jsonStr "discussed")
       , ("chunk_index", jsonInt curIdx)
+      , ("total_chunks", jsonInt (stTotalChunks st))
+      , ("is_chapter_end", jsonBool isChapEnd)
       , ("is_finished", jsonBool isFin)
       , ("wrapup_pending", jsonBool wrapupPending)
       , ("fact_check_discussion_resolved", jsonBool isFactCheckDiscussion)

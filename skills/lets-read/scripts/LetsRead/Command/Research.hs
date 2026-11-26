@@ -4,11 +4,11 @@
 -- Module      : LetsRead.Command.Research
 -- Description : Handler and CLI parser for the 'research' subcommand
 --
--- Audits @researcher@'s verbatim quotes and @search_web@ receipts against
+-- Audits @lets-read-researcher@'s verbatim quotes and @search_web@ receipts against
 -- primary session files and tool telemetry, immediately deletes
 -- @current_research_prompt.md@ and @current_research_response.md@ (removing the
 -- embedded script draft from disk), writes the neutral @current_research.md@
--- reference packet, and unlocks @current_prompt.md@ for @blind-reader@.
+-- reference packet, and unlocks @current_prompt.md@ for @lets-read-blind-reader@.
 module LetsRead.Command.Research
   ( ResearchOptions (..)
   , parseResearchArgs
@@ -60,9 +60,9 @@ data ResearchOptions = ResearchOptions
   { resOptSession :: FilePath
   -- ^ Target session directory.
   , resOptResponseFile :: Maybe FilePath
-  -- ^ Optional explicit path to the @researcher@ response file.
+  -- ^ Optional explicit path to the @lets-read-researcher@ response file.
   , resOptSubagentLog :: Maybe FilePath
-  -- ^ Optional path or conversation ID for the @researcher@ transcript log.
+  -- ^ Optional path or conversation ID for the @lets-read-researcher@ transcript log.
   }
 
 -- | Parse CLI arguments for the @research@ subcommand.
@@ -77,10 +77,10 @@ parseResearchArgs = go (ResearchOptions "" Nothing Nothing)
     go opts ("--subagent-log" : v : rest) = go opts {resOptSubagentLog = Just v} rest
     go _ (arg : _) = die ("Error: Unknown option: " ++ arg ++ "\n\n" ++ usage)
 
--- | Execute the @research@ subcommand: verify @researcher@'s notes against disk
+-- | Execute the @research@ subcommand: verify @lets-read-researcher@'s notes against disk
 -- and tool receipts, delete @current_research_prompt.md@ and
 -- @current_research_response.md@, write @current_research.md@ and
--- @current_prompt.md@ for @blind-reader@, update @state.json@, and emit JSON.
+-- @current_prompt.md@ for @lets-read-blind-reader@, update @state.json@, and emit JSON.
 cmdResearch :: ResearchOptions -> IO ()
 cmdResearch opts = do
   sessionDir <- canonicalizePath (resOptSession opts)
@@ -110,11 +110,11 @@ cmdResearch opts = do
           else sfsHasReaderPrompt sfs
 
   when (hasScriptPrompt && isNothing (resOptResponseFile opts)) $
-    die "Error: script-writer step has not completed yet (current_script_prompt.md is still active). Wait for script-writer and run 'lets-read script' before 'research'."
+    die "Error: lets-read-script-writer step has not completed yet (current_script_prompt.md is still active). Wait for lets-read-script-writer and run 'lets-read script' before 'research'."
 
   when (not hasResearchPrompt && isNothing (resOptResponseFile opts)) $ do
     when hasActiveReaderPrompt $
-      die "Error: 'research' has already completed and current_prompt.md is active. Wait for blind-reader and run 'lets-read record' next."
+      die "Error: 'research' has already completed and current_prompt.md is active. Wait for lets-read-blind-reader and run 'lets-read record' next."
     die "Error: No active current_research_prompt.md found. Run 'lets-read next' and 'lets-read script' first."
 
   let curPad = T.pack (padChunkNumber curIdx)
@@ -127,11 +127,11 @@ cmdResearch opts = do
       [researchRespPath]
       (resOptSubagentLog opts)
       "Researcher"
-      ( "Error: current_research_response.md has not been written yet (researcher is still running). Do not re-message researcher; end your turn with ZERO tool calls outputting ONLY '[HOST_WAIT | "
+      ( "Error: current_research_response.md has not been written yet (lets-read-researcher is still running). Do not re-message lets-read-researcher; end your turn with ZERO tool calls outputting ONLY '[HOST_WAIT | "
           ++ roundTagStr
-          ++ " | research | 0/1 idle | pending: researcher]' and wait for '[SUBAGENT_DONE | "
+          ++ " | research | 0/1 idle | pending: lets-read-researcher]' and wait for '[SUBAGENT_DONE | "
           ++ roundTagStr
-          ++ " | researcher]' before running 'research'."
+          ++ " | lets-read-researcher]' before running 'research'."
       )
 
   researchAudit <- resolveSubagentToolAudit (resOptSubagentLog opts) (Just rawResearch)
@@ -170,7 +170,7 @@ cmdResearch opts = do
           , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
           , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
           , ("orchestrator_rule", jsonStr orchestratorRuleText)
-          , ("next_step_hint", jsonStr "Kill the finished one-shot researcher immediately via manage_subagents(Action: \"kill\"), send a 1-line notification to blind-reader (via send_message, or invoke_subagent if no blind-reader is active) to read subagent_prompt_file and write reader_response_file for the Final Wrapup & Retrospective, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Wrapup | record | 0/1 idle | pending: blind-reader]'; once '[SUBAGENT_DONE | Wrapup | blind-reader]' arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'.")
+          , ("next_step_hint", jsonStr "Kill the finished one-shot lets-read-researcher immediately via manage_subagents(Action: \"kill\"), send a 1-line notification to lets-read-blind-reader (via send_message, or invoke_subagent if no lets-read-blind-reader is active) to read subagent_prompt_file and write reader_response_file for the Final Wrapup & Retrospective, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Wrapup | record | 0/1 idle | pending: lets-read-blind-reader]'; once '[SUBAGENT_DONE | Wrapup | lets-read-blind-reader]' arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'.")
           ]
     else do
       let activeCount = countActivePredictions (stPredictions st)
@@ -182,17 +182,17 @@ cmdResearch opts = do
           unlockHint =
             if shouldRotate
               then
-                "Kill the finished one-shot researcher via manage_subagents(Action: \"kill\"), and because rotate_reader_recommended is true, also kill the previous blind-reader via manage_subagents(Action: \"kill\") and invoke a fresh blind-reader with a 1-line notification to read subagent_prompt_file and write reader_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
+                "Kill the finished one-shot lets-read-researcher via manage_subagents(Action: \"kill\"), and because rotate_reader_recommended is true, also kill the previous lets-read-blind-reader via manage_subagents(Action: \"kill\") and invoke a fresh lets-read-blind-reader with a 1-line notification to read subagent_prompt_file and write reader_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
                   <> curPad
-                  <> " | record | 0/1 idle | pending: blind-reader]'; once '[SUBAGENT_DONE | Chunk "
+                  <> " | record | 0/1 idle | pending: lets-read-blind-reader]'; once '[SUBAGENT_DONE | Chunk "
                   <> curPad
-                  <> " | blind-reader]' arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'."
+                  <> " | lets-read-blind-reader]' arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'."
               else
-                "Kill the finished one-shot researcher immediately via manage_subagents(Action: \"kill\"), send a 1-line notification to blind-reader (via send_message, or invoke_subagent on Chunk 1 or if no blind-reader is active) to read subagent_prompt_file and write reader_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
+                "Kill the finished one-shot lets-read-researcher immediately via manage_subagents(Action: \"kill\"), send a 1-line notification to lets-read-blind-reader (via send_message, or invoke_subagent on Chunk 1 or if no lets-read-blind-reader is active) to read subagent_prompt_file and write reader_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
                   <> curPad
-                  <> " | record | 0/1 idle | pending: blind-reader]'; once '[SUBAGENT_DONE | Chunk "
+                  <> " | record | 0/1 idle | pending: lets-read-blind-reader]'; once '[SUBAGENT_DONE | Chunk "
                   <> curPad
-                  <> " | blind-reader]' arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'."
+                  <> " | lets-read-blind-reader]' arrives, run 'lets-read record --session <dir> --subagent-log <reader_log>'."
       TIO.putStrLn $
         jsonObject
           [ ("status", jsonStr "unlocked")
@@ -209,7 +209,6 @@ cmdResearch opts = do
           , ("research_prompt_deleted", jsonBool True)
           , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
           , ("rotate_reader_recommended", jsonBool shouldRotate)
-          , ("rotate_subagent_recommended", jsonBool shouldRotate)
           , ("orchestrator_rule", jsonStr orchestratorRuleText)
           , ("next_step_hint", jsonStr unlockHint)
           ]

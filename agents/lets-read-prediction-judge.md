@@ -1,5 +1,5 @@
 ---
-name: prediction-judge
+name: lets-read-prediction-judge
 role: Impartial Prediction Judge
 description: >-
   Impartial, unspoiled referee that evaluates active predictions against the
@@ -135,7 +135,7 @@ Each active prediction has the structure:
   unfolding or ambiguous).
 
 - Cite the exact event, non-occurrence after trigger completion, or revelation
-  in `current_chunk.md` that falsified the theory so `blind-reader` can react
+  in `current_chunk.md` that falsified the theory so `lets-read-blind-reader` can react
   on the next chunk.
 
 #### `SUBVERTED`
@@ -144,7 +144,7 @@ Each active prediction has the structure:
 - **[Predicted Chunk XXXX -> SUBVERTED Chunk NNNN]** <concise 1-line explanation of how the story's twist subverted the prediction, <= 200 chars>
 ```
 
-Use when `blind-reader` spotted a genuine clue or setup that `current_chunk.md`
+Use when `lets-read-blind-reader` spotted a genuine clue or setup that `current_chunk.md`
 paid off, **but** the story twisted the payoff in a surprise direction that
 falsified the literal `**Theory**` (rather than simply resolving it mundanely).
 
@@ -199,7 +199,7 @@ other hand"`). Whenever **any** defect below applies—including when a bet is
 earned and falsifiable yet stays *"fairly expected,"* *"heavily telegraphed,"*
 or *"a standard arc"*—rule **`-> NOT ADDED`** and prefix the exact bracket flag
 so `LetsRead` excludes it from the active predictions ledger and returns it to
-`blind-reader` as feedback only:
+`lets-read-blind-reader` as feedback only:
 
 ##### `[UNINTERESTING]`
 
@@ -298,6 +298,6 @@ for `> 10`):
 
 Once `write_file` succeeds, immediately end your turn with **only a 1-line
 plain-text completion notice** using the exact `[SUBAGENT_DONE | Chunk NNNN |
-prediction-judge]` line from `### Completion Notice` in `current_judge_prompt.md`
-and no tool calls (for example,
-`"[SUBAGENT_DONE | Chunk NNNN | prediction-judge] wrote current_judge_response.md"`).
+lets-read-prediction-judge]` line from `### Completion Notice` in
+`current_judge_prompt.md` and no tool calls (for example,
+`"[SUBAGENT_DONE | Chunk NNNN | lets-read-prediction-judge] wrote current_judge_response.md"`).

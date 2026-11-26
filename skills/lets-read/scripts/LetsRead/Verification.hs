@@ -459,7 +459,7 @@ renderCriticFeedbackMarkdown sessionDir curIdx isArchiveDoc verifiedLog peerQuer
       howToUseQuote =
         wrapMarkdownQuote
           78
-          "Read `commentary-critic`'s editorial review of your previous entry. Protect strengths marked `STRONG` in `What Worked`, retain editorial autonomy on `MINOR` notes in `What Didn't Work`, and treat `MODERATE` or `STRONG` notes in `What Didn't Work` as priority craft corrections that must visibly change how you write this chunk's commentary. Apply all adjustments silently—never apologize for, mention, or meta-reference style feedback inside `=== COMMENTARY ===`."
+          "Read `lets-read-commentary-critic`'s editorial review of your previous entry. Protect strengths marked `STRONG` in `What Worked`, retain editorial autonomy on `MINOR` notes in `What Didn't Work`, and treat `MODERATE` or `STRONG` notes in `What Didn't Work` as priority craft corrections that must visibly change how you write this chunk's commentary. Apply all adjustments silently—never apologize for, mention, or meta-reference style feedback inside `=== COMMENTARY ===`."
    in T.unlines $
         [ "# Persona & Style Critique Notes (Chunk " <> curPad <> ")"
         , ""
@@ -796,7 +796,7 @@ auditReaderToolUsageWithResearch curIdx shouldRotateRecommended researchChunkRef
               curPad = T.pack (padChunkNumber curIdx)
               prevPad = T.pack (padChunkNumber (curIdx - 1))
               rotWarn =
-                [ "- **[Callback & Continuity Audit (`LetsRead`)]** Newly rotated `blind-reader` on Chunk "
+                [ "- **[Callback & Continuity Audit (`LetsRead`)]** Newly rotated `lets-read-blind-reader` on Chunk "
                     <> curPad
                     <> " did not call `read_file` on `chunks/chunk_"
                     <> prevPad
@@ -1383,6 +1383,7 @@ isCompletionNoticeOnly raw =
    in not hasDelimiter
         && length ls <= 2
         && ( "[subagent_done |" `T.isPrefixOf` low
+               || "[driver_done |" `T.isPrefixOf` low
                || "[host_wait |" `T.isPrefixOf` low
                || "done:" `T.isPrefixOf` low
                || "completed:" `T.isPrefixOf` low

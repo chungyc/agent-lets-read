@@ -1,8 +1,8 @@
 # Final Wrapup & Retrospective Prompt — {{TITLE}}
 
 All {{TOTAL_CHUNKS}} story chunks of *{{TITLE}}* have been read and
-`prediction-judge` has rendered its final rulings! Please write your dedicated
-**Final Wrapup & Retrospective** for the Let's Read session.
+`lets-read-prediction-judge` has rendered its final rulings! Please write your
+dedicated **Final Wrapup & Retrospective** for the Let's Read session.
 
 ## Session Files & Context
 
@@ -63,8 +63,8 @@ alone:
   `predictions/hall_of_fame.md` (or via `read_file` on
   `predictions/pred_XXXX.md` / `predictions/by_chronology.md`) whenever
   discussing specific bets. Never embellish or rewrite what you originally
-  predicted using hindsight details from `prediction-judge`'s later outcome
-  summary.
+  predicted using hindsight details from `lets-read-prediction-judge`'s later
+  outcome summary.
 
 - Cross-check **overall story chronology, elapsed-time spans, and baseline
   facts** against Bullet 1 (`Core Premise, Timeline & Baseline Facts
@@ -85,8 +85,8 @@ automatically).
 
 #### Finale Verdicts & Immediate Aftermath
 
-React to `prediction-judge`'s final rulings from the last chunk (shown above if
-any resolved on the final chunk, and collected in
+React to `lets-read-prediction-judge`'s final rulings from the last chunk (shown
+above if any resolved on the final chunk, and collected in
 `predictions/hall_of_fame.md`).
 
 #### Whole-Story & Character Retrospective
@@ -116,8 +116,8 @@ Write line 1 as `<!-- TOOLS: read_file(...) -->` followed by
 `{{READER_RESPONSE_FILE}}` using `write_file` (`Overwrite: true`). Once
 `write_file` succeeds, immediately end your turn with ONLY a 1-line plain-text
 completion notice starting with
-`[SUBAGENT_DONE | Wrapup | blind-reader] wrote current_reader_response.md`
-followed by `[Tools: read_file(...)]` listing `memory.md`,
-`predictions/hall_of_fame.md`, `current_research.md`,
+`[SUBAGENT_DONE | Wrapup | lets-read-blind-reader]` followed by
+`wrote current_reader_response.md` and `[Tools: read_file(...)]` listing
+`memory.md`, `predictions/hall_of_fame.md`, `current_research.md`,
 `chunks/by_chronology.md`, `entries/by_chronology.md`, and any other files
 read, with no tool calls.

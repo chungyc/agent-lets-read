@@ -4,11 +4,11 @@
 -- Module      : LetsRead.Command.Script
 -- Description : Handler and CLI parser for the 'script' subcommand
 --
--- Ingests the stateless @script-writer@ subagent's unresearched draft reaction
+-- Ingests the stateless @lets-read-script-writer@ subagent's unresearched draft reaction
 -- (@current_script_response.md@), embeds the stripped draft into
--- @current_research_prompt.md@ for @researcher@, and immediately deletes both
+-- @current_research_prompt.md@ for @lets-read-researcher@, and immediately deletes both
 -- @current_script_prompt.md@ and @current_script_response.md@ so no script file
--- remains on disk to contaminate @blind-reader@.
+-- remains on disk to contaminate @lets-read-blind-reader@.
 module LetsRead.Command.Script
   ( ScriptOptions (..)
   , parseScriptArgs
@@ -48,9 +48,9 @@ data ScriptOptions = ScriptOptions
   { scrOptSession :: FilePath
   -- ^ Target session directory.
   , scrOptResponseFile :: Maybe FilePath
-  -- ^ Optional explicit path to the @script-writer@ response file.
+  -- ^ Optional explicit path to the @lets-read-script-writer@ response file.
   , scrOptSubagentLog :: Maybe FilePath
-  -- ^ Optional path or conversation ID for the @script-writer@ transcript log.
+  -- ^ Optional path or conversation ID for the @lets-read-script-writer@ transcript log.
   }
 
 -- | Parse CLI arguments for the @script@ subcommand.
@@ -65,7 +65,7 @@ parseScriptArgs = go (ScriptOptions "" Nothing Nothing)
     go opts ("--subagent-log" : v : rest) = go opts {scrOptSubagentLog = Just v} rest
     go _ (arg : _) = die ("Error: Unknown option: " ++ arg ++ "\n\n" ++ usage)
 
--- | Execute the @script@ subcommand: resolve @script-writer@'s draft, write
+-- | Execute the @script@ subcommand: resolve @lets-read-script-writer@'s draft, write
 -- @current_research_prompt.md@ with the stripped draft embedded, immediately
 -- delete @current_script_prompt.md@ and @current_script_response.md@, update
 -- @state.json@, and emit a JSON status summary.
@@ -98,9 +98,9 @@ cmdScript opts = do
 
   when (not hasScriptPrompt && isNothing (scrOptResponseFile opts)) $ do
     when hasResearchPrompt $
-      die "Error: 'script' has already completed and current_research_prompt.md is active. Wait for researcher and run 'lets-read research' next."
+      die "Error: 'script' has already completed and current_research_prompt.md is active. Wait for lets-read-researcher and run 'lets-read research' next."
     when hasActiveReaderPrompt $
-      die "Error: 'script' and 'research' have already completed and current_prompt.md is active. Wait for blind-reader and run 'lets-read record' next."
+      die "Error: 'script' and 'research' have already completed and current_prompt.md is active. Wait for lets-read-blind-reader and run 'lets-read record' next."
     die "Error: No active current_script_prompt.md found. Run 'lets-read next --session <dir>' first."
 
   let roundTag = if isWrapupTurn then "Wrapup" else "Chunk " <> T.pack (padChunkNumber curIdx)
@@ -112,11 +112,11 @@ cmdScript opts = do
       [scriptRespPath]
       (scrOptSubagentLog opts)
       "Script writer"
-      ( "Error: current_script_response.md has not been written yet (script-writer is still running). Do not re-message script-writer; end your turn with ZERO tool calls outputting ONLY '[HOST_WAIT | "
+      ( "Error: current_script_response.md has not been written yet (lets-read-script-writer is still running). Do not re-message lets-read-script-writer; end your turn with ZERO tool calls outputting ONLY '[HOST_WAIT | "
           ++ roundTagStr
-          ++ " | script | 0/1 idle | pending: script-writer]' and wait for '[SUBAGENT_DONE | "
+          ++ " | script | 0/1 idle | pending: lets-read-script-writer]' and wait for '[SUBAGENT_DONE | "
           ++ roundTagStr
-          ++ " | script-writer]' before running 'script'."
+          ++ " | lets-read-script-writer]' before running 'script'."
       )
 
   let strippedDraft = T.strip (stripToolReceiptComments rawScript)
@@ -136,11 +136,11 @@ cmdScript opts = do
   saveState sessionDir st
 
   let dispatchResearcherHint =
-        "Kill the finished one-shot script-writer immediately via manage_subagents(Action: \"kill\"), invoke a fresh one-shot researcher subagent via invoke_subagent (Model: \"flash\") with a 1-line notification to read research_prompt_file and write research_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | "
+        "Kill the finished one-shot lets-read-script-writer immediately via manage_subagents(Action: \"kill\"), invoke a fresh one-shot lets-read-researcher subagent via invoke_subagent (Model: \"flash\") with a 1-line notification to read research_prompt_file and write research_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | "
           <> roundTag
-          <> " | research | 0/1 idle | pending: researcher]'; once '[SUBAGENT_DONE | "
+          <> " | research | 0/1 idle | pending: lets-read-researcher]'; once '[SUBAGENT_DONE | "
           <> roundTag
-          <> " | researcher]' arrives, run 'lets-read research --session <dir> --subagent-log <research_log>'."
+          <> " | lets-read-researcher]' arrives, run 'lets-read research --session <dir> --subagent-log <research_log>'."
 
   TIO.putStrLn $
     jsonObject

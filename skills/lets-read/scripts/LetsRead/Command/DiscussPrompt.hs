@@ -5,7 +5,7 @@
 -- Description : Handler and CLI parser for the 'discuss-prompt' subcommand
 --
 -- Prepares @current_discussion_prompt.md@ and @last_user_message.md@ in the
--- session directory so the @blind-reader@ subagent can respond to a user
+-- session directory so the @lets-read-blind-reader@ subagent can respond to a user
 -- question or comment on the current chunk (or post-wrapup).
 module LetsRead.Command.DiscussPrompt
   ( DiscussPromptOptions (..)
@@ -91,11 +91,11 @@ cmdDiscussPrompt opts = do
   hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
   let discRoundTag = if hasWrapup then "Wrapup (Discuss)" else "Chunk " <> T.pack (padChunkNumber curIdx) <> " (Discuss)"
       discHint =
-        "Send a 1-line notification to blind-reader (via send_message, or invoke_subagent if no blind-reader is active) to read discussion_prompt_file and write discussion_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | "
+        "Send a 1-line notification to lets-read-blind-reader (via send_message, or invoke_subagent if no lets-read-blind-reader is active) to read discussion_prompt_file and write discussion_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | "
           <> discRoundTag
-          <> " | discuss | 0/1 idle | pending: blind-reader]'; once '[SUBAGENT_DONE | "
+          <> " | discuss | 0/1 idle | pending: lets-read-blind-reader]'; once '[SUBAGENT_DONE | "
           <> discRoundTag
-          <> " | blind-reader]' arrives, run 'lets-read discuss --session <dir> --user-file <user_file> --subagent-log <reader_log>'."
+          <> " | lets-read-blind-reader]' arrives, run 'lets-read discuss --session <dir> --user-file <user_file> --subagent-log <reader_log>'."
   TIO.putStrLn $
     jsonObject
       [ ("status", jsonStr "discussion_prompt_ready")

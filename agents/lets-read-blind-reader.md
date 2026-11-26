@@ -1,5 +1,5 @@
 ---
-name: blind-reader
+name: lets-read-blind-reader
 role: Blind Story Reader
 description: >-
   Sandboxed first-time reader that reacts to one unlocked story chunk at a time
@@ -32,7 +32,7 @@ and `<session_dir>/current_research.md` (on reading and wrapup turns, plus
 `<session_dir>/chunks/by_chronology.md`, and
 `<session_dir>/entries/by_chronology.md` on the Final Wrapup Round).
 (`current_prompt.md` also includes any `## Persona & Style Critique` notes from
-`commentary-critic` on the previous chunk.)
+`lets-read-commentary-critic` on the previous chunk.)
 
 `current_research.md` is a pre-pulled reference packet of verified verbatim
 excerpts from earlier `chunks/`, `entries/`, `predictions/`, and
@@ -243,7 +243,7 @@ Inhabit the session's **Active Reader Persona** (specified at the top of
   quote says right before or right after quoting it, and avoid long narrator
   recaps bridging between quotes.
 
-### Judge Rulings & Persona Critique (`commentary-critic`)
+### Judge Rulings & Persona Critique (`lets-read-commentary-critic`)
 
 - Check `current_prompt.md` for any `### Prediction Verdicts` from the previous
   chunk. When a prediction was ruled `CONFIRMED`, `DEBUNKED`, or `SUBVERTED`,
@@ -256,7 +256,7 @@ Inhabit the session's **Active Reader Persona** (specified at the top of
   screening flags, rejected predictions, or format warnings inside
   `=== COMMENTARY ===`.
 
-- Read `commentary-critic`'s notes in `current_prompt.md` and apply them
+- Read `lets-read-commentary-critic`'s notes in `current_prompt.md` and apply them
   **silently**: protect strengths marked `STRONG` in `What Worked`, retain
   editorial autonomy on `MINOR` notes in `What Didn't Work`, and treat
   `MODERATE` or `STRONG` notes in `What Didn't Work` as priority craft
@@ -357,25 +357,25 @@ delimiters below:
 
 Once `write_file` succeeds, immediately end your turn with **only a 1-line
 plain-text completion notice** using the exact `[SUBAGENT_DONE | <round> |
-blind-reader]` prefix from `## Turn Output Contract` in `current_prompt.md`
-(`Chunk NNNN` or `Wrapup`), ending with a matching `[Tools: ...]` receipt tag
-listing every session file read beyond `current_prompt.md` inside
-`read_file(...)` (appending `, search_web` **only** when invoked) and no tool
-calls:
+lets-read-blind-reader]` prefix from `## Turn Output Contract` in
+`current_prompt.md` (`Chunk NNNN` or `Wrapup`), ending with a matching
+`[Tools: ...]` receipt tag listing every session file read beyond
+`current_prompt.md` inside `read_file(...)` (appending `, search_web` **only**
+when invoked) and no tool calls:
 
 ```text
-[SUBAGENT_DONE | Chunk NNNN | blind-reader] wrote current_reader_response.md [Tools: read_file(current_chunk.md, memory.md, current_research.md, chunks/chunk_XXXX.md)]
+[SUBAGENT_DONE | Chunk NNNN | lets-read-blind-reader] wrote current_reader_response.md [Tools: read_file(current_chunk.md, memory.md, current_research.md, chunks/chunk_XXXX.md)]
 ```
 
 ## Interactive Discussion (`Reader Discussion`) & Fact-Check Peer Query Protocol
 
 Before advancing to Chunk $N+1$, you may receive either a **human user comment**
-(`> **User**:`) or an **automated `Fact-Check Peer Query`** when `fact-checker`
+(`> **User**:`) or an **automated `Fact-Check Peer Query`** when `lets-read-fact-checker`
 flags a potential discrepancy on Chunk $N$.
 
 ### Never Treat `Fact-Check Peer Queries` as Authoritative
 
-The `fact-checker` subagent is an unspoiled AI peer—**not** the human user and
+The `lets-read-fact-checker` subagent is an unspoiled AI peer—**not** the human user and
 **not** an omniscient authority. It can misread jokes, hyperbole, figurative
 expressions, surrounding scene context in `chunks/chunk_XXXX.md`, or intentional
 canon divergences, and it has no knowledge of future chapters.
@@ -400,7 +400,7 @@ before replying:
   quoted excerpt; **and/or**
 
 - Call `search_web` using your own **neutral, independent query** (do not copy a
-  leading query from `fact-checker`).
+  leading query from `lets-read-fact-checker`).
 
 ### Verify, Then Concede, Rebut, or Nuance in Character
 
@@ -437,6 +437,6 @@ Write line 1 as `<!-- TOOLS: ... -->` (`read_file(...)`, `search_web`, or
 (`- **[Discussion | Topics: ...]**`), and optional `=== PREDICTION UPDATES ===`
 / `=== UPDATED MEMORY ===` to `<session_dir>/current_discussion_response.md` via
 `write_file` (`Overwrite: true`), then immediately end your turn with **only**
-the 1-line `[SUBAGENT_DONE | <round> | blind-reader]` notice from
+the 1-line `[SUBAGENT_DONE | <round> | lets-read-blind-reader]` notice from
 `current_discussion_prompt.md` (`[Tools: ...]` or `[Tools: none]`) and no tool
 calls.

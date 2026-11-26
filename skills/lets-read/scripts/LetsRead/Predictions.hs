@@ -563,7 +563,7 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
 
       selfJudgedAuditBlocks =
         [ renderTagFormatAuditBlock
-            "Self-judging predictions (`CONFIRMED`, `DEBUNKED`, `SUBVERTED`) is handled exclusively by the `prediction-judge` subagent; `blind-reader` must not emit resolution verdicts in `=== PREDICTION UPDATES ===`."
+            "Self-judging predictions (`CONFIRMED`, `DEBUNKED`, `SUBVERTED`) is handled exclusively by the `lets-read-prediction-judge` subagent; `lets-read-blind-reader` must not emit resolution verdicts in `=== PREDICTION UPDATES ===`."
             (ppRawLine r)
             ( "Remove `CONFIRMED` / `DEBUNKED` / `SUBVERTED` lines from `=== PREDICTION UPDATES ===`. Only output your 1 new prediction (`- **[Predicted Chunk "
                 <> nextStr
@@ -574,7 +574,7 @@ auditAndApplyPredictionUpdates curIdx totalChunks chapNum chapTitle partNum part
 
       strayRetireAuditBlocks =
         [ renderTagFormatAuditBlock
-            "10-prediction cap retirement (`RETIRED`) is handled automatically by `prediction-judge`; `blind-reader` should not emit `RETIRED` lines in `=== PREDICTION UPDATES ===`."
+            "10-prediction cap retirement (`RETIRED`) is handled automatically by `lets-read-prediction-judge`; `lets-read-blind-reader` should not emit `RETIRED` lines in `=== PREDICTION UPDATES ===`."
             (ppRawLine r)
             ( "Submit only your 1 new prediction (`- **[Predicted Chunk "
                 <> nextStr
@@ -1044,7 +1044,7 @@ applyJudgeVerdictsWithFeedback curIdx (chapNum, chapTitle, partNum, partsTotal) 
       reopenedLines =
         [ "- **[Predicted Chunk "
             <> T.pack (padChunkNumber (prOriginChunk pr))
-            <> " -> ACTIVE (Cliffhanger Fake-Out Reversal)]** Restored to active status by `prediction-judge`."
+            <> " -> ACTIVE (Cliffhanger Fake-Out Reversal)]** Restored to active status by `lets-read-prediction-judge`."
         | pr <- finalRecords
         , prOriginChunk pr `elem` reopenedOrigins
         ]

@@ -4,10 +4,10 @@
 -- Module      : LetsRead.Command.Record
 -- Description : Handler and CLI parser for the 'record' subcommand
 --
--- Records the blind-reader's commentary, chunk summaries, prediction proposals,
+-- Records the lets-read-blind-reader's commentary, chunk summaries, prediction proposals,
 -- and curated memory updates for the currently unlocked chunk (or the Final
--- Wrapup & Retrospective turn). Runs the deterministic style linter and writes the prompt files for @prediction-judge@,
--- @fact-checker@, @commentary-critic@, and (when triggered) @topic-curator@.
+-- Wrapup & Retrospective turn). Runs the deterministic style linter and writes the prompt files for @lets-read-prediction-judge@,
+-- @lets-read-fact-checker@, @lets-read-commentary-critic@, and (when triggered) @lets-read-topic-curator@.
 module LetsRead.Command.Record
   ( RecordOptions (..)
   , parseRecordArgs
@@ -90,7 +90,7 @@ data RecordOptions = RecordOptions
   , recResponseFile :: Maybe FilePath
   -- ^ Optional explicit path to the structured reader response file.
   , recSubagentLog :: Maybe FilePath
-  -- ^ Optional path or conversation ID for the @blind-reader@ transcript log.
+  -- ^ Optional path or conversation ID for the @lets-read-blind-reader@ transcript log.
   , recCommentaryFile :: Maybe FilePath
   -- ^ Optional path to a plain commentary file (without delimiter sections).
   , recMemoryFile :: Maybe FilePath
@@ -125,11 +125,11 @@ cmdRecord opts = do
 
   hasScriptPrompt <- doesFileExist (sessionDir </> "current_script_prompt.md")
   when hasScriptPrompt $
-    die "Error: script-writer step has not completed yet (current_script_prompt.md is still active). Run 'lets-read script' and 'lets-read research' before 'record'."
+    die "Error: lets-read-script-writer step has not completed yet (current_script_prompt.md is still active). Run 'lets-read script' and 'lets-read research' before 'record'."
 
   hasResearchPrompt <- doesFileExist (sessionDir </> "current_research_prompt.md")
   when hasResearchPrompt $
-    die "Error: researcher step has not completed yet (current_research_prompt.md is still active). Run 'lets-read research' before 'record'."
+    die "Error: lets-read-researcher step has not completed yet (current_research_prompt.md is still active). Run 'lets-read research' before 'record'."
 
   let isWrapupTurn = curIdx >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st
       curPad = T.pack (padChunkNumber curIdx)
@@ -142,11 +142,11 @@ cmdRecord opts = do
       [sessionDir </> "current_reader_response.md"]
       (recSubagentLog opts)
       "Reader"
-      ( "Error: current_reader_response.md has not been written yet (blind-reader is still running). Do not re-message blind-reader; end your turn with ZERO tool calls outputting ONLY '[HOST_WAIT | "
+      ( "Error: current_reader_response.md has not been written yet (lets-read-blind-reader is still running). Do not re-message lets-read-blind-reader; end your turn with ZERO tool calls outputting ONLY '[HOST_WAIT | "
           ++ roundTagStr
-          ++ " | record | 0/1 idle | pending: blind-reader]' and wait for '[SUBAGENT_DONE | "
+          ++ " | record | 0/1 idle | pending: lets-read-blind-reader]' and wait for '[SUBAGENT_DONE | "
           ++ roundTagStr
-          ++ " | blind-reader]' before running 'record'."
+          ++ " | lets-read-blind-reader]' before running 'record'."
       )
 
   when (T.null commText) $
@@ -209,8 +209,10 @@ cmdRecord opts = do
           , ("chunk_index", jsonInt curIdx)
           , ("total_chunks", jsonInt (stTotalChunks st))
           , ("remaining_chunks", jsonInt 0)
+          , ("is_chapter_end", jsonBool False)
           , ("is_finished", jsonBool True)
           , ("wrapup_recorded", jsonBool True)
+          , ("wrapup_pending", jsonBool False)
           , ("entry_file", jsonStr (T.pack wrapupFile))
           , ("wrapup_file", jsonStr (T.pack wrapupFile))
           , ("hall_of_fame_file", jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")))
@@ -391,15 +393,15 @@ cmdRecord opts = do
           nextHint =
             if curateTopics
               then
-                "Notify prediction-judge, fact-checker, commentary-critic (Model: \"inherit\" when invoking), and one-shot topic-curator (Model: \"flash_lite\") in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
+                "Notify lets-read-prediction-judge, lets-read-fact-checker, lets-read-commentary-critic (Model: \"inherit\" when invoking), and one-shot lets-read-topic-curator (Model: \"flash_lite\") in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
                   <> curPad
-                  <> " | judge | 0/4 idle | pending: prediction-judge, fact-checker, commentary-critic, topic-curator]' (updating the idle count and pending list on intermediate wakeups) until ALL 4 '[SUBAGENT_DONE | Chunk "
+                  <> " | judge | 0/4 idle | pending: lets-read-prediction-judge, lets-read-fact-checker, lets-read-commentary-critic, lets-read-topic-curator]' (updating the idle count and pending list on intermediate wakeups) until ALL 4 '[SUBAGENT_DONE | Chunk "
                   <> curPad
                   <> " | <role>]' notices arrive; then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log> --topic-log <topic_log>'."
               else
-                "Notify prediction-judge, fact-checker, and commentary-critic (Model: \"inherit\" when invoking) in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
+                "Notify lets-read-prediction-judge, lets-read-fact-checker, and lets-read-commentary-critic (Model: \"inherit\" when invoking) in parallel with 1-line messages to read their prompt files and write their current_*_response.md files, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
                   <> curPad
-                  <> " | judge | 0/3 idle | pending: prediction-judge, fact-checker, commentary-critic]' (updating the idle count and pending list on intermediate wakeups) until ALL 3 '[SUBAGENT_DONE | Chunk "
+                  <> " | judge | 0/3 idle | pending: lets-read-prediction-judge, lets-read-fact-checker, lets-read-commentary-critic]' (updating the idle count and pending list on intermediate wakeups) until ALL 3 '[SUBAGENT_DONE | Chunk "
                   <> curPad
                   <> " | <role>]' notices arrive; then run 'lets-read judge --session <dir> --subagent-log <judge_log> --fact-check-log <fact_check_log> --critic-log <critic_log>'."
       TIO.putStrLn $

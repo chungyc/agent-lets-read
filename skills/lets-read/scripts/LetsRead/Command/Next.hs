@@ -95,7 +95,7 @@ cmdNext rawSessionDir forceFlag = do
         die $
           "Error: Chunk "
             ++ show curIdx
-            ++ " is already unlocked and awaiting script-writer. "
+            ++ " is already unlocked and awaiting lets-read-script-writer. "
             ++ "Run 'script', 'research', 'record', and 'judge' first (or pass --force to override)."
       else
         if hasResearchPrompt
@@ -103,7 +103,7 @@ cmdNext rawSessionDir forceFlag = do
             die $
               "Error: Chunk "
                 ++ show curIdx
-                ++ " is awaiting researcher. "
+                ++ " is awaiting lets-read-researcher. "
                 ++ "Run 'research', 'record', and 'judge' first (or pass --force to override)."
           else
             die $
@@ -116,7 +116,7 @@ cmdNext rawSessionDir forceFlag = do
     die $
       "Error: Chunk "
         ++ show curIdx
-        ++ " commentary has been recorded, but prediction-judge verdicts have not been recorded yet. "
+        ++ " commentary has been recorded, but lets-read-prediction-judge verdicts have not been recorded yet. "
         ++ "Run 'judge' first (or pass --force to override)."
 
   hasFactCheckPending <- doesFileExist questionsPath
@@ -126,17 +126,17 @@ cmdNext rawSessionDir forceFlag = do
         ++ show curIdx
         ++ " has a pending Fact-Check Peer Query in "
         ++ discPromptPath
-        ++ ". Notify blind-reader via send_message to read current_discussion_prompt.md and write current_discussion_response.md, then record the response with 'lets-read discuss --session <dir> --subagent-log <reader_log>' before running 'next' (or pass --force to override)."
+        ++ ". Notify lets-read-blind-reader via send_message to read current_discussion_prompt.md and write current_discussion_response.md, then record the response with 'lets-read discuss --session <dir> --subagent-log <reader_log>' before running 'next' (or pass --force to override)."
 
   when (curIdx >= totalChunks && stCurrentRecorded st && stCurrentJudged st && not forceFlag) $ do
     hasWrapup <- doesFileExist (sessionDir </> "entries" </> "wrapup.md")
     when (not hasWrapup) $ do
       when hasScriptPrompt $
-        die "Error: Final Wrapup is already unlocked and awaiting script-writer. Run 'script', 'research', and 'record' first (or pass --force to override)."
+        die "Error: Final Wrapup is already unlocked and awaiting lets-read-script-writer. Run 'script', 'research', and 'record' first (or pass --force to override)."
       when hasResearchPrompt $
-        die "Error: Final Wrapup is awaiting researcher. Run 'research' and 'record' first (or pass --force to override)."
+        die "Error: Final Wrapup is awaiting lets-read-researcher. Run 'research' and 'record' first (or pass --force to override)."
       when hasWrapupReaderPrompt $
-        die "Error: Final Wrapup is already unlocked and awaiting blind-reader. Run 'record' first (or pass --force to override)."
+        die "Error: Final Wrapup is already unlocked and awaiting lets-read-blind-reader. Run 'record' first (or pass --force to override)."
 
   when forceFlag $ do
     when hasFactCheckPending $ do
@@ -178,7 +178,7 @@ cmdNext rawSessionDir forceFlag = do
               , ("archive_dir", jsonStr (T.pack (sessionDir </> "archive")))
               , ("predictions_dir", jsonStr (T.pack (sessionDir </> "predictions")))
               , ("orchestrator_rule", jsonStr orchestratorRuleText)
-              , ("next_step_hint", jsonStr "Invoke a fresh one-shot script-writer subagent via invoke_subagent (Model: \"flash\") with a 1-line notification to read script_prompt_file and write script_response_file for the Final Wrapup draft, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Wrapup | script | 0/1 idle | pending: script-writer]'; once '[SUBAGENT_DONE | Wrapup | script-writer]' arrives, run 'lets-read script --session <dir> --subagent-log <script_log>'.")
+              , ("next_step_hint", jsonStr "Invoke a fresh one-shot lets-read-script-writer subagent via invoke_subagent (Model: \"flash\") with a 1-line notification to read script_prompt_file and write script_response_file for the Final Wrapup draft, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Wrapup | script | 0/1 idle | pending: lets-read-script-writer]'; once '[SUBAGENT_DONE | Wrapup | lets-read-script-writer]' arrives, run 'lets-read script --session <dir> --subagent-log <script_log>'.")
               ]
         else
           TIO.putStrLn $
@@ -220,11 +220,11 @@ cmdNext rawSessionDir forceFlag = do
       let shouldRotate = computeShouldRotate (stStoryRecords st) chunk
           nextPad = T.pack (padChunkNumber nextIdx)
           unlockHint =
-            "Invoke a fresh one-shot script-writer subagent via invoke_subagent (Model: \"flash\") with a 1-line notification to read script_prompt_file and write script_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
+            "Invoke a fresh one-shot lets-read-script-writer subagent via invoke_subagent (Model: \"flash\") with a 1-line notification to read script_prompt_file and write script_response_file, then park with ZERO tool calls outputting ONLY '[HOST_WAIT | Chunk "
               <> nextPad
-              <> " | script | 0/1 idle | pending: script-writer]'; once '[SUBAGENT_DONE | Chunk "
+              <> " | script | 0/1 idle | pending: lets-read-script-writer]'; once '[SUBAGENT_DONE | Chunk "
               <> nextPad
-              <> " | script-writer]' arrives, run 'lets-read script --session <dir> --subagent-log <script_log>'."
+              <> " | lets-read-script-writer]' arrives, run 'lets-read script --session <dir> --subagent-log <script_log>'."
       TIO.putStrLn $
         jsonObject
           [ ("status", jsonStr "awaiting_script")
@@ -252,7 +252,6 @@ cmdNext rawSessionDir forceFlag = do
           , ("entries_dir", jsonStr (T.pack (sessionDir </> "entries")))
           , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
           , ("rotate_reader_recommended", jsonBool shouldRotate)
-          , ("rotate_subagent_recommended", jsonBool shouldRotate)
           , ("orchestrator_rule", jsonStr orchestratorRuleText)
           , ("next_step_hint", jsonStr unlockHint)
           ]
