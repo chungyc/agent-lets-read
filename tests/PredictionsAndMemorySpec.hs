@@ -1,12 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module PredictionsAndMemorySpec
-  ( testRec4PredictionSubClausesAndScreening
-  , testRec5ArcRollupsFinalMysteriesAndHallOfFame
-  , testRec6LeadingEmphasisAndMarkdownFormatting
-  , testRec7IndexByteBudgetsWrappingAndSummaryLint
-  , testRec8CrossArcPredictionIndexesAndEchoGuard
-  , testRec9PersistentActiveScreeningNotes
+  ( spec
   ) where
 
 import Control.Monad (forM_, when)
@@ -82,6 +77,7 @@ import LetsRead.Verification
 import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory)
 import System.Exit (die)
 import System.FilePath ((</>))
+import Test.Hspec (Spec, describe, it)
 import TestHarness
   ( assertBool
   , assertEq
@@ -91,9 +87,17 @@ import TestHarness
   , withTempDir
   )
 
+spec :: Spec
+spec = describe "Predictions, Memory & Multi-Layer Indexes" $ do
+  it "audits prediction sub-clause bounds, screening flags, and retirements" testRec4PredictionSubClausesAndScreening
+  it "renders L1 arc rollups, final-chunk mysteries, and Hall of Fame" testRec5ArcRollupsFinalMysteriesAndHallOfFame
+  it "preserves leading emphasis and wraps generated Markdown cleanly" testRec6LeadingEmphasisAndMarkdownFormatting
+  it "enforces index byte budgets, bullet wrapping, and summary length linting" testRec7IndexByteBudgetsWrappingAndSummaryLint
+  it "tracks cross-arc prediction resolutions, echo guards, and topic recency" testRec8CrossArcPredictionIndexesAndEchoGuard
+  it "preserves active screening notes and guards copied-slate overwrites" testRec9PersistentActiveScreeningNotes
+
 testRec4PredictionSubClausesAndScreening :: IO ()
 testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
-  putStrLn "== Rec #4: Sub-Clause Overflow Audit, Screening Flags & Diversified Retirement =="
   let clueOk = "Lin notices fresh salt stains on the locked boathouse latch"
       theoryOver =
         "Mara unlocked the flooded North Pier boathouse at high tide using the duplicate brass key from the customs office so she could hide the harbor master's forged cargo ledger behind the upper rafters before dawn patrol arrived"
@@ -372,7 +376,6 @@ testRec4PredictionSubClausesAndScreening = withTempDir "rec4-preds" $ \tmp -> do
 
 testRec5ArcRollupsFinalMysteriesAndHallOfFame :: IO ()
 testRec5ArcRollupsFinalMysteriesAndHallOfFame = do
-  putStrLn "== Rec #5: Inline L1 Arc Rollups, Final-Chunk Mysteries & Hall of Fame Original Bet =="
   let arc1And2Story =
         [ StoryChunkRecord i ((i + 1) `div` 2) ("Chap " <> T.pack (show ((i + 1) `div` 2))) (if odd i then 1 else 2) 2 ["Harbor"] "Summary."
         | i <- [1 .. 20]
@@ -505,7 +508,6 @@ testRec5ArcRollupsFinalMysteriesAndHallOfFame = do
 
 testRec6LeadingEmphasisAndMarkdownFormatting :: IO ()
 testRec6LeadingEmphasisAndMarkdownFormatting = do
-  putStrLn "== Rec #6 & #34: Leading Emphasis Preservation & Clean Wrapped Markdown =="
   let sumRaw =
         T.unlines
           [ "- **[Story | Topics: Harbor, Starlight]** *Starlight* arrives at Pier 4 under heavy fog."
@@ -611,7 +613,6 @@ testRec6LeadingEmphasisAndMarkdownFormatting = do
 
 testRec7IndexByteBudgetsWrappingAndSummaryLint :: IO ()
 testRec7IndexByteBudgetsWrappingAndSummaryLint = do
-  putStrLn "== Rec #7: Index Byte Budgets, Wrapped Bullets & Summary Length Linter =="
   let verboseSummary =
         "Mara and Inspector Lin inspect the flooded North Pier boathouse, recover the wax-sealed harbor manifest from behind theLoose pilings, and spot a lantern signal from the outer breakwater."
       sampleStoryRec =
@@ -792,7 +793,6 @@ testRec7IndexByteBudgetsWrappingAndSummaryLint = do
 
 testRec8CrossArcPredictionIndexesAndEchoGuard :: IO ()
 testRec8CrossArcPredictionIndexesAndEchoGuard = withTempDir "rec8-cross-arc" $ \tmp -> do
-  putStrLn "== Rec #8: Cross-Arc Prediction Resolutions, Gap Spans, Echo Guard & Topic Recency =="
   let stEmpty = baseDummyState 40
   syncPredictionsDirectory tmp stEmpty
   emptyChronTxt <- TIO.readFile (tmp </> "predictions" </> "by_chronology.md")
@@ -1032,7 +1032,6 @@ testRec8CrossArcPredictionIndexesAndEchoGuard = withTempDir "rec8-cross-arc" $ \
 
 testRec9PersistentActiveScreeningNotes :: IO ()
 testRec9PersistentActiveScreeningNotes = withTempDir "rec9-screening" $ \tmp -> do
-  putStrLn "== Rec #9: Persistent Active Screening Notes, Overwrite Guards & Copied-Slate Parser Guard =="
   let mkBet idx chap topics theoryTxt =
         PredictionRecord
           { prOriginChunk = idx

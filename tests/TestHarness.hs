@@ -9,8 +9,11 @@ module TestHarness
   , dummyChunk
   ) where
 
+import Control.Exception (finally)
+import Control.Monad (unless, when)
 import Data.Text (Text)
 import qualified Data.Text as T
+import GHC.Stack (HasCallStack)
 import LetsRead.Memory (defaultCuratedMemory)
 import LetsRead.Types
   ( Chunk (..)
@@ -18,30 +21,26 @@ import LetsRead.Types
   )
 import System.Directory
   ( createDirectoryIfMissing
+  , doesDirectoryExist
   , getTemporaryDirectory
   , removeDirectoryRecursive
   )
-import System.Exit (die)
 import System.FilePath ((</>))
+import Test.Hspec (expectationFailure)
 
-assertBool :: String -> Bool -> IO ()
+assertBool :: HasCallStack => String -> Bool -> IO ()
 assertBool label cond =
-  if cond
-    then putStrLn ("  [PASS] " ++ label)
-    else die ("  [FAIL] " ++ label)
+  unless cond (expectationFailure label)
 
-assertEq :: (Eq a, Show a) => String -> a -> a -> IO ()
+assertEq :: (HasCallStack, Eq a, Show a) => String -> a -> a -> IO ()
 assertEq label expected actual =
-  if expected == actual
-    then putStrLn ("  [PASS] " ++ label)
-    else
-      die $
-        "  [FAIL] "
-          ++ label
-          ++ "\n    Expected: "
-          ++ show expected
-          ++ "\n    Actual:   "
-          ++ show actual
+  unless (expected == actual) $
+    expectationFailure $
+      label
+        ++ "\n  expected: "
+        ++ show expected
+        ++ "\n   but got: "
+        ++ show actual
 
 normWs :: Text -> Text
 normWs = T.unwords . T.words
@@ -50,10 +49,13 @@ withTempDir :: String -> (FilePath -> IO a) -> IO a
 withTempDir prefix action = do
   baseTmp <- getTemporaryDirectory
   let dir = baseTmp </> (prefix ++ "-lets-read-spec")
+  exists <- doesDirectoryExist dir
+  when exists (removeDirectoryRecursive dir)
   createDirectoryIfMissing True dir
-  res <- action dir
-  removeDirectoryRecursive dir
-  pure res
+  action dir
+    `finally` do
+      stillExists <- doesDirectoryExist dir
+      when stillExists (removeDirectoryRecursive dir)
 
 baseDummyState :: Int -> SessionState
 baseDummyState totalChks =

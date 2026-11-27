@@ -1,9 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module VerificationSpec
-  ( testRec2SandboxToolTelemetry
-  , testRec3CallbackAndFactCheckAudits
-  , testRec10HiddenScriptAndResearchVerification
+  ( spec
   ) where
 
 import qualified Data.Text as T
@@ -45,6 +43,7 @@ import LetsRead.Verification
   )
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
+import Test.Hspec (Spec, describe, it)
 import TestHarness
   ( assertBool
   , assertEq
@@ -54,9 +53,14 @@ import TestHarness
   , withTempDir
   )
 
+spec :: Spec
+spec = describe "Verification & Sandbox Audits" $ do
+  it "extracts tool telemetry from response headers and subagent logs" testRec2SandboxToolTelemetry
+  it "audits rotation reads, callback citations, and fact-check receipts" testRec3CallbackAndFactCheckAudits
+  it "verifies hidden script prompts, research receipts, and quarantine" testRec10HiddenScriptAndResearchVerification
+
 testRec2SandboxToolTelemetry :: IO ()
 testRec2SandboxToolTelemetry = withTempDir "rec2-sandbox" $ \tmp -> do
-  putStrLn "== Rec #2: Sandbox-Compatible Subagent Tool-Verification Telemetry =="
   assertEq
     "parseToolReceiptTag parses [SUBAGENT_DONE | ...] with [Tools: read_file(...), search_web]"
     (Just (True, ["current_chunk.md", "chunks/chunk_0002.md"], False))
@@ -172,7 +176,6 @@ testRec2SandboxToolTelemetry = withTempDir "rec2-sandbox" $ \tmp -> do
 
 testRec3CallbackAndFactCheckAudits :: IO ()
 testRec3CallbackAndFactCheckAudits = withTempDir "rec3-callbacks" $ \tmp -> do
-  putStrLn "== Rec #3: Rotation chunk_(N-1).md, Callback Read Audits & Canon Welcoming =="
   let priorRecs =
         [ StoryChunkRecord i i ("Chap " <> T.pack (show i)) 1 1 ["Harbor"] "Summary."
         | i <- [1 .. 6]
@@ -386,7 +389,6 @@ testRec3CallbackAndFactCheckAudits = withTempDir "rec3-callbacks" $ \tmp -> do
 
 testRec10HiddenScriptAndResearchVerification :: IO ()
 testRec10HiddenScriptAndResearchVerification = withTempDir "rec10-research" $ \tmp -> do
-  putStrLn "== Rec #10: Hidden-Script Prompts, Research Receipt Filtering & Quarantine Guardrails =="
   let st1 = (baseDummyState 6) {stCurrentIndex = 1}
       chk1 = dummyChunk 1 1 1 1
   sp1Path <- writeCurrentScriptPromptFile tmp st1 chk1

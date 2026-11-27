@@ -1,8 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module CoreSpec
-  ( testVaultAndChunker
-  , testRec1OrchestratorGuardrails
+  ( spec
   ) where
 
 import Control.Monad (forM_)
@@ -29,10 +28,16 @@ import LetsRead.Types
   , saveState
   , saveVault
   )
-import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.Directory
+  ( createDirectoryIfMissing
+  , doesFileExist
+  , findExecutable
+  , getCurrentDirectory
+  )
 import System.Exit (ExitCode (..))
-import System.FilePath (takeDirectory, (</>))
+import System.FilePath ((</>))
 import System.Process (readProcessWithExitCode)
+import Test.Hspec (Spec, describe, expectationFailure, it)
 import TestHarness
   ( assertBool
   , assertEq
@@ -40,9 +45,22 @@ import TestHarness
   , withTempDir
   )
 
+spec :: Spec
+spec = describe "Core Gatekeeper & CLI" $ do
+  it "chunks stories, round-trips vault and state, and formats turn summaries" testVaultAndChunker
+  it "compiles standalone binary via scripts/prepare.sh" testPrepareScript
+  it "enforces orchestrator anti-race guardrails and full CLI session lifecycle" testRec1OrchestratorGuardrails
+
+testPrepareScript :: IO ()
+testPrepareScript = do
+  repoDir <- getCurrentDirectory
+  (ec, _, errOut) <- readProcessWithExitCode (repoDir </> "scripts" </> "prepare.sh") [] ""
+  assertEq ("scripts/prepare.sh exits 0 (" ++ errOut ++ ")") ExitSuccess ec
+  hasBin <- doesFileExist (repoDir </> ".bin" </> "lets-read")
+  assertBool ".bin/lets-read exists after scripts/prepare.sh" hasBin
+
 testVaultAndChunker :: IO ()
 testVaultAndChunker = withTempDir "vault" $ \tmp -> do
-  putStrLn "== Core Vault, State & Chunker =="
   let srcPath = tmp </> "story.md"
       chapBody = T.unwords (replicate 120 "The lantern flickered across the harbor water.")
       storyDoc =
@@ -168,9 +186,8 @@ testVaultAndChunker = withTempDir "vault" $ \tmp -> do
     , formatTurnChapterLabel True (2, "Departure", 1, 2)
     )
 
-testRec1OrchestratorGuardrails :: Maybe FilePath -> IO ()
-testRec1OrchestratorGuardrails mBinPath = do
-  putStrLn "== Rec #1: Orchestrator Anti-Race Guardrails & Topic-Curator Cleanup Hints =="
+testRec1OrchestratorGuardrails :: IO ()
+testRec1OrchestratorGuardrails = do
   assertBool
     "orchestratorRuleText forbids calling script/research/record/judge/discuss before [SUBAGENT_DONE"
     ( "NEVER call 'script', 'research', 'record', 'judge', or 'discuss'" `T.isInfixOf` orchestratorRuleText
@@ -186,11 +203,12 @@ testRec1OrchestratorGuardrails mBinPath = do
     "orchestratorRuleText directs status check via lets-read status"
     ("lets-read status --session <dir>" `T.isInfixOf` orchestratorRuleText)
 
+  repoDir <- getCurrentDirectory
+  mBinPath <- findExecutable "lets-read"
   case mBinPath of
-    Nothing -> pure ()
+    Nothing -> expectationFailure "lets-read executable not found on PATH (check build-tool-depends in lets-read.cabal)"
     Just binPath -> withTempDir "rec1-cli" $ \tmp -> do
-      let repoDir = takeDirectory (takeDirectory binPath)
-          agentFiles =
+      let agentFiles =
             [ ("lets-read-script-writer.md", "name: lets-read-script-writer", "model: flash")
             , ("lets-read-researcher.md", "name: lets-read-researcher", "model: flash")
             , ("lets-read-blind-reader.md", "name: lets-read-blind-reader", "model: inherit")

@@ -1,0 +1,100 @@
+cabal-version: 3.0
+name:          lets-read
+version:       0.0.1
+synopsis:      Spoiler-free Gatekeeper CLI for AI-hosted Let's Reads
+description:
+  Haskell gatekeeper library and CLI for conducting spoiler-free,
+  chunk-by-chunk Let's Read liveblogs with isolated subagents.
+
+license:       MIT
+license-file:  LICENSE
+author:        Yoo Chung
+maintainer:    dev@chungyc.org
+homepage:      https://github.com/chungyc/agent-lets-read
+build-type:    Simple
+
+common shared
+  default-language: Haskell2010
+  ghc-options:      -Wall
+  build-depends:
+    , base        >=4.14 && <5
+    , binary
+    , bytestring
+    , containers
+    , directory
+    , filepath
+    , process
+    , text
+    , time
+    , unix
+
+library
+  import:          shared
+  hs-source-dirs:  src
+  exposed-modules:
+    LetsRead.Chunker
+    LetsRead.Chunker.Epub
+    LetsRead.Chunker.Html
+    LetsRead.Chunker.Markdown
+    LetsRead.Command.Common
+    LetsRead.Command.Discuss
+    LetsRead.Command.DiscussPrompt
+    LetsRead.Command.Init
+    LetsRead.Command.Judge
+    LetsRead.Command.Next
+    LetsRead.Command.Record
+    LetsRead.Command.Research
+    LetsRead.Command.Script
+    LetsRead.Command.Status
+    LetsRead.Index
+    LetsRead.Memory
+    LetsRead.Predictions
+    LetsRead.Prompts
+    LetsRead.Types
+    LetsRead.Verification
+
+executable lets-read
+  import:         shared
+  hs-source-dirs: src
+  main-is:        LetsRead.hs
+  other-modules:
+    LetsRead.Chunker
+    LetsRead.Chunker.Epub
+    LetsRead.Chunker.Html
+    LetsRead.Chunker.Markdown
+    LetsRead.Command.Common
+    LetsRead.Command.Discuss
+    LetsRead.Command.DiscussPrompt
+    LetsRead.Command.Init
+    LetsRead.Command.Judge
+    LetsRead.Command.Next
+    LetsRead.Command.Record
+    LetsRead.Command.Research
+    LetsRead.Command.Script
+    LetsRead.Command.Status
+    LetsRead.Index
+    LetsRead.Memory
+    LetsRead.Predictions
+    LetsRead.Prompts
+    LetsRead.Types
+    LetsRead.Verification
+
+test-suite lets-read-test
+  import:             shared
+  type:               exitcode-stdio-1.0
+  ghc-options:        -Werror
+  hs-source-dirs:     tests
+  main-is:            Spec.hs
+  other-modules:
+    CoreSpec
+    PredictionsAndMemorySpec
+    TestHarness
+    VerificationSpec
+
+  build-depends:
+    , hspec      >=2.7 && <3
+    , lets-read
+
+  build-tool-depends:
+    , hspec-discover:hspec-discover
+    , lets-read:lets-read
