@@ -36,6 +36,7 @@ import LetsRead.Memory
   ( rebuildMasterLog
   , stripTrailingEntryRule
   , syncMemoryAndArchives
+  , writeCurrentTurnFile
   )
 import LetsRead.Predictions
   ( applyJudgeVerdictsWithFeedback
@@ -46,12 +47,15 @@ import LetsRead.Predictions
   , renderRecordActiveLine
   , stripExistingJudgeCallout
   , stripTrackerProposalCallout
+  , summarizeTurnPredictions
   )
 import LetsRead.Types
   ( ChunkMeta (metaIsChapterEnd)
   , PredictionRecord (..)
   , PredictionStatus (..)
   , SessionState (..)
+  , countWords
+  , formatTurnChapterLabel
   , jsonBool
   , jsonInt
   , jsonObject
@@ -247,7 +251,12 @@ cmdJudge opts = do
       judgeCallout = formatJudgeCallout curIdx (curProposalLines ++ judgeSummaryLines)
       judgeAuditCallout = formatAuditEntryCallout judgeAuditBlocks
       updatedEntry = baseEntry <> judgeCallout <> judgeAuditCallout <> "\n\n---\n\n"
+      currentTurnFile = sessionDir </> "current_turn.md"
+      storyChunkFile = sessionDir </> "chunks" </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")
   TIO.writeFile entryFile updatedEntry
+  unless factCheckPending $ do
+    _ <- writeCurrentTurnFile sessionDir updatedEntry
+    pure ()
 
   let (st', topicMergesApplied) =
         case mRawTopic of
@@ -284,16 +293,23 @@ cmdJudge opts = do
               <> curPad
               <> " (Discuss) | lets-read-blind-reader]' arrives, run 'lets-read discuss --session <dir> --subagent-log <reader_log>' BEFORE running 'next'."
         | storyChunksDone && not hasWrapup =
-            "All story chunks have been judged! Run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round (or present the commentary to the user)."
+            "All story chunks have been judged! In Batch Mode, run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round; in Interactive Mode, end your turn with ONLY the 1-line '[DRIVER_DONE | ...]' summary (never read or paste entry files)."
         | otherwise =
-            "Run 'lets-read next --session <dir>' to unlock the next chunk (or present the commentary to the user)."
+            "In Batch Mode, run 'lets-read next --session <dir>' to unlock the next chunk; in Interactive Mode, end your turn with ONLY the 1-line '[DRIVER_DONE | ...]' summary (never read or paste entry files)."
       nextHint = topicKillPrefix <> nextHintBase
+      chapLabel = formatTurnChapterLabel False (currentChunkMetaTuple st)
+      turnWords = countWords (stripTrailingEntryRule updatedEntry)
+      predSummary = summarizeTurnPredictions curIdx preds' newRejs
   TIO.putStrLn $
     jsonObject
       [ ("status", jsonStr statusStr)
+      , ("session_dir", jsonStr (T.pack sessionDir))
       , ("chunk_index", jsonInt curIdx)
       , ("total_chunks", jsonInt (stTotalChunks st))
       , ("remaining_chunks", jsonInt (stTotalChunks st - curIdx))
+      , ("chapter_label", jsonStr chapLabel)
+      , ("word_count", jsonInt turnWords)
+      , ("prediction_summary", jsonStr predSummary)
       , ("is_chapter_end", jsonBool isChapEnd)
       , ("is_finished", jsonBool isFin)
       , ("wrapup_recorded", jsonBool hasWrapup)
@@ -303,6 +319,8 @@ cmdJudge opts = do
       , ("discussion_prompt_file", if factCheckPending then jsonStr (T.pack (sessionDir </> "current_discussion_prompt.md")) else "null")
       , ("discussion_response_file", if factCheckPending then jsonStr (T.pack (sessionDir </> "current_discussion_response.md")) else "null")
       , ("fact_check_questions_file", if factCheckPending then jsonStr (T.pack (sessionDir </> "current_fact_check_questions.md")) else "null")
+      , ("current_turn_file", jsonStr (T.pack currentTurnFile))
+      , ("story_chunk_file", jsonStr (T.pack storyChunkFile))
       , ("entry_file", jsonStr (T.pack entryFile))
       , ("log_file", jsonStr (T.pack logPath))
       , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))

@@ -21,6 +21,8 @@ module LetsRead.Predictions
   , applyJudgeVerdicts
   , applyJudgeVerdictsWithFeedback
   , countActivePredictions
+  , summarizeTurnPredictions
+  , summarizeFinalPredictions
   , predStatusBadge
   , predShortStatusTag
   , renderSinglePredictionDoc
@@ -1577,3 +1579,91 @@ formatAuditEntryCallout auditBlocks =
           | l <- T.lines (T.strip (T.intercalate "\n\n" auditBlocks))
           ]
       )
+
+summarizeTurnPredictions :: Int -> [PredictionRecord] -> [(PredictionRecord, Text)] -> Text
+summarizeTurnPredictions curIdx preds rejectedOnTurn =
+  let confirmedCnt =
+        length
+          [ ()
+          | pr <- preds
+          , PredStatusConfirmed rm _ <- [prStatus pr]
+          , rmChunk rm == curIdx
+          ]
+      subvertedCnt =
+        length
+          [ ()
+          | pr <- preds
+          , PredStatusSubverted rm <- [prStatus pr]
+          , rmChunk rm == curIdx
+          ]
+      debunkedCnt =
+        length
+          [ ()
+          | pr <- preds
+          , PredStatusDebunked rm <- [prStatus pr]
+          , rmChunk rm == curIdx
+          ]
+      retiredCnt =
+        length
+          [ ()
+          | pr <- preds
+          , PredStatusRetired rm <- [prStatus pr]
+          , rmChunk rm == curIdx
+          ]
+      newActiveCnt =
+        length
+          [ ()
+          | pr <- preds
+          , prOriginChunk pr == curIdx
+          , isPredActive pr
+          ]
+      wasScreenedOut =
+        any (\(pr, _) -> prOriginChunk pr == curIdx) rejectedOnTurn
+          && all (\pr -> prOriginChunk pr /= curIdx) preds
+      activeCnt = countActivePredictions preds
+      clauses =
+        [jsonInt confirmedCnt <> " CONFIRMED" | confirmedCnt > 0]
+          ++ [jsonInt subvertedCnt <> " SUBVERTED" | subvertedCnt > 0]
+          ++ [jsonInt debunkedCnt <> " DEBUNKED" | debunkedCnt > 0]
+          ++ [jsonInt retiredCnt <> " RETIRED" | retiredCnt > 0]
+          ++ [jsonInt newActiveCnt <> " new staked" | newActiveCnt > 0]
+          ++ ["proposal screened out" | wasScreenedOut]
+      leadSummary =
+        if null clauses
+          then "no verdict changes"
+          else T.intercalate ", " clauses
+   in leadSummary <> "; " <> jsonInt activeCnt <> " active"
+
+summarizeFinalPredictions :: [PredictionRecord] -> Text
+summarizeFinalPredictions preds
+  | null preds = "no predictions recorded"
+  | otherwise =
+      let confirmedCnt =
+            length
+              [ ()
+              | pr <- preds
+              , PredStatusConfirmed _ isSame <- [prStatus pr]
+              , not isSame
+              ]
+          sameChunkCnt =
+            length
+              [ ()
+              | pr <- preds
+              , PredStatusConfirmed _ isSame <- [prStatus pr]
+              , isSame
+              ]
+          subvertedCnt =
+            length [() | pr <- preds, PredStatusSubverted _ <- [prStatus pr]]
+          debunkedCnt =
+            length [() | pr <- preds, PredStatusDebunked _ <- [prStatus pr]]
+          retiredCnt =
+            length [() | pr <- preds, PredStatusRetired _ <- [prStatus pr]]
+          unresolvedCnt = countActivePredictions preds
+          clauses =
+            [jsonInt confirmedCnt <> " CONFIRMED" | confirmedCnt > 0]
+              ++ [jsonInt sameChunkCnt <> " same-chunk CONFIRMED" | sameChunkCnt > 0]
+              ++ [jsonInt subvertedCnt <> " SUBVERTED" | subvertedCnt > 0]
+              ++ [jsonInt debunkedCnt <> " DEBUNKED" | debunkedCnt > 0]
+              ++ [jsonInt retiredCnt <> " RETIRED" | retiredCnt > 0]
+              ++ [jsonInt unresolvedCnt <> " unresolved" | unresolvedCnt > 0]
+       in "Final tally: " <> T.intercalate ", " clauses

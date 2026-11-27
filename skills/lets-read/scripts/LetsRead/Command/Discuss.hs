@@ -36,11 +36,14 @@ import LetsRead.Memory
   , stripLeadingChunkHeading
   , stripTrailingEntryRule
   , syncMemoryAndArchives
+  , writeCurrentTurnFile
   )
 import LetsRead.Predictions
   ( countActivePredictions
   , formatAuditEntryCallout
   , formatPredictionTrackerCallout
+  , summarizeFinalPredictions
+  , summarizeTurnPredictions
   )
 import LetsRead.Types
   ( ChunkMeta (..)
@@ -50,11 +53,14 @@ import LetsRead.Types
   , PredictionRecord (..)
   , SessionState (..)
   , StoryChunkRecord (..)
+  , countWords
   , emptyParsedChunkSummaries
+  , formatTurnChapterLabel
   , jsonBool
   , jsonInt
   , jsonObject
   , jsonStr
+  , ledgerPredictions
   , loadState
   , orchestratorRuleText
   , padChunkNumber
@@ -257,10 +263,15 @@ cmdDiscuss opts = do
             | otherwise -> formatUserQuote u <> "\n"
       trackerCallout = formatPredictionTrackerCallout trackerUpdates
       auditCallout = formatAuditEntryCallout auditBlocks
+      replyBodyOnly = T.strip (stripLeadingChunkHeading replyText <> trackerCallout <> auditCallout)
       appendedSection = headingPrefix <> userBlock <> stripLeadingChunkHeading replyText <> trackerCallout <> auditCallout
       updatedEntry = baseEntry <> "\n\n" <> appendedSection <> "\n\n---\n\n"
+      lastDiscPath = sessionDir </> "last_discussion_exchange.md"
+      currentTurnFile = sessionDir </> "current_turn.md"
 
   TIO.writeFile entryFile updatedEntry
+  unless isFactCheckDiscussion $
+    TIO.writeFile lastDiscPath (if T.null replyBodyOnly then "" else replyBodyOnly <> "\n")
 
   discToolAudit <- resolveSubagentToolAudit (discSubagentLog opts) (Just rawDiscResp)
   let mUsedVerifyTools = staUsedVerificationTools discToolAudit
@@ -271,6 +282,11 @@ cmdDiscuss opts = do
   unless isFactCheckDiscussion $
     removeFileIfExists defaultUserFilePath
   removeFileIfExists (sessionDir </> "current_discussion_response.md")
+
+  stillPending <- doesFileExist questionsPath
+  unless stillPending $ do
+    _ <- writeCurrentTurnFile sessionDir updatedEntry
+    pure ()
 
   let isWrapupTarget = hasWrapup && curIdx >= stTotalChunks st
       storyRecords' =
@@ -342,34 +358,59 @@ cmdDiscuss opts = do
   when (memUpdated || isFactCheckDiscussion) $
     saveState sessionDir st'
 
-  stillPending <- doesFileExist questionsPath
   let storyChunksDone = curIdx >= stTotalChunks st && stCurrentRecorded st' && stCurrentJudged st' && not stillPending
       isChapEnd = not hasWrapup && maybe False metaIsChapterEnd (stCurrentMeta st)
       wrapupPending = storyChunksDone && not hasWrapup
       isFin = storyChunksDone && hasWrapup
+      chapLabel = formatTurnChapterLabel isWrapupTarget (chapNum, chapTitle, partNum, partsTotal)
+      turnWords =
+        if isFactCheckDiscussion
+          then countWords (stripTrailingEntryRule updatedEntry)
+          else countWords replyBodyOnly
+      predSummary =
+        if isWrapupTarget
+          then summarizeFinalPredictions (ledgerPredictions st')
+          else summarizeTurnPredictions curIdx preds' [r | r@(pr, _) <- rejected', prOriginChunk pr == curIdx]
+      storyChunkJson =
+        if isWrapupTarget
+          then "null"
+          else jsonStr (T.pack (sessionDir </> "chunks" </> ("chunk_" ++ padChunkNumber curIdx ++ ".md")))
+      lastDiscJson =
+        if isFactCheckDiscussion
+          then "null"
+          else jsonStr (T.pack lastDiscPath)
       nextHint
         | stillPending =
             "A Fact-Check Peer Query is still pending in current_discussion_prompt.md. Send it to lets-read-blind-reader and run 'discuss' before 'next'."
         | wrapupPending && isFactCheckDiscussion =
-            "Fact-check discussion resolved and all story chunks are judged! Run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round (or present the commentary and discussion to the user)."
+            "Fact-check discussion resolved and all story chunks are judged! In Batch Mode, run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round; in Interactive Mode, end your turn with ONLY the 1-line '[DRIVER_DONE | ...]' summary (never read or paste entry files)."
         | wrapupPending =
-            "Discussion recorded! Run 'lets-read next --session <dir>' to unlock the dedicated Final Wrapup Round (or present the commentary and discussion to the user)."
+            "Discussion recorded! End your turn with ONLY the 1-line '[DRIVER_DONE | ...]' summary (never read or paste entry files), or run 'lets-read next --session <dir>' in Batch Mode to unlock the Final Wrapup Round."
         | isFin =
-            "Post-wrapup discussion recorded! Relay the appended Reader Discussion reply from entries/wrapup.md to the user."
+            "Post-wrapup discussion recorded! End your turn with ONLY the 1-line '[DRIVER_DONE | ...]' summary (never read or paste entry files)."
+        | isFactCheckDiscussion =
+            "Fact-check discussion resolved! In Batch Mode, run 'lets-read next --session <dir>' to unlock the next chunk; in Interactive Mode, end your turn with ONLY the 1-line '[DRIVER_DONE | ...]' summary (never read or paste entry files)."
         | otherwise =
-            "Discussion recorded! Run 'lets-read next --session <dir>' to unlock the next chunk (or present the commentary and discussion to the user)."
+            "Discussion recorded! End your turn with ONLY the 1-line '[DRIVER_DONE | ...]' summary (never read or paste entry files)."
 
   TIO.putStrLn $
     jsonObject
       [ ("status", jsonStr "discussed")
+      , ("session_dir", jsonStr (T.pack sessionDir))
       , ("chunk_index", jsonInt curIdx)
       , ("total_chunks", jsonInt (stTotalChunks st))
+      , ("chapter_label", jsonStr chapLabel)
+      , ("word_count", jsonInt turnWords)
+      , ("prediction_summary", jsonStr predSummary)
       , ("is_chapter_end", jsonBool isChapEnd)
       , ("is_finished", jsonBool isFin)
       , ("wrapup_pending", jsonBool wrapupPending)
       , ("fact_check_discussion_resolved", jsonBool isFactCheckDiscussion)
       , ("fact_check_discussion_pending", jsonBool stillPending)
       , ("reader_verified_with_tools", maybe "null" jsonBool mUsedVerifyTools)
+      , ("current_turn_file", jsonStr (T.pack currentTurnFile))
+      , ("story_chunk_file", storyChunkJson)
+      , ("last_discussion_file", lastDiscJson)
       , ("entry_file", jsonStr (T.pack entryFile))
       , ("log_file", jsonStr (T.pack logPath))
       , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))

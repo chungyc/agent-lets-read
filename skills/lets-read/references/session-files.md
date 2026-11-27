@@ -17,8 +17,8 @@ local file outside `<session_dir>`.
 
 Write **only** to the single `<session_dir>/current_*_response.md` path
 specified in your turn prompt (`Overwrite: true`). Never write directly to
-`chunks/`, `entries/`, `predictions/`, `archive/`, `memory.md`, or
-`lets_read_log.md`.
+`chunks/`, `entries/`, `predictions/`, `archive/`, `memory.md`,
+`current_turn.md`, `last_discussion_exchange.md`, or `lets_read_log.md`.
 
 ## File Groups & What Each Group Is For
 
@@ -93,12 +93,13 @@ Chronological and topic indexes (along with `entries/archive/`) of `[Entry]` and
 `[Discussion]` summaries used to look up prior reactions, running gags, style
 patterns, or discussion exchanges.
 
-#### `<session_dir>/lets_read_log.md`
+#### `<session_dir>/lets_read_log.md`, `current_turn.md` & `last_discussion_exchange.md`
 
-Do **not** call `read_file` on `<session_dir>/lets_read_log.md` (the
-concatenated full-session liveblog maintained for the human reader); use
-`entries/by_topic.md`, `entries/by_chronology.md`, and `entries/chunk_XXXX.md`
-instead.
+Do **not** call `read_file` on `<session_dir>/lets_read_log.md`,
+`<session_dir>/current_turn.md`, or
+`<session_dir>/last_discussion_exchange.md` (human-facing liveblog and turn
+views maintained for the user); use `entries/by_topic.md`,
+`entries/by_chronology.md`, and `entries/chunk_XXXX.md` instead.
 
 ### Predictions, Verdicts & Scoreboard (`predictions/`)
 

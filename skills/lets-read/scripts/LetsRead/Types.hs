@@ -41,6 +41,7 @@ module LetsRead.Types
   , renderStateJsonWithFiles
   , padChunkNumber
   , formatChapLabel
+  , formatTurnChapterLabel
   , countWords
   , readTextFileSafe
   , stripFileUriPrefix
@@ -352,6 +353,8 @@ data SessionFileStatus = SessionFileStatus
   , sfsHasReaderPrompt :: !Bool
   , sfsHasWrapupReaderPrompt :: !Bool
   , sfsHasResearchFile :: !Bool
+  , sfsHasCurrentTurn :: !Bool
+  , sfsHasLastDiscussion :: !Bool
   }
   deriving (Show, Eq)
 
@@ -371,6 +374,8 @@ readSessionFileStatus sessionDir = do
         txt <- readTextFileSafe readerPromptPath
         pure ("# Final Wrapup" `T.isPrefixOf` T.stripStart txt)
   hasResearchFile <- doesFileExist (sessionDir </> "current_research.md")
+  hasCurrentTurn <- doesFileExist (sessionDir </> "current_turn.md")
+  hasLastDiscussion <- doesFileExist (sessionDir </> "last_discussion_exchange.md")
   pure
     SessionFileStatus
       { sfsHasWrapup = hasWrapup
@@ -381,6 +386,8 @@ readSessionFileStatus sessionDir = do
       , sfsHasReaderPrompt = hasReaderPrompt
       , sfsHasWrapupReaderPrompt = hasWrapupReaderPrompt
       , sfsHasResearchFile = hasResearchFile
+      , sfsHasCurrentTurn = hasCurrentTurn
+      , sfsHasLastDiscussion = hasLastDiscussion
       }
 
 saveState :: FilePath -> SessionState -> IO ()
@@ -464,6 +471,8 @@ renderStateJson sessionDir hasWrapup hasFactCheckPending hasTopicPrompt =
       , sfsHasReaderPrompt = False
       , sfsHasWrapupReaderPrompt = False
       , sfsHasResearchFile = False
+      , sfsHasCurrentTurn = False
+      , sfsHasLastDiscussion = False
       }
 
 renderStateJsonWithFiles :: FilePath -> SessionFileStatus -> SessionState -> Text
@@ -476,6 +485,8 @@ renderStateJsonWithFiles sessionDir sfs st =
       hasReaderPrompt = sfsHasReaderPrompt sfs
       hasWrapupReaderPrompt = sfsHasWrapupReaderPrompt sfs
       hasResearchFile = sfsHasResearchFile sfs
+      hasCurrentTurn = sfsHasCurrentTurn sfs
+      hasLastDiscussion = sfsHasLastDiscussion sfs
       storyChunksDone = stCurrentIndex st >= stTotalChunks st && stCurrentRecorded st && stCurrentJudged st && not hasFactCheckPending
       isFin = storyChunksDone && hasWrapup
       awaitingReader =
@@ -542,6 +553,8 @@ renderStateJsonWithFiles sessionDir sfs st =
         , ("predictions_by_chronology_file", jsonStr (T.pack (sessionDir </> "predictions" </> "by_chronology.md")))
         , ("predictions_by_topic_file", jsonStr (T.pack (sessionDir </> "predictions" </> "by_topic.md")))
         , ("hall_of_fame_file", if storyChunksDone then jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")) else "null")
+        , ("current_turn_file", if hasCurrentTurn then jsonStr (T.pack (sessionDir </> "current_turn.md")) else "null")
+        , ("last_discussion_file", if hasLastDiscussion then jsonStr (T.pack (sessionDir </> "last_discussion_exchange.md")) else "null")
         , ("memory_file", jsonStr (T.pack (sessionDir </> "memory.md")))
         , ("log_file", jsonStr (T.pack (sessionDir </> "lets_read_log.md")))
         , ("orchestrator_rule", jsonStr orchestratorRuleText)
@@ -558,6 +571,17 @@ formatChapLabel chapNum chapTitle
   | chapNum == 0 = chapTitle
   | "chapter " `T.isPrefixOf` T.toLower (T.strip chapTitle) = chapTitle
   | otherwise = "Ch. " <> jsonInt chapNum <> ": " <> chapTitle
+
+formatTurnChapterLabel :: Bool -> (Int, Text, Int, Int) -> Text
+formatTurnChapterLabel True _ = "Final Wrapup & Retrospective"
+formatTurnChapterLabel False (chapNum, chapTitle, partNum, partsTotal) =
+  let chapDisplay
+        | chapNum == 0 = chapTitle
+        | "chapter " `T.isPrefixOf` T.toLower (T.strip chapTitle) = chapTitle
+        | otherwise = "Chapter " <> jsonInt chapNum <> ": " <> chapTitle
+   in if partsTotal > 1
+        then chapDisplay <> " (Part " <> jsonInt partNum <> "/" <> jsonInt partsTotal <> ")"
+        else chapDisplay
 
 countWords :: Text -> Int
 countWords = length . T.words

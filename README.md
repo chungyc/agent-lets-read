@@ -50,10 +50,14 @@ Once installed, ask Antigravity to start a Let's Read of any `.txt`, `.md`,
 
 ### Interactive Mode (Default)
 
-Advances one chunk at a time via the Interactive Driver, presents the reader's
-commentary and the judge's prediction verdicts in chat, and pauses so you can
-discuss theories, ask questions, or say "continue" to unlock the next chunk
-(rotating the driver lazily across chapter boundaries so context stays bounded).
+Advances one chunk at a time via the Interactive Driver, updates
+`current_turn.md` in place so a pinned side preview tab refreshes automatically
+each turn, posts a compact spoiler-free turn card with prediction verdict counts
+and session links in chat (while relaying user discussion replies inline from
+`last_discussion_exchange.md`, or full entries inline on request), and pauses so
+you can discuss theories, ask questions, or say "continue" to unlock the next
+chunk (rotating the driver lazily across chapter boundaries so context stays
+bounded).
 
 ### Batch Mode
 
@@ -89,6 +93,13 @@ presets in [personas.md]:
 
 By default, sessions are written to `./lets-read-sessions/<story-slug>/` (or any
 directory you specify).
+
+### Live Turn View
+
+The pin-once view of the latest finalized chunk commentary, wrapup, or
+discussion turn in `current_turn.md` (along with the latest user Q&A delta in
+`last_discussion_exchange.md`), keeping Interactive Mode chat context compact
+while your open preview tab updates in place.
 
 ### Master Liveblog
 

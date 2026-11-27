@@ -11,8 +11,9 @@ Shared gatekeeper and leaf-subagent execution protocol for both
 Do **not** read the original source story file, `<session_dir>/.vault.bin`,
 `<session_dir>/.state.bin`, or the gatekeeper Haskell source code. Never answer
 story questions in your own voice, never impersonate leaf subagents, and never
-call `edit_file` or `write_file` on `<session_dir>/memory.md`, `entries/`,
-`chunks/`, or `predictions/`.
+call `edit_file` or `write_file` on `<session_dir>/memory.md`,
+`current_turn.md`, `last_discussion_exchange.md`, `entries/`, `chunks/`, or
+`predictions/`.
 
 ### CLI Whitelist Only
 
@@ -25,9 +26,10 @@ Use strictly `<skill_dir>/.bin/lets-read` (`status`, `next`, `script`,
 ### 1-Line Notifications Only
 
 Never read or paste `current_*_prompt.md`, `current_chunk.md`,
-`current_research.md`, `memory.md`, or `entries/chunk_XXXX.md` into
-`invoke_subagent` or `send_message`. Send **only a 1-line notification** naming
-the prompt file to read and the response file to write (`Overwrite: true`):
+`current_research.md`, `memory.md`, `current_turn.md`,
+`last_discussion_exchange.md`, or `entries/chunk_XXXX.md` into `invoke_subagent`
+or `send_message`. Send **only a 1-line notification** naming the prompt file to
+read and the response file to write (`Overwrite: true`):
 
 ```text
 Chunk XXXX/YYYY ready: read <session_dir>/current_prompt.md via read_file and write your response to <session_dir>/current_reader_response.md.

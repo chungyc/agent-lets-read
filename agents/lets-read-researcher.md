@@ -74,7 +74,8 @@ Call `read_file` in parallel on `<session_dir>/current_research_prompt.md`,
 - `<session_dir>/entries/by_topic.md`, `<session_dir>/entries/by_chronology.md`,
   `<session_dir>/entries/archive/`, and `<session_dir>/entries/chunk_XXXX.md`
   (to extract prior Let's Read commentary reactions, running gags, and
-  `Reader Discussion` exchanges; do not read `lets_read_log.md`).
+  `Reader Discussion` exchanges; do not read `lets_read_log.md`,
+  `current_turn.md`, or `last_discussion_exchange.md`).
 
 - `<session_dir>/predictions/by_topic.md`,
   `<session_dir>/predictions/by_chronology.md`,

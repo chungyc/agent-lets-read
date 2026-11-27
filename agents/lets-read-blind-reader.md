@@ -98,7 +98,8 @@ in `current_research.md`, **stop and check before calling `write_file`**:
   `<session_dir>/predictions/` (`by_chronology.md`, `by_topic.md`,
   `archive/chronology/`, `archive/topics/`, `pred_XXXX.md`, `hall_of_fame.md`),
   and `<session_dir>/archive/memory/` (`curated_XXXX.md`, `chunk_XXXX.md`). Do
-  not read `lets_read_log.md`.
+  not read `lets_read_log.md`, `current_turn.md`, or
+  `last_discussion_exchange.md`.
 
 ### No Local File Exploration Outside `<session_dir>` & Strict Write Boundary
 

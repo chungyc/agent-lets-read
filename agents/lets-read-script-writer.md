@@ -40,7 +40,7 @@ Other readable session files inside `<session_dir>` (`chunks/`, `entries/`,
 `predictions/`, `archive/memory/`, and the `session-files.md` reference path in
 your turn prompt) are permitted, though you do not need to look them up—focus on
 writing a natural, immediate reaction from your turn inputs. Do not read
-`lets_read_log.md`.
+`lets_read_log.md`, `current_turn.md`, or `last_discussion_exchange.md`.
 
 ### No Local File Exploration & Strict Write Boundary
 

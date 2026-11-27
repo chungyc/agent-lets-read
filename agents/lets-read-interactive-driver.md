@@ -46,6 +46,10 @@ chunk).
   resume from that exact step in **Procedure 1** (or **Procedure 2** if
   `is_wrapup`) of `driver-pipeline.md`.
 
+- Otherwise, if `"is_finished": true`, do **not** call `lets-read next`;
+  immediately return the 1-line `[DRIVER_DONE | Wrapup | ...]` summary with
+  `status=wrapup_recorded` and `is_finished=true`.
+
 - Otherwise, if `"wrapup_pending": true`, execute **Procedure 2 (Final Wrapup
   Round)** in `driver-pipeline.md` through `lets-read record`
   (`"status": "wrapup_recorded"`).
@@ -80,13 +84,23 @@ Execute **Procedure 3 (User Discussion Turn)** in `driver-pipeline.md` using
 
 ## 1-Line Return Contract (Never Paste Commentary Prose)
 
-Do **not** call `read_file` on `entries/chunk_XXXX.md` or `entries/wrapup.md`,
+Do **not** call `read_file` on `current_turn.md`,
+`last_discussion_exchange.md`, `entries/chunk_XXXX.md`, or `entries/wrapup.md`,
 and **never** copy commentary or discussion prose into your response. Once the
 requested turn's final `lets-read` CLI command (`judge`, `discuss`, or wrapup
 `record`) exits `0` (and any one-shot `lets-read-topic-curator` is killed),
-immediately end your turn with **only** this 1-line plain-text summary (`<round>`
-is `Chunk NNNN`, `Chunk NNNN (Discuss)`, `Wrapup`, or `Wrapup (Discuss)`):
+immediately end your turn with **only** this 1-line plain-text summary using the
+fields from that command's JSON output:
+
+- For an `ADVANCE` request, `<round>` is **always** `Chunk NNNN` (with
+  `status=judged`, even when Step 7 `lets-read discuss` ran internally to
+  resolve a `fact_check_discussion_pending` peer query) or `Wrapup` (with
+  `status=wrapup_recorded` and `story_chunk_file=none`).
+
+- For a `DISCUSS` request, `<round>` is `Chunk NNNN (Discuss)` or
+  `Wrapup (Discuss)` (with `status=discussed`, appending
+  `, last_discussion_file=<last_discussion_file>`).
 
 ```text
-[DRIVER_DONE | <round> | lets-read-interactive-driver] status=<judged|discussed|wrapup_recorded>, chunk=<N>/<Total>, chunks_in_driver=<M>, is_chapter_end=<true|false>, wrapup_pending=<true|false>, is_finished=<true|false>, entry_file=<entry_path>
+[DRIVER_DONE | <round> | lets-read-interactive-driver] status=<judged|discussed|wrapup_recorded>, chunk=<N>/<Total>, chunks_in_driver=<M>, is_chapter_end=<true|false>, wrapup_pending=<true|false>, is_finished=<true|false>, session_dir=<session_dir>, chapter_label="<chapter_label>", word_count=<W>, predictions="<prediction_summary>", current_turn_file=<current_turn_file>, story_chunk_file=<story_chunk_file|none>, entry_file=<entry_path>[, last_discussion_file=<last_discussion_file>]
 ```

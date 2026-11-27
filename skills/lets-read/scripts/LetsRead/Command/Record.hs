@@ -37,12 +37,15 @@ import LetsRead.Memory
   , rebuildMasterLog
   , resolveAndAuditTurn
   , stripLeadingChunkHeading
+  , stripTrailingEntryRule
   , syncMemoryAndArchives
+  , writeCurrentTurnFile
   )
 import LetsRead.Predictions
   ( countActivePredictions
   , formatAuditEntryCallout
   , formatPredictionTrackerCallout
+  , summarizeFinalPredictions
   )
 import LetsRead.Prompts
   ( writeCurrentCriticPromptFile
@@ -56,6 +59,8 @@ import LetsRead.Types
   , PredictionRecord (..)
   , SessionState (..)
   , StoryChunkRecord (..)
+  , countWords
+  , formatTurnChapterLabel
   , jsonBool
   , jsonInt
   , jsonObject
@@ -199,20 +204,31 @@ cmdRecord opts = do
 
       createDirectoryIfMissing True entriesDir
       TIO.writeFile wrapupFile wrapupContent
+      currentTurnFile <- writeCurrentTurnFile sessionDir wrapupContent
       (needsCompaction, curLines, curBytes) <- syncMemoryAndArchives sessionDir st'
       logPath <- rebuildMasterLog sessionDir st'
       saveState sessionDir st'
 
+      let wrapupChapLabel = formatTurnChapterLabel True (0, "", 1, 1)
+          wrapupWords = countWords (stripTrailingEntryRule wrapupContent)
+          wrapupPredSummary = summarizeFinalPredictions (ledgerPredictions st')
+
       TIO.putStrLn $
         jsonObject
           [ ("status", jsonStr "wrapup_recorded")
+          , ("session_dir", jsonStr (T.pack sessionDir))
           , ("chunk_index", jsonInt curIdx)
           , ("total_chunks", jsonInt (stTotalChunks st))
           , ("remaining_chunks", jsonInt 0)
+          , ("chapter_label", jsonStr wrapupChapLabel)
+          , ("word_count", jsonInt wrapupWords)
+          , ("prediction_summary", jsonStr wrapupPredSummary)
           , ("is_chapter_end", jsonBool False)
           , ("is_finished", jsonBool True)
           , ("wrapup_recorded", jsonBool True)
           , ("wrapup_pending", jsonBool False)
+          , ("current_turn_file", jsonStr (T.pack currentTurnFile))
+          , ("story_chunk_file", "null")
           , ("entry_file", jsonStr (T.pack wrapupFile))
           , ("wrapup_file", jsonStr (T.pack wrapupFile))
           , ("hall_of_fame_file", jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")))
@@ -226,7 +242,7 @@ cmdRecord opts = do
           , ("curated_memory_lines", jsonInt curLines)
           , ("curated_memory_bytes", jsonInt curBytes)
           , ("orchestrator_rule", jsonStr orchestratorRuleText)
-          , ("next_step_hint", jsonStr "The Let's Read and Final Wrapup are complete! Present the Final Wrapup and Hall of Fame & Shame to the user (or use 'lets-read discuss-prompt' + 'lets-read discuss' if the user replies with post-story questions).")
+          , ("next_step_hint", jsonStr "The Let's Read and Final Wrapup are complete! End your driver turn with ONLY the 1-line '[DRIVER_DONE | ...]' summary (calling manage_subagents(Action: \"kill_all\") first in Batch Mode; never read or paste entry files).")
           ]
     else do
       bannedJargon <- loadBannedJargonIO

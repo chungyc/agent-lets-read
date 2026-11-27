@@ -59,9 +59,18 @@ asks for a custom chunk size.
   `[HOST_WAIT | ...]` line until `[DRIVER_DONE | ...]` arrives. Never re-send
   duplicate notifications or poll with `manage_subagents(Action: "list")`.
 
-- When relaying `lets-read-blind-reader`'s commentary or discussion reply in
-  chat, call `read_file` on `<session_dir>/entries/chunk_XXXX.md` (or
-  `entries/wrapup.md`) and prefix your message with a third-person host banner:
+- By default in Interactive Mode (`ADVANCE`), do **not** call `read_file` on
+  `<session_dir>/current_turn.md` or `<session_dir>/entries/chunk_XXXX.md`—post
+  a compact, spoiler-free turn card from `[DRIVER_DONE | ...]` with clickable
+  `file://` links (percent-encoding spaces as `%20` or wrapping `<file:///...>`
+  when paths contain spaces).
+
+- When relaying a user `DISCUSS` reply—or when the user explicitly asks to view
+  full commentary inline in chat—call `read_file` on
+  `<session_dir>/last_discussion_exchange.md` (for `DISCUSS`) or
+  `<session_dir>/current_turn.md` (for inline `ADVANCE`) and prefix your message
+  with a third-person host banner (`Chunk XXXX/YYYY`, or `Final Wrapup` on
+  `Wrapup` / `Wrapup (Discuss)` turns):
 
   ```markdown
   > **Let's Read Host** — Relaying from Blind Reader (Chunk XXXX/YYYY):
@@ -86,9 +95,12 @@ If not specified by the user, check briefly or use defaults:
 
 ##### Interactive Mode (Default)
 
-Read one chunk at a time via `lets-read-interactive-driver`, relay commentary
-and Judge rulings in chat, and pause so the user can discuss theories or say
-"continue".
+Read one chunk at a time via `lets-read-interactive-driver`, updating
+`<session_dir>/current_turn.md` in place while posting a compact turn card and
+prediction verdict counts in chat (relaying `DISCUSS` replies inline from
+`last_discussion_exchange.md`, or relaying full `current_turn.md` entries inline
+if the user explicitly requests inline mode), and pause so the user can discuss
+theories or say "continue".
 
 ##### Batch Mode
 
@@ -173,12 +185,31 @@ descendant leaf subagents) so a fresh driver starts cleanly on the next chunk.
   `[HOST_WAIT | Interactive | advance | 0/1 idle | pending: lets-read-interactive-driver]`
   until `[DRIVER_DONE | ... | lets-read-interactive-driver]` arrives.
 
-- Call `read_file` on the reported `entry_file`
-  (`<session_dir>/entries/chunk_XXXX.md` or `<session_dir>/entries/wrapup.md`),
-  present it under the third-person host banner, and link to `lets_read_log.md`,
-  `memory.md`, `predictions/by_chronology.md`, and `predictions/by_topic.md`
-  (plus `predictions/hall_of_fame.md` once chunk `N/N` is judged). Do **not**
-  relay `critic_feedback.md` unless asked.
+- Unless the user explicitly requested full inline commentary in chat, make
+  **zero follow-up tool calls** on wakeup: present a compact, spoiler-free turn
+  card directly from `[DRIVER_DONE | ...]` containing:
+
+  - Host banner with progress, `chapter_label`, and `word_count` (`> **Let's
+    Read Host** — Chunk XXXX/YYYY · <chapter_label> (<word_count> words)` on
+    reading chunks, or `> **Let's Read Host** — Final Wrapup & Retrospective
+    (<word_count> words)` when `status=wrapup_recorded`).
+
+  - Count-only `predictions` status from `[DRIVER_DONE | ...]` (never reveal
+    which theory hit or spoil chunk events in the card).
+
+  - Clickable `file://` links (percent-encoding spaces or wrapping
+    `<file:///...>`) to `current_turn_file` (reminding the user on Chunk 1 that
+    pinning `current_turn.md` in a side preview tab refreshes automatically each
+    turn), `entry_file`, `story_chunk_file` (when not `none`),
+    `<session_dir>/lets_read_log.md`, `<session_dir>/memory.md`,
+    `<session_dir>/predictions/by_chronology.md`, and
+    `<session_dir>/predictions/by_topic.md` (plus
+    `<session_dir>/predictions/hall_of_fame.md` once chunk `N/N` is judged).
+
+- If the user explicitly asked for inline mode (or asks to paste a turn inline
+  in chat), call `read_file` on `current_turn_file` and present it under the
+  third-person host banner alongside the session `file://` links above. Do
+  **not** relay `critic_feedback.md` unless asked.
 
 ##### 3. Handling User Discussion (`DISCUSS`)
 
@@ -199,8 +230,11 @@ Whenever the user replies with comments, questions, or non-spoiler theories:
    `[HOST_WAIT | Interactive | discuss | 0/1 idle | pending: lets-read-interactive-driver]`
    until `[DRIVER_DONE | ... (Discuss) | lets-read-interactive-driver]` arrives.
 
-4. Call `read_file` on `entry_file` and relay the newly appended
-   `### Reader Discussion` section under the third-person host banner.
+4. Call `read_file` on `last_discussion_file`
+   (`<session_dir>/last_discussion_exchange.md`—never re-read the full
+   `entry_file` or `current_turn.md`, even in inline mode) and relay that
+   discussion exchange inline under the third-person host banner alongside
+   `file://` links to `current_turn.md` and `entry_file`.
 
 ##### 4. Switching Mid-Session to Batch Mode
 
@@ -230,7 +264,8 @@ current slice so chunk `N/N` and the Final Wrapup finish together):
 3. If `is_finished=false` and more chunks remain before the user's target,
    invoke a **new** `lets-read-batch-driver` (`Model: "inherit"`) for the next
    ~7–8 chunk slice; once complete, present a concise summary alongside links to
-   `lets_read_log.md`, `memory.md`, `predictions/by_chronology.md`, and
-   `predictions/by_topic.md` (plus `predictions/hall_of_fame.md` when finished).
+   `current_turn.md`, `lets_read_log.md`, `memory.md`,
+   `predictions/by_chronology.md`, and `predictions/by_topic.md` (plus
+   `predictions/hall_of_fame.md` when finished).
 
 [personas.md]: ./references/personas.md

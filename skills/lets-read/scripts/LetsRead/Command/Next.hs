@@ -146,6 +146,7 @@ cmdNext rawSessionDir forceFlag = do
 
   let readerRespPath = sessionDir </> "current_reader_response.md"
       discRespPath = sessionDir </> "current_discussion_response.md"
+      lastDiscPath = sessionDir </> "last_discussion_exchange.md"
   removeFileIfExists scriptPromptPath
   removeFileIfExists scriptRespPath
   removeFileIfExists researchPromptPath
@@ -161,6 +162,7 @@ cmdNext rawSessionDir forceFlag = do
       hasWrapup <- doesFileExist wrapupPath
       if not hasWrapup || forceFlag
         then do
+          removeFileIfExists lastDiscPath
           let stClean = st {stPredictions = ledgerPredictions st}
           scriptPromptFile <- writeWrapupScriptPromptFile sessionDir stClean
           saveState sessionDir stClean
@@ -184,14 +186,17 @@ cmdNext rawSessionDir forceFlag = do
           TIO.putStrLn $
             jsonObject
               [ ("status", jsonStr "finished")
+              , ("session_dir", jsonStr (T.pack sessionDir))
               , ("current_index", jsonInt curIdx)
               , ("total_chunks", jsonInt totalChunks)
+              , ("current_turn_file", jsonStr (T.pack (sessionDir </> "current_turn.md")))
               , ("wrapup_file", jsonStr (T.pack wrapupPath))
               , ("hall_of_fame_file", jsonStr (T.pack (sessionDir </> "predictions" </> "hall_of_fame.md")))
               , ("orchestrator_rule", jsonStr orchestratorRuleText)
               , ("message", jsonStr "All chunks and the Final Wrapup have been completed! The Let's Read is complete.")
               ]
     else do
+      removeFileIfExists lastDiscPath
       let nextIdx = curIdx + 1
           cleanPreds = ledgerPredictions st
           activeCount = countActivePredictions cleanPreds

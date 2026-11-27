@@ -22,6 +22,7 @@ module LetsRead.Memory
   , renderMemoryMarkdown
   , syncMemoryAndArchives
   , rebuildMasterLog
+  , writeCurrentTurnFile
   ) where
 
 import Control.Exception (IOException, catch)
@@ -575,3 +576,10 @@ rebuildMasterLog sessionDir st = do
       logPath = sessionDir </> "lets_read_log.md"
   TIO.writeFile logPath (logHeader <> T.concat entryContents <> wrapupContent <> hofSuffix)
   pure logPath
+
+writeCurrentTurnFile :: FilePath -> Text -> IO FilePath
+writeCurrentTurnFile sessionDir entryMarkdown = do
+  let turnPath = sessionDir </> "current_turn.md"
+      cleanBody = T.strip (stripTrailingEntryRule entryMarkdown)
+  TIO.writeFile turnPath (if T.null cleanBody then "" else cleanBody <> "\n")
+  pure turnPath

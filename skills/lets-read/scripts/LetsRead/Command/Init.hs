@@ -136,8 +136,6 @@ cmdInit opts = do
           , stCuratedTopics = []
           , stTopicAliases = []
           }
-  saveState sessionDir st
-
   let memoryPath = sessionDir </> "memory.md"
   memExists <- doesFileExist memoryPath
   when (not memExists || initOverwrite opts) $ do
@@ -156,6 +154,21 @@ cmdInit opts = do
           <> "\n\n---\n\n"
       )
 
+  let currentTurnPath = sessionDir </> "current_turn.md"
+  curTurnExists <- doesFileExist currentTurnPath
+  when (not curTurnExists || initOverwrite opts) $
+    TIO.writeFile
+      currentTurnPath
+      ( "# Let's Read: "
+          <> bookTitle
+          <> "\n\n## Reader Persona\n\n"
+          <> wrapMarkdownParagraph 78 persona
+          <> "\n\n## Current Turn\n\n"
+          <> "*(Session initialized — advance to Chunk 1 to populate this view.)*\n"
+      )
+
+  saveState sessionDir st
+
   let avgWords = if totalChunks > 0 then totalWords `div` totalChunks else 0
   TIO.putStrLn $
     jsonObject
@@ -170,6 +183,7 @@ cmdInit opts = do
       , ("entries_dir", jsonStr (T.pack entriesDir))
       , ("archive_dir", jsonStr (T.pack archiveDir))
       , ("predictions_dir", jsonStr (T.pack predictionsDir))
+      , ("current_turn_file", jsonStr (T.pack currentTurnPath))
       , ("memory_file", jsonStr (T.pack memoryPath))
       , ("log_file", jsonStr (T.pack logPath))
       , ("orchestrator_rule", jsonStr orchestratorRuleText)

@@ -63,8 +63,9 @@ Once your assigned slice (and Final Wrapup, if applicable) is complete:
    `lets-read-prediction-judge`, `lets-read-fact-checker`,
    `lets-read-commentary-critic`) spawned during this batch.
 
-2. Do **not** read or paste `entries/` or `lets_read_log.md` into your response;
-   immediately end your turn with **only** this 1-line plain-text summary:
+2. Do **not** read or paste `entries/`, `current_turn.md`, or `lets_read_log.md`
+   into your response; immediately end your turn with **only** this 1-line
+   plain-text summary:
 
    ```text
    [DRIVER_DONE | Batch <A>..<B> | lets-read-batch-driver] chunk=<N>/<Total>, active_predictions=<K>, wrapup_pending=<true|false>, is_finished=<true|false>

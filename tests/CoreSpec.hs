@@ -10,11 +10,19 @@ import Data.List (isInfixOf)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import LetsRead.Chunker (buildChunksFromSource)
+import LetsRead.Predictions
+  ( summarizeFinalPredictions
+  , summarizeTurnPredictions
+  )
 import LetsRead.Prompts (expandPersonaPreset)
 import LetsRead.Types
   ( Chunk (..)
+  , PredictionRecord (..)
+  , PredictionStatus (..)
+  , ResolutionMeta (..)
   , SessionState (..)
   , chunkToMeta
+  , formatTurnChapterLabel
   , loadState
   , loadVaultChunk
   , orchestratorRuleText
@@ -105,6 +113,61 @@ testVaultAndChunker = withTempDir "vault" $ \tmp -> do
         expanded
         (expandPersonaPreset altName)
 
+  let mkDummyPred orig stStatus =
+        PredictionRecord
+          { prOriginChunk = orig
+          , prChapterNumber = 1
+          , prChapterTitle = "Arrival"
+          , prPartInChapter = 1
+          , prPartsInChapter = 1
+          , prTopics = ["Harbor"]
+          , prClue = "Clue"
+          , prTheory = "Theory"
+          , prRawBody = "Clue -> Theory"
+          , prStatus = stStatus
+          }
+      rmAt c =
+        ResolutionMeta
+          { rmChunk = c
+          , rmChapterNumber = 2
+          , rmChapterTitle = "Departure"
+          , rmPartInChapter = 1
+          , rmPartsInChapter = 1
+          , rmNote = "Resolved."
+          }
+      samplePreds =
+        [ mkDummyPred 1 (PredStatusConfirmed (rmAt 4) False)
+        , mkDummyPred 2 (PredStatusDebunked (rmAt 4))
+        , mkDummyPred 3 (PredStatusActive Nothing)
+        , mkDummyPred 4 (PredStatusActive (Just "Good bet."))
+        ]
+  assertEq
+    "summarizeTurnPredictions reports count-only outcomes and active count"
+    "1 CONFIRMED, 1 DEBUNKED, 1 new staked; 2 active"
+    (summarizeTurnPredictions 4 samplePreds [])
+  assertEq
+    "summarizeTurnPredictions reports screened-out proposal when rejected on turn"
+    "proposal screened out; 1 active"
+    (summarizeTurnPredictions 5 [mkDummyPred 3 (PredStatusActive Nothing)] [(mkDummyPred 5 (PredStatusActive Nothing), "[UNINTERESTING] Routine.")])
+  assertEq
+    "summarizeFinalPredictions tallies foresight vs same-chunk confirmed, subverted, debunked, and unresolved"
+    "Final tally: 1 CONFIRMED, 1 same-chunk CONFIRMED, 1 SUBVERTED, 1 DEBUNKED, 1 unresolved"
+    ( summarizeFinalPredictions
+        [ mkDummyPred 1 (PredStatusConfirmed (rmAt 3) False)
+        , mkDummyPred 2 (PredStatusConfirmed (rmAt 2) True)
+        , mkDummyPred 3 (PredStatusSubverted (rmAt 4))
+        , mkDummyPred 4 (PredStatusDebunked (rmAt 4))
+        , mkDummyPred 5 (PredStatusActive Nothing)
+        ]
+    )
+  assertEq
+    "formatTurnChapterLabel omits (Part 1/1) on single-part chapters and formats multi-part and wrapup"
+    ("Chapter 2: Departure", "Chapter 2: Departure (Part 1/2)", "Final Wrapup & Retrospective")
+    ( formatTurnChapterLabel False (2, "Departure", 1, 1)
+    , formatTurnChapterLabel False (2, "Departure", 1, 2)
+    , formatTurnChapterLabel True (2, "Departure", 1, 2)
+    )
+
 testRec1OrchestratorGuardrails :: Maybe FilePath -> IO ()
 testRec1OrchestratorGuardrails mBinPath = do
   putStrLn "== Rec #1: Orchestrator Anti-Race Guardrails & Topic-Curator Cleanup Hints =="
@@ -155,6 +218,11 @@ testRec1OrchestratorGuardrails mBinPath = do
           ( not ("reply to the host" `T.isInfixOf` T.toLower agentTxt)
               && "[SUBAGENT_DONE |" `T.isInfixOf` agentTxt
           )
+        assertBool
+          (af ++ " forbids reading current_turn.md and last_discussion_exchange.md")
+          ( "current_turn.md" `T.isInfixOf` agentTxt
+              && "last_discussion_exchange.md" `T.isInfixOf` agentTxt
+          )
       forM_ driverFiles $ \(df, expectedName) -> do
         drvTxt <- TIO.readFile (repoDir </> "agents" </> df)
         assertBool
@@ -185,8 +253,9 @@ testRec1OrchestratorGuardrails mBinPath = do
             , T.unwords (replicate 120 "Mara climbed the spiral stairs toward the beacon.")
             ]
         )
-      (ecInit, _, errInit) <- readProcessWithExitCode binPath ["init", srcPath, "--session", sessDir] ""
+      (ecInit, outInit, errInit) <- readProcessWithExitCode binPath ["init", srcPath, "--session", sessDir] ""
       assertEq ("CLI init exit 0 (" ++ errInit ++ ")") ExitSuccess ecInit
+      assertBool "init JSON includes current_turn_file" ("\"current_turn_file\":" `isInfixOf` outInit)
       initLogTxt <- TIO.readFile (sessDir </> "lets_read_log.md")
       assertBool "lets_read_log.md after init uses ## Reader Persona heading" ("## Reader Persona" `T.isInfixOf` initLogTxt)
       assertBool "lets_read_log.md after init omits *Reader Persona*: pseudo-heading" (not ("*Reader Persona*:" `T.isInfixOf` initLogTxt))
@@ -194,6 +263,16 @@ testRec1OrchestratorGuardrails mBinPath = do
       assertBool
         "lets_read_log.md header prose lines after init wrap <= 80 cols"
         (all (\l -> "#" `T.isPrefixOf` l || T.length l <= 80) initHeaderLines)
+      initTurnTxt <- TIO.readFile (sessDir </> "current_turn.md")
+      assertBool
+        "current_turn.md after init uses semantic headings and wraps lines <= 80 cols"
+        ( "## Reader Persona" `T.isInfixOf` initTurnTxt
+            && "## Current Turn" `T.isInfixOf` initTurnTxt
+            && not ("*Reader Persona*:" `T.isInfixOf` initTurnTxt)
+            && all (\l -> "#" `T.isPrefixOf` l || T.length l <= 80) (T.lines initTurnTxt)
+        )
+      hasInitLastDisc <- doesFileExist (sessDir </> "last_discussion_exchange.md")
+      assertBool "last_discussion_exchange.md is absent after init" (not hasInitLastDisc)
 
       (ecNext, outNext, _) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
       assertEq "CLI next exit 0" ExitSuccess ecNext
@@ -334,6 +413,10 @@ testRec1OrchestratorGuardrails mBinPath = do
       assertBool
         "record writes temporary Prediction Tracker Update (Reader Proposal) callout before judge runs"
         ("Prediction Tracker Update (Reader Proposal)" `T.isInfixOf` preJudgeEntry1Txt)
+      preJudgeTurn1Txt <- TIO.readFile (sessDir </> "current_turn.md")
+      assertBool
+        "mid-chunk record leaves current_turn.md untouched before judge finalizes verdicts"
+        ("## Current Turn" `T.isInfixOf` preJudgeTurn1Txt && not ("That compass is definitely planted!" `T.isInfixOf` preJudgeTurn1Txt))
 
       TIO.writeFile
         (sessDir </> "current_judge_response.md")
@@ -348,9 +431,22 @@ testRec1OrchestratorGuardrails mBinPath = do
       (ecJ1, outJ1, _) <- readProcessWithExitCode binPath ["judge", "--session", sessDir] ""
       assertEq "CLI judge (no topic-curator) exit 0" ExitSuccess ecJ1
       assertBool
-        "judge includes is_chapter_end and omits topic-curator kill prompt when unused"
+        "judge includes is_chapter_end, compact turn metadata, and omits topic-curator kill prompt when unused"
         ( "\"is_chapter_end\": true" `isInfixOf` outJ1
+            && "\"chapter_label\": \"Chapter 1: Harbor\"" `isInfixOf` outJ1
+            && "\"prediction_summary\": \"1 new staked; 1 active\"" `isInfixOf` outJ1
+            && "\"current_turn_file\":" `isInfixOf` outJ1
+            && "\"story_chunk_file\":" `isInfixOf` outJ1
+            && "\"word_count\":" `isInfixOf` outJ1
             && not ("lets-read-topic-curator" `isInfixOf` outJ1)
+        )
+      judgedTurn1Txt <- TIO.readFile (sessDir </> "current_turn.md")
+      assertBool
+        "judge populates current_turn.md with finalized entry and strips trailing horizontal rule"
+        ( "## Chunk 1/2" `T.isInfixOf` judgedTurn1Txt
+            && "That compass is definitely planted!" `T.isInfixOf` judgedTurn1Txt
+            && "**Prediction Judge Rulings (Chunk 0001)**:" `T.isInfixOf` judgedTurn1Txt
+            && not ("---\n" `T.isSuffixOf` judgedTurn1Txt)
         )
 
       let topicResp = tmp </> "topic_resp.md"
@@ -375,16 +471,28 @@ testRec1OrchestratorGuardrails mBinPath = do
         (all (\l -> "#" `T.isPrefixOf` l || T.length l <= 80) rebuiltHeaderLines)
 
       skillTxt <- TIO.readFile (repoDir </> "skills" </> "lets-read" </> "SKILL.md")
+      interactiveDrvTxt <- TIO.readFile (repoDir </> "agents" </> "lets-read-interactive-driver.md")
       pipelineTxt <- TIO.readFile (repoDir </> "skills" </> "lets-read" </> "references" </> "driver-pipeline.md")
       let (_, fromStep4Interactive) = T.breakOn "\n#### Interactive Mode\n" skillTxt
       assertBool
-        "SKILL.md delegates Interactive Mode and Batch Mode to lets-read-*-driver without linking driver-pipeline.md"
+        "SKILL.md delegates Interactive Mode and Batch Mode to lets-read-*-driver with compact current_turn.md and delta last_discussion_exchange.md rules"
         ( "lets-read-interactive-driver" `T.isInfixOf` skillTxt
             && "lets-read-batch-driver" `T.isInfixOf` skillTxt
             && not ("driver-pipeline.md" `T.isInfixOf` skillTxt)
             && "chunks_in_driver >= 8" `T.isInfixOf` skillTxt
             && "[DRIVER_DONE |" `T.isInfixOf` skillTxt
+            && "current_turn.md" `T.isInfixOf` skillTxt
+            && "last_discussion_exchange.md" `T.isInfixOf` skillTxt
+            && "zero follow-up tool calls" `T.isInfixOf` skillTxt
             && "invoke_subagent" `T.isInfixOf` fst (T.breakOn "\n#### Batch Mode\n" fromStep4Interactive)
+        )
+      assertBool
+        "lets-read-interactive-driver.md carries compact turn metadata in [DRIVER_DONE | and forbids reading current_turn.md"
+        ( "chapter_label=" `T.isInfixOf` interactiveDrvTxt
+            && "predictions=" `T.isInfixOf` interactiveDrvTxt
+            && "current_turn_file=" `T.isInfixOf` interactiveDrvTxt
+            && "story_chunk_file=" `T.isInfixOf` interactiveDrvTxt
+            && "last_discussion_exchange.md" `T.isInfixOf` interactiveDrvTxt
         )
       let (_, fromProc2) = T.breakOn "## Procedure 2: Final Wrapup Round" pipelineTxt
           (_, fromProc3) = T.breakOn "## Procedure 3: User Discussion Turn" pipelineTxt
@@ -399,6 +507,10 @@ testRec1OrchestratorGuardrails mBinPath = do
 
       (ecNext2, _, errNext2) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
       assertEq ("CLI next chunk 2/2 exit 0 (" ++ errNext2 ++ ")") ExitSuccess ecNext2
+      turnDuringChunk2Txt <- TIO.readFile (sessDir </> "current_turn.md")
+      assertBool
+        "next leaves previous finalized chunk in current_turn.md while chunk 2 runs"
+        ("That compass is definitely planted!" `T.isInfixOf` turnDuringChunk2Txt)
       TIO.writeFile
         scriptResp
         ( T.unlines
@@ -483,6 +595,12 @@ testRec1OrchestratorGuardrails mBinPath = do
             && "\"fact_check_discussion_pending\": true" `isInfixOf` outJDispute
             && "\"wrapup_pending\": false" `isInfixOf` outJDispute
         )
+      turnWhileDisputedTxt <- TIO.readFile (sessDir </> "current_turn.md")
+      assertBool
+        "judge with pending fact-check dispute does not prematurely overwrite current_turn.md"
+        ( "That compass is definitely planted!" `T.isInfixOf` turnWhileDisputedTxt
+            && not ("Mara was at the lighthouse the whole time" `T.isInfixOf` turnWhileDisputedTxt)
+        )
 
       (ecStatPending, outStatPending, _) <- readProcessWithExitCode binPath ["status", "--session", sessDir] ""
       assertEq "CLI status while fact-check dispute is pending on chunk 2/2 exit 0" ExitSuccess ecStatPending
@@ -507,12 +625,22 @@ testRec1OrchestratorGuardrails mBinPath = do
         readProcessWithExitCode binPath ["discuss", "--session", sessDir] ""
       assertEq ("CLI fact-check discuss on chunk 2/2 exit 0 (" ++ errFcDisc ++ ")") ExitSuccess ecFcDisc
       assertBool
-        "fact-check discuss on chunk N/N flips wrapup_pending to true and includes present-to-user option"
+        "fact-check discuss on chunk N/N flips wrapup_pending to true and directs driver to [DRIVER_DONE"
         ( "\"wrapup_pending\": true" `isInfixOf` outFcDisc
             && "\"fact_check_discussion_resolved\": true" `isInfixOf` outFcDisc
             && "\"fact_check_discussion_pending\": false" `isInfixOf` outFcDisc
+            && "\"last_discussion_file\": null" `isInfixOf` outFcDisc
+            && "\"prediction_summary\": \"1 new staked; 2 active\"" `isInfixOf` outFcDisc
             && "Fact-check discussion resolved" `isInfixOf` outFcDisc
-            && "(or present the commentary and discussion to the user)" `isInfixOf` outFcDisc
+            && "[DRIVER_DONE | ...]" `isInfixOf` outFcDisc
+        )
+      hasLastDiscAfterFc <- doesFileExist (sessDir </> "last_discussion_exchange.md")
+      assertBool "fact-check peer query does not write last_discussion_exchange.md" (not hasLastDiscAfterFc)
+      turnAfterFcTxt <- TIO.readFile (sessDir </> "current_turn.md")
+      assertBool
+        "fact-check discuss updates current_turn.md once peer query resolves"
+        ( "Mara was at the lighthouse the whole time" `T.isInfixOf` turnAfterFcTxt
+            && "Good catch: Chapter 2 only mentions climbing" `T.isInfixOf` turnAfterFcTxt
         )
 
       (ecStatFinal, outStatFinal, _) <- readProcessWithExitCode binPath ["status", "--session", sessDir] ""
@@ -529,9 +657,9 @@ testRec1OrchestratorGuardrails mBinPath = do
       (ecJFinal, outJFinal, errJFinal) <- readProcessWithExitCode binPath ["judge", "--session", sessDir] ""
       assertEq ("CLI clean judge chunk 2/2 exit 0 (" ++ errJFinal ++ ")") ExitSuccess ecJFinal
       assertBool
-        "clean judge on chunk N/N sets wrapup_pending true and includes present-to-user option"
+        "clean judge on chunk N/N sets wrapup_pending true and directs driver to [DRIVER_DONE"
         ( "\"wrapup_pending\": true" `isInfixOf` outJFinal
-            && "(or present the commentary to the user)" `isInfixOf` outJFinal
+            && "[DRIVER_DONE | ...]" `isInfixOf` outJFinal
         )
 
       let userFinaleMsg = "What did you make of that cliffhanger at the lighthouse?"
@@ -570,9 +698,9 @@ testRec1OrchestratorGuardrails mBinPath = do
             && "\"fact_check_discussion_resolved\": false" `isInfixOf` outDisc
         )
       assertBool
-        "user discuss on chunk N/N does not mislabel hint as Fact-check discussion resolved and includes present-to-user option"
+        "user discuss on chunk N/N does not mislabel hint as Fact-check discussion resolved and directs driver to [DRIVER_DONE"
         ( not ("Fact-check discussion resolved" `isInfixOf` outDisc)
-            && "(or present the commentary and discussion to the user)" `isInfixOf` outDisc
+            && "[DRIVER_DONE | ...]" `isInfixOf` outDisc
         )
       hasWrapupAfterDisc <- doesFileExist (sessDir </> "entries" </> "wrapup.md")
       assertBool "wrapup.md is still not created during pre-wrapup finale discussion" (not hasWrapupAfterDisc)
@@ -582,9 +710,29 @@ testRec1OrchestratorGuardrails mBinPath = do
         ( "### Reader Discussion" `T.isInfixOf` chunk2EntryTxt
             && T.pack userFinaleMsg `T.isInfixOf` chunk2EntryTxt
         )
+      assertBool
+        "user discuss emits non-null last_discussion_file and prediction_summary"
+        ( "\"last_discussion_file\": \"" `isInfixOf` outDisc
+            && "\"prediction_summary\": \"1 new staked; 2 active\"" `isInfixOf` outDisc
+        )
+      lastDiscTxt <- TIO.readFile (sessDir </> "last_discussion_exchange.md")
+      assertBool
+        "last_discussion_exchange.md holds only the reader reply without echoing user prompt or earlier chunk commentary"
+        ( not (T.pack userFinaleMsg `T.isInfixOf` lastDiscTxt)
+            && "Ending right on the spiral stairs leaves the compass mystery wide open!" `T.isInfixOf` lastDiscTxt
+            && not ("Mara was at the lighthouse the whole time" `T.isInfixOf` lastDiscTxt)
+        )
+      turnAfterUserDiscTxt <- TIO.readFile (sessDir </> "current_turn.md")
+      assertBool
+        "user discuss refreshes current_turn.md with both chunk commentary and discussion"
+        ( "Mara was at the lighthouse the whole time" `T.isInfixOf` turnAfterUserDiscTxt
+            && T.pack userFinaleMsg `T.isInfixOf` turnAfterUserDiscTxt
+        )
 
       (ecNextWrap, outNextWrap, errNextWrap) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
       assertEq ("CLI next wrapup unlock exit 0 (" ++ errNextWrap ++ ")") ExitSuccess ecNextWrap
+      hasLastDiscAfterNextWrap <- doesFileExist (sessDir </> "last_discussion_exchange.md")
+      assertBool "next cleans up stale last_discussion_exchange.md while preserving current_turn.md" (not hasLastDiscAfterNextWrap)
       assertBool
         "next on wrapup starts awaiting_script with is_wrapup true"
         ("\"status\": \"awaiting_script\"" `isInfixOf` outNextWrap && "\"is_wrapup\": true" `isInfixOf` outNextWrap)
@@ -631,11 +779,23 @@ testRec1OrchestratorGuardrails mBinPath = do
       (ecRecWrap, outRecWrap, errRecWrap) <- readProcessWithExitCode binPath ["record", "--session", sessDir] ""
       assertEq ("CLI record wrapup exit 0 (" ++ errRecWrap ++ ")") ExitSuccess ecRecWrap
       assertBool
-        "record wrapup emits wrapup_recorded, is_chapter_end false, wrapup_pending false, and is_finished true"
+        "record wrapup emits wrapup_recorded, compact wrapup metadata, [DRIVER_DONE hint, is_chapter_end false, wrapup_pending false, and is_finished true"
         ( "\"status\": \"wrapup_recorded\"" `isInfixOf` outRecWrap
+            && "\"chapter_label\": \"Final Wrapup & Retrospective\"" `isInfixOf` outRecWrap
+            && "\"story_chunk_file\": null" `isInfixOf` outRecWrap
+            && "\"prediction_summary\": \"Final tally: 2 unresolved\"" `isInfixOf` outRecWrap
+            && "\"current_turn_file\":" `isInfixOf` outRecWrap
+            && "[DRIVER_DONE | ...]" `isInfixOf` outRecWrap
             && "\"is_chapter_end\": false" `isInfixOf` outRecWrap
             && "\"wrapup_pending\": false" `isInfixOf` outRecWrap
             && "\"is_finished\": true" `isInfixOf` outRecWrap
+        )
+      wrapupTurnTxt <- TIO.readFile (sessDir </> "current_turn.md")
+      assertBool
+        "record wrapup updates current_turn.md with wrapup entry without trailing rule"
+        ( "## Final Wrapup & Retrospective" `T.isInfixOf` wrapupTurnTxt
+            && "Looking back across both chapters" `T.isInfixOf` wrapupTurnTxt
+            && not ("---\n" `T.isSuffixOf` wrapupTurnTxt)
         )
 
       let postWrapMsg = "Any favorite scene looking back at the whole story?"
@@ -663,12 +823,14 @@ testRec1OrchestratorGuardrails mBinPath = do
           ""
       assertEq ("CLI post-wrapup discuss exit 0 (" ++ errDiscWrap ++ ")") ExitSuccess ecDiscWrap
       assertBool
-        "post-wrapup discuss reports total_chunks, is_chapter_end false, is_finished true, wrapup_pending false, and omits unlock-next-chunk hint"
+        "post-wrapup discuss reports total_chunks, is_chapter_end false, is_finished true, wrapup_pending false, and directs driver to [DRIVER_DONE"
         ( "\"total_chunks\": 2" `isInfixOf` outDiscWrap
             && "\"is_chapter_end\": false" `isInfixOf` outDiscWrap
             && "\"is_finished\": true" `isInfixOf` outDiscWrap
             && "\"wrapup_pending\": false" `isInfixOf` outDiscWrap
             && "Post-wrapup discussion recorded!" `isInfixOf` outDiscWrap
+            && "[DRIVER_DONE | ...]" `isInfixOf` outDiscWrap
+            && not ("entries/wrapup.md to the user" `isInfixOf` outDiscWrap)
             && not ("unlock the next chunk" `isInfixOf` outDiscWrap)
         )
       wrapupEntryTxt <- TIO.readFile (sessDir </> "entries" </> "wrapup.md")
@@ -676,6 +838,25 @@ testRec1OrchestratorGuardrails mBinPath = do
         "post-wrapup user discussion appends ### Reader Discussion to entries/wrapup.md"
         ( "### Reader Discussion" `T.isInfixOf` wrapupEntryTxt
             && T.pack postWrapMsg `T.isInfixOf` wrapupEntryTxt
+        )
+      postWrapLastDiscTxt <- TIO.readFile (sessDir </> "last_discussion_exchange.md")
+      postWrapTurnTxt <- TIO.readFile (sessDir </> "current_turn.md")
+      assertBool
+        "post-wrapup user discussion writes reply-only delta to last_discussion_exchange.md and refreshes current_turn.md"
+        ( not (T.pack postWrapMsg `T.isInfixOf` postWrapLastDiscTxt)
+            && "Definitely the brass compass discovery" `T.isInfixOf` postWrapLastDiscTxt
+            && not ("Looking back across both chapters" `T.isInfixOf` postWrapLastDiscTxt)
+            && "Looking back across both chapters" `T.isInfixOf` postWrapTurnTxt
+            && T.pack postWrapMsg `T.isInfixOf` postWrapTurnTxt
+        )
+      (ecNextFin, outNextFin, errNextFin) <- readProcessWithExitCode binPath ["next", "--session", sessDir] ""
+      assertEq ("CLI next on already-finished session exit 0 (" ++ errNextFin ++ ")") ExitSuccess ecNextFin
+      hasLastDiscAfterFinNext <- doesFileExist (sessDir </> "last_discussion_exchange.md")
+      assertBool
+        "post-finale no-op next reports finished with current_turn_file and preserves last_discussion_exchange.md"
+        ( "\"status\": \"finished\"" `isInfixOf` outNextFin
+            && "\"current_turn_file\":" `isInfixOf` outNextFin
+            && hasLastDiscAfterFinNext
         )
 
       forM_

@@ -58,7 +58,7 @@ in a `[Tools: ...]` receipt.
 - `<session_dir>/entries/by_chronology.md`, `<session_dir>/entries/by_topic.md`,
   `<session_dir>/entries/archive/`, and `<session_dir>/entries/chunk_XXXX.md`
   (to check earlier commentary entries if needed; do not read
-  `lets_read_log.md`)
+  `lets_read_log.md`, `current_turn.md`, or `last_discussion_exchange.md`)
 
 - `<session_dir>/predictions/` (`pred_XXXX.md`, `by_chronology.md`,
   `by_topic.md`, `archive/`) and `<session_dir>/archive/memory/`

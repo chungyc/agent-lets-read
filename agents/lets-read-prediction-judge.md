@@ -49,7 +49,7 @@ premise, cast, established timeline/canon baselines, and recent chunks).
   (`chunk_XXXX.md`, `by_chronology.md`, `by_topic.md`, `archive/`),
   `<session_dir>/entries/`, and `<session_dir>/archive/memory/` when checking
   earlier unlocked story context or full prediction history. Do not read
-  `lets_read_log.md`.
+  `lets_read_log.md`, `current_turn.md`, or `last_discussion_exchange.md`.
 
 ### No Local File Exploration Outside `<session_dir>` & Strict Write Boundary
 

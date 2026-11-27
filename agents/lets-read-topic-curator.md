@@ -37,7 +37,7 @@ topic.
   tags—to inspect the 1-line summary where that tag was used. The `Session File
   & Index Reference` (`session-files.md` path in `current_topic_prompt.md`)
   explains file-group roles and sharded index layout. Do not read
-  `lets_read_log.md`.
+  `lets_read_log.md`, `current_turn.md`, or `last_discussion_exchange.md`.
 
 - Never access files outside `<session_dir>` (aside from the `session-files.md`
   reference path in your turn prompt) or inspect `.vault.bin`.

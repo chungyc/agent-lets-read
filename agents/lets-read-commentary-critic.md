@@ -53,7 +53,8 @@ and end your turn with a 1-line completion notice.
 
 - `<session_dir>/entries/by_chronology.md`, `<session_dir>/entries/by_topic.md`,
   `<session_dir>/entries/archive/`, and `<session_dir>/entries/chunk_XXXX.md`
-  (do not read `lets_read_log.md`).
+  (do not read `lets_read_log.md`, `current_turn.md`, or
+  `last_discussion_exchange.md`).
 
 ### No Local File Exploration Outside `<session_dir>` & Strict Write Boundary
 
