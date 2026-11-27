@@ -44,7 +44,7 @@ import LetsRead.Predictions
   , renderPredSummaryBullet
   )
 import LetsRead.Prompts
-  ( fallbackSkillRefFromExePath
+  ( fallbackPluginRefFromExePath
   , renderPredictionSlateNote
   , resolveSessionFilesRefPathIO
   , writeCurrentJudgePromptFile
@@ -574,15 +574,15 @@ testRec6LeadingEmphasisAndMarkdownFormatting = do
 
     refPath <- resolveSessionFilesRefPathIO
     hasRefFile <- doesFileExist refPath
-    assertBool "Resolved session-files.md skill reference exists on disk" hasRefFile
+    assertBool "Resolved session-files.md plugin reference exists on disk" hasRefFile
     assertEq
-      "fallbackSkillRefFromExePath derives <skill_dir>/references/session-files.md from .bin/lets-read"
-      (Just "/opt/plugins/lets-read/skills/lets-read/references/session-files.md")
-      (fallbackSkillRefFromExePath ("references" </> "session-files.md") "/opt/plugins/lets-read/skills/lets-read/.bin/lets-read")
+      "fallbackPluginRefFromExePath derives <plugin_dir>/references/session-files.md from .bin/lets-read"
+      (Just "/opt/plugins/lets-read/references/session-files.md")
+      (fallbackPluginRefFromExePath ("references" </> "session-files.md") "/opt/plugins/lets-read/.bin/lets-read")
     assertEq
-      "fallbackSkillRefFromExePath returns Nothing for non-.bin test executables"
+      "fallbackPluginRefFromExePath returns Nothing for non-.bin test executables"
       Nothing
-      (fallbackSkillRefFromExePath ("references" </> "session-files.md") "/tmp/tmp.1234/Spec-bin")
+      (fallbackPluginRefFromExePath ("references" </> "session-files.md") "/tmp/tmp.1234/Spec-bin")
     topicPromptPath <- writeCurrentTopicPromptFile tmp stWrap
     topicPromptTxt <- TIO.readFile topicPromptPath
     assertBool

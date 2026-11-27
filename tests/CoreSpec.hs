@@ -189,7 +189,7 @@ testRec1OrchestratorGuardrails mBinPath = do
   case mBinPath of
     Nothing -> pure ()
     Just binPath -> withTempDir "rec1-cli" $ \tmp -> do
-      let repoDir = takeDirectory (takeDirectory (takeDirectory (takeDirectory binPath)))
+      let repoDir = takeDirectory (takeDirectory binPath)
           agentFiles =
             [ ("lets-read-script-writer.md", "name: lets-read-script-writer", "model: flash")
             , ("lets-read-researcher.md", "name: lets-read-researcher", "model: flash")
@@ -472,7 +472,7 @@ testRec1OrchestratorGuardrails mBinPath = do
 
       skillTxt <- TIO.readFile (repoDir </> "skills" </> "lets-read" </> "SKILL.md")
       interactiveDrvTxt <- TIO.readFile (repoDir </> "agents" </> "lets-read-interactive-driver.md")
-      pipelineTxt <- TIO.readFile (repoDir </> "skills" </> "lets-read" </> "references" </> "driver-pipeline.md")
+      pipelineTxt <- TIO.readFile (repoDir </> "references" </> "driver-pipeline.md")
       let (_, fromStep4Interactive) = T.breakOn "\n#### Interactive Mode\n" skillTxt
       assertBool
         "SKILL.md delegates Interactive Mode and Batch Mode to lets-read-*-driver with compact current_turn.md and delta last_discussion_exchange.md rules"

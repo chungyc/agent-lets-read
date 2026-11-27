@@ -49,7 +49,7 @@ import LetsRead.Types
   , jsonInt
   , padChunkNumber
   , readTextFileSafe
-  , resolveSkillResourcePath
+  , resolvePluginResourcePath
   , stripAfterClosingBracket
   , stripFileUriPrefix
   , stripToolReceiptComments
@@ -85,7 +85,7 @@ defaultBannedJargon =
 
 loadBannedJargonIO :: IO [Text]
 loadBannedJargonIO = do
-  jargonPath <- resolveSkillResourcePath ("resources" </> "banned_jargon.txt")
+  jargonPath <- resolvePluginResourcePath ("assets" </> "banned_jargon.txt")
   exists <- doesFileExist jargonPath
   if not exists
     then pure defaultBannedJargon

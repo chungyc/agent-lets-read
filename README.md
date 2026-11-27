@@ -22,7 +22,7 @@ and requires:
 
 - GHC (Glasgow Haskell Compiler) and the `zlib` Haskell package
 
-[prepare.sh]: ./skills/lets-read/scripts/prepare.sh
+[prepare.sh]: ./scripts/prepare.sh
 
 ## Installation
 
@@ -242,8 +242,8 @@ Defined in [lets-read-topic-curator.md]. Runs on demand when new topic tags
 accumulate, consolidating synonyms, character or faction aliases, and overly
 narrow scene tags across the session's topic indices.
 
-[LetsRead.hs]: ./skills/lets-read/scripts/LetsRead.hs
-[driver-pipeline.md]: ./skills/lets-read/references/driver-pipeline.md
+[LetsRead.hs]: ./src/LetsRead.hs
+[driver-pipeline.md]: ./references/driver-pipeline.md
 [lets-read-interactive-driver.md]: ./agents/lets-read-interactive-driver.md
 [lets-read-batch-driver.md]: ./agents/lets-read-batch-driver.md
 [lets-read-script-writer.md]: ./agents/lets-read-script-writer.md

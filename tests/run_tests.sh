@@ -4,8 +4,9 @@ umask 022
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$TESTS_DIR")"
-SCRIPTS_DIR="$REPO_DIR/skills/lets-read/scripts"
-BIN_PATH="$REPO_DIR/skills/lets-read/.bin/lets-read"
+SCRIPTS_DIR="$REPO_DIR/scripts"
+SRC_DIR="$REPO_DIR/src"
+BIN_PATH="$REPO_DIR/.bin/lets-read"
 
 "$SCRIPTS_DIR/prepare.sh"
 
@@ -24,7 +25,7 @@ done
 for entry in "${entrypoints[@]}"; do
   name="$(basename "$entry" .hs)"
   ghc -O0 -Wall -Werror \
-    -i"$SCRIPTS_DIR" \
+    -i"$SRC_DIR" \
     -i"$TESTS_DIR" \
     -outputdir "$TMP_BUILD_DIR/$name" \
     -o "$TMP_BUILD_DIR/$name-bin" \

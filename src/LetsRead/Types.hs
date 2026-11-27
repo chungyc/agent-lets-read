@@ -51,7 +51,7 @@ module LetsRead.Types
   , wrapMarkdownParagraph
   , wrapMarkdownBullet
   , wrapMarkdownQuote
-  , resolveSkillResourcePath
+  , resolvePluginResourcePath
   ) where
 
 import Control.Exception (IOException, catch)
@@ -681,16 +681,16 @@ wrapMarkdownQuote maxWidth txt =
         then ">"
         else T.intercalate "\n" (wrapWordsAt maxWidth "> " "> " ws)
 
--- | Locate a file inside the skill directory (skills/lets-read/<relPath>)
+-- | Locate a file inside the plugin root directory (<plugin_dir>/<relPath>)
 -- using the compiled executable's location (.bin/lets-read -> parent directory),
--- falling back to the relative workspace path if run via runghc.
-resolveSkillResourcePath :: FilePath -> IO FilePath
-resolveSkillResourcePath relPath = do
+-- falling back to the relative workspace path if run via runghc or a test binary.
+resolvePluginResourcePath :: FilePath -> IO FilePath
+resolvePluginResourcePath relPath = do
   exeCandidate <-
     ( do
         exePath <- getExecutablePath
-        let skillDir = takeDirectory (takeDirectory exePath)
-        pure (skillDir </> relPath)
+        let pluginDir = takeDirectory (takeDirectory exePath)
+        pure (pluginDir </> relPath)
     )
       `catch` (\(_ :: IOException) -> pure "")
   hasExeCandidate <-
@@ -699,4 +699,4 @@ resolveSkillResourcePath relPath = do
       else doesFileExist exeCandidate
   if hasExeCandidate
     then pure exeCandidate
-    else pure ("skills/lets-read" </> relPath)
+    else pure relPath

@@ -5,7 +5,7 @@ module LetsRead.Prompts
   ( defaultPersonaText
   , expandPersonaPreset
   , resolvePersonaPresetIO
-  , fallbackSkillRefFromExePath
+  , fallbackPluginRefFromExePath
   , resolveSessionFilesRefPathIO
   , renderPredictionSlateNote
   , renderTurnPredictionSection
@@ -59,7 +59,7 @@ import LetsRead.Types
   , predResolutionMeta
   , predStoryResolutionMeta
   , readTextFileSafe
-  , resolveSkillResourcePath
+  , resolvePluginResourcePath
   , wrapMarkdownBullet
   , wrapMarkdownParagraph
   , wrapMarkdownQuote
@@ -166,14 +166,15 @@ expandPersonaPreset raw =
                           <> "without clinical pop-psychology jargon, smug moralizing, or detached character-study essays."
                       else T.strip raw
 
--- | Resolve a persona name or custom string by reading references/personas.md
--- from the skill package, falling back to expandPersonaPreset.
+-- | Resolve a persona name or custom string by reading
+-- skills/lets-read/references/personas.md from the plugin package, falling back
+-- to expandPersonaPreset.
 resolvePersonaPresetIO :: Maybe Text -> IO Text
 resolvePersonaPresetIO Nothing = pure defaultPersonaText
 resolvePersonaPresetIO (Just raw)
   | T.null (T.strip raw) = pure defaultPersonaText
   | otherwise = do
-      personasPath <- resolveSkillResourcePath ("references" </> "personas.md")
+      personasPath <- resolvePluginResourcePath ("skills" </> "lets-read" </> "references" </> "personas.md")
       exists <- doesFileExist personasPath
       if not exists
         then pure (expandPersonaPreset raw)
@@ -184,18 +185,18 @@ resolvePersonaPresetIO (Just raw)
             Just matched -> pure matched
             Nothing -> pure (expandPersonaPreset raw)
 
-fallbackSkillRefFromExePath :: FilePath -> FilePath -> Maybe FilePath
-fallbackSkillRefFromExePath relRef exePath =
+fallbackPluginRefFromExePath :: FilePath -> FilePath -> Maybe FilePath
+fallbackPluginRefFromExePath relRef exePath =
   let binDir = takeDirectory exePath
-      skillDir = takeDirectory binDir
+      pluginDir = takeDirectory binDir
    in if takeFileName binDir == ".bin"
-        then Just (skillDir </> relRef)
+        then Just (pluginDir </> relRef)
         else Nothing
 
 resolveSessionFilesRefPathIO :: IO FilePath
 resolveSessionFilesRefPathIO = do
   let relRef = "references" </> "session-files.md"
-  rawPath <- resolveSkillResourcePath relRef
+  rawPath <- resolvePluginResourcePath relRef
   exists <- doesFileExist rawPath
   if exists
     then canonicalizePath rawPath `catch` (\(_ :: IOException) -> makeAbsolute rawPath)
@@ -203,7 +204,7 @@ resolveSessionFilesRefPathIO = do
       mBinCandidate <-
         ( do
             exePath <- getExecutablePath
-            case fallbackSkillRefFromExePath relRef exePath of
+            case fallbackPluginRefFromExePath relRef exePath of
               Just cand -> Just <$> makeAbsolute cand
               Nothing -> pure Nothing
         )
@@ -974,7 +975,7 @@ writeWrapupPromptFile sessionDir st = do
         if "\n\n\n" `T.isInfixOf` txt
           then collapseBlankLines (T.replace "\n\n\n" "\n\n" txt)
           else txt
-  tmplPath <- resolveSkillResourcePath ("resources" </> "wrapup_prompt_template.md")
+  tmplPath <- resolvePluginResourcePath ("assets" </> "wrapup_prompt_template.md")
   hasTmpl <- doesFileExist tmplPath
   rawTmpl <-
     if hasTmpl

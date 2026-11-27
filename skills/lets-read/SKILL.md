@@ -17,11 +17,11 @@ compatibility: >-
 
 This skill conducts an unspoiled **Let's Read** of a story or book in `.txt`,
 `.md`, `.markdown`, `.html`, or `.epub` format. This top-level host initializes
-the compiled **Haskell Gatekeeper** (`<skill_dir>/.bin/lets-read`, where
-`<skill_dir>` is the directory containing this `SKILL.md`) and delegates all
-chunk reading, review, and discussion execution to `lets-read-interactive-driver`
-or `lets-read-batch-driver` (which coordinate the seven isolated `lets-read-*`
-leaf subagents via `<session_dir>` files).
+the compiled **Haskell Gatekeeper** (`<plugin_dir>/.bin/lets-read`, where
+`<plugin_dir>` is the plugin root directory two levels above this `SKILL.md`)
+and delegates all chunk reading, review, and discussion execution to
+`lets-read-interactive-driver` or `lets-read-batch-driver` (which coordinate the
+seven isolated `lets-read-*` leaf subagents via `<session_dir>` files).
 
 ## Mandatory Anti-Spoiler & Host Rules
 
@@ -78,12 +78,12 @@ asks for a custom chunk size.
 
 ### CLI Whitelist Only — No `python`, `ls`/`cat`, or Ad-Hoc Shell Commands
 
-In the main host conversation, use strictly `<skill_dir>/scripts/prepare.sh`,
-`<skill_dir>/.bin/lets-read` (`init`, `status`), `read_file`, `write_file`,
+In the main host conversation, use strictly `<plugin_dir>/scripts/prepare.sh`,
+`<plugin_dir>/.bin/lets-read` (`init`, `status`), `read_file`, `write_file`,
 `invoke_subagent`, `send_message`, and `manage_subagents`. **Never** run `python`,
 `python3`, `ls`, `cat`, `head`, `tail`, `find`, or `grep` to inspect
 `<session_dir>` or `state.json`. To check session state, run
-`<skill_dir>/.bin/lets-read status --session "<session_dir>"`.
+`<plugin_dir>/.bin/lets-read status --session "<session_dir>"`.
 
 ## Workflow
 
@@ -124,7 +124,7 @@ Read [personas.md] if a custom tone or preset was requested.
 Run [prepare.sh] as a standalone command:
 
 ```bash
-<skill_dir>/scripts/prepare.sh
+<plugin_dir>/scripts/prepare.sh
 ```
 
 #### 2. Initialize or Resume the Session
@@ -132,7 +132,7 @@ Run [prepare.sh] as a standalone command:
 Initialize a new session:
 
 ```bash
-<skill_dir>/.bin/lets-read init "<source_story_path>" \
+<plugin_dir>/.bin/lets-read init "<source_story_path>" \
   --session "<session_dir>" \
   --persona "<chosen_persona>"
 ```
@@ -140,10 +140,10 @@ Initialize a new session:
 Or inspect/resume an existing session:
 
 ```bash
-<skill_dir>/.bin/lets-read status --session "<session_dir>"
+<plugin_dir>/.bin/lets-read status --session "<session_dir>"
 ```
 
-[prepare.sh]: ./scripts/prepare.sh
+[prepare.sh]: ../../scripts/prepare.sh
 
 ### Step 3: Verify the Mode Drivers Are Registered
 
@@ -178,7 +178,7 @@ descendant leaf subagents) so a fresh driver starts cleanly on the next chunk.
   request:
 
   ```text
-  ADVANCE: skill_dir=<skill_dir>, session_dir=<session_dir> — complete the next chunk (or Final Wrapup if wrapup_pending is true).
+  ADVANCE: plugin_dir=<plugin_dir>, session_dir=<session_dir> — complete the next chunk (or Final Wrapup if wrapup_pending is true).
   ```
 
 - Park with **ZERO tool calls** outputting **only**
@@ -223,7 +223,7 @@ Whenever the user replies with comments, questions, or non-spoiler theories:
    session without an active interactive driver):
 
    ```text
-   DISCUSS: skill_dir=<skill_dir>, session_dir=<session_dir> — user message written to <session_dir>/last_user_message.md; run discuss-prompt and discuss.
+   DISCUSS: plugin_dir=<plugin_dir>, session_dir=<session_dir> — user message written to <session_dir>/last_user_message.md; run discuss-prompt and discuss.
    ```
 
 3. Park with **ZERO tool calls** outputting **only**
@@ -253,7 +253,7 @@ current slice so chunk `N/N` and the Final Wrapup finish together):
    1-line request:
 
    ```text
-   BATCH <start_chunk>..<end_chunk>: skill_dir=<skill_dir>, session_dir=<session_dir> — complete chunks <start_chunk>..<end_chunk> (plus Final Wrapup if finishing chunk N/N).
+   BATCH <start_chunk>..<end_chunk>: plugin_dir=<plugin_dir>, session_dir=<session_dir> — complete chunks <start_chunk>..<end_chunk> (plus Final Wrapup if finishing chunk N/N).
    ```
 
 2. Park with **ZERO tool calls** outputting **only**

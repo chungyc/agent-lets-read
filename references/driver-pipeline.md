@@ -17,7 +17,7 @@ call `edit_file` or `write_file` on `<session_dir>/memory.md`,
 
 ### CLI Whitelist Only
 
-Use strictly `<skill_dir>/.bin/lets-read` (`status`, `next`, `script`,
+Use strictly `<plugin_dir>/.bin/lets-read` (`status`, `next`, `script`,
 `research`, `record`, `judge`, `discuss-prompt`, `discuss`), `read_file`,
 `invoke_subagent`, `send_message`, and `manage_subagents`. **Never** run
 `python`, `python3`, `ls`, `cat`, `head`, `tail`, `find`, or `grep` to inspect
@@ -119,7 +119,7 @@ rather than calling `lets-read next`:
 ### 1. Unlock Chunk (`next`) & Invoke `lets-read-script-writer`
 
 ```bash
-<skill_dir>/.bin/lets-read next --session "<session_dir>"
+<plugin_dir>/.bin/lets-read next --session "<session_dir>"
 ```
 
 After `next` exits `0`, call `invoke_subagent`
@@ -138,7 +138,7 @@ Run `script` **only after**
 `[SUBAGENT_DONE | Chunk NNNN | lets-read-script-writer]` arrives:
 
 ```bash
-<skill_dir>/.bin/lets-read script \
+<plugin_dir>/.bin/lets-read script \
   --session "<session_dir>" \
   --subagent-log "<script_writer_logAbsoluteUri>"
 ```
@@ -160,7 +160,7 @@ Run `research` **only after**
 `[SUBAGENT_DONE | Chunk NNNN | lets-read-researcher]` arrives:
 
 ```bash
-<skill_dir>/.bin/lets-read research \
+<plugin_dir>/.bin/lets-read research \
   --session "<session_dir>" \
   --subagent-log "<researcher_logAbsoluteUri>"
 ```
@@ -186,7 +186,7 @@ Run `record` **only after**
 `[SUBAGENT_DONE | Chunk NNNN | lets-read-blind-reader]` arrives:
 
 ```bash
-<skill_dir>/.bin/lets-read record \
+<plugin_dir>/.bin/lets-read record \
   --session "<session_dir>" \
   --subagent-log "<blind_reader_logAbsoluteUri>"
 ```
@@ -218,7 +218,7 @@ until all `3/3` (or `4/4` with `lets-read-topic-curator`)
 Run `judge` **only after** all dispatched reviewers have reported:
 
 ```bash
-<skill_dir>/.bin/lets-read judge \
+<plugin_dir>/.bin/lets-read judge \
   --session "<session_dir>" \
   --subagent-log "<prediction_judge_logAbsoluteUri>" \
   --fact-check-log "<fact_checker_logAbsoluteUri>" \
@@ -249,14 +249,14 @@ running `next`:
    arrives, record the reply:
 
    ```bash
-   <skill_dir>/.bin/lets-read discuss \
+   <plugin_dir>/.bin/lets-read discuss \
      --session "<session_dir>" \
      --subagent-log "<blind_reader_logAbsoluteUri>"
    ```
 
 ## Procedure 2: Final Wrapup Round (`"wrapup_pending": true`)
 
-1. Run `<skill_dir>/.bin/lets-read next --session "<session_dir>"`
+1. Run `<plugin_dir>/.bin/lets-read next --session "<session_dir>"`
    (`"is_wrapup": true`), invoke `lets-read-script-writer` (`Model: "flash"`),
    and wait with `ZERO tool calls` (`[HOST_WAIT | Wrapup | script | 0/1 idle |
    pending: lets-read-script-writer]`) for
@@ -279,7 +279,7 @@ running `next`:
 4. Record the Final Wrapup (no `judge` step runs after `"wrapup_recorded"`):
 
    ```bash
-   <skill_dir>/.bin/lets-read record \
+   <plugin_dir>/.bin/lets-read record \
      --session "<session_dir>" \
      --subagent-log "<blind_reader_logAbsoluteUri>"
    ```
@@ -289,7 +289,7 @@ running `next`:
 1. Generate `current_discussion_prompt.md` from `<session_dir>/last_user_message.md`:
 
    ```bash
-   <skill_dir>/.bin/lets-read discuss-prompt \
+   <plugin_dir>/.bin/lets-read discuss-prompt \
      --session "<session_dir>" \
      --user-file "<session_dir>/last_user_message.md"
    ```
@@ -306,7 +306,7 @@ running `next`:
    (or `Wrapup (Discuss)`) arrives, record the reply:
 
    ```bash
-   <skill_dir>/.bin/lets-read discuss \
+   <plugin_dir>/.bin/lets-read discuss \
      --session "<session_dir>" \
      --user-file "<session_dir>/last_user_message.md" \
      --subagent-log "<blind_reader_logAbsoluteUri>"
